@@ -1,0 +1,39 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "activity-hub-ingest",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-01",
+  // Pinned so CI only needs CLOUDFLARE_API_TOKEN. Not a secret.
+  "account_id": "72bdc77341dc52a3cf4a94097f9ad96f",
+  "observability": {
+    "enabled": true,
+  },
+  "r2_buckets": [
+    { "binding": "RAW", "bucket_name": "activity-hub-raw" },
+    { "binding": "LAKE", "bucket_name": "activity-hub-lake" },
+  ],
+  "d1_databases": [
+    {
+      "binding": "REGISTRY",
+      "database_name": "activity-hub-registry",
+      "database_id": "c95d449b-7feb-459f-bc6a-cd1eb18c2345",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "queues": {
+    "producers": [
+      { "binding": "INGEST_QUEUE", "queue": "activity-hub-ingest" },
+    ],
+    "consumers": [
+      {
+        "queue": "activity-hub-ingest",
+        "max_retries": 3,
+        "dead_letter_queue": "activity-hub-ingest-dlq",
+        // upsertSourceRecord is read-then-write with no cross-statement
+        // transaction. A single consumer keeps concurrent events for the
+        // same ride from double-minting.
+        "max_concurrency": 1,
+      },
+    ],
+  },
+}
