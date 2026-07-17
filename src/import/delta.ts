@@ -115,9 +115,10 @@ export function buildDelta(
     }
     const startedAt = new Date(startedAtMs).toISOString();
 
+    // A superset prefilter for performance only: the time window bounds the
+    // scan cheaply, matchActivity applies the real rules (sport, duration).
     const candidates = activities.filter(
       (activity) =>
-        activity.sport === record.sport &&
         Math.abs((startTimes.get(activity.activityId) ?? NaN) - startedAtMs) <=
           MAX_START_DELTA_S * 1000 &&
         !sourced.get(activity.activityId)?.has(record.source),

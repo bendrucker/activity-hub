@@ -118,6 +118,42 @@ describe("extractTrack", () => {
     expect(points).toEqual([[37.7715, -122.4609]]);
   });
 
+  it("keeps records from a truncated FIT file that reports decode errors", async () => {
+    const bytes = syntheticFit(4);
+    const points = await extractTrack(bytes.slice(0, -2), "activities/6.fit");
+    expect(points).toHaveLength(4);
+  });
+
+  it("drops pre-lock (0, 0) points from GPX", async () => {
+    const gpx = `<gpx><trk><trkseg>
+     <trkpt lat="0.0" lon="0.0"></trkpt>
+     <trkpt lat="40.7259600" lon="-74.0013940"></trkpt>
+    </trkseg></trk></gpx>`;
+    const points = await extractTrack(
+      new TextEncoder().encode(gpx),
+      "activities/7.gpx",
+    );
+    expect(points).toEqual([[40.72596, -74.001394]]);
+  });
+
+  it("drops pre-lock (0, 0) points from TCX", async () => {
+    const tcx = `<TrainingCenterDatabase><Activities><Activity><Lap><Track>
+     <Trackpoint><Position>
+      <LatitudeDegrees>0.0</LatitudeDegrees>
+      <LongitudeDegrees>0.0</LongitudeDegrees>
+     </Position></Trackpoint>
+     <Trackpoint><Position>
+      <LatitudeDegrees>37.7715</LatitudeDegrees>
+      <LongitudeDegrees>-122.4609</LongitudeDegrees>
+     </Position></Trackpoint>
+    </Track></Lap></Activity></Activities></TrainingCenterDatabase>`;
+    const points = await extractTrack(
+      new TextEncoder().encode(tcx),
+      "activities/8.tcx",
+    );
+    expect(points).toEqual([[37.7715, -122.4609]]);
+  });
+
   it("rejects unsupported extensions", async () => {
     await expect(
       extractTrack(new Uint8Array(), "activities/4.kml"),

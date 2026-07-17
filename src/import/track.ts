@@ -37,17 +37,18 @@ function fitTrack(bytes: Uint8Array): TrackPoint[] {
     throw new Error("not a FIT file");
   }
   const { messages, errors } = decoder.read();
-  if (errors.length > 0) {
+  const records = messages.recordMesgs ?? [];
+  // A truncated file (device died mid-ride) reports a trailing decode error
+  // but still yields its record messages. Only fail when nothing decoded.
+  if (records.length === 0 && errors.length > 0) {
     throw new Error(`FIT decode failed: ${errors[0]}`);
   }
   const points: TrackPoint[] = [];
-  for (const record of messages.recordMesgs ?? []) {
+  for (const record of records) {
     if (record.positionLat == null || record.positionLong == null) {
       continue;
     }
-    // Some devices log (0, 0) before satellite lock. A real track point at
-    // null island is not a case this athlete's history contains.
-    if (record.positionLat === 0 && record.positionLong === 0) {
+    if (nullIsland(record.positionLat, record.positionLong)) {
       continue;
     }
     points.push([
@@ -58,13 +59,19 @@ function fitTrack(bytes: Uint8Array): TrackPoint[] {
   return points;
 }
 
+// Some devices log (0, 0) before satellite lock. A real track point at
+// null island is not a case this athlete's history contains.
+function nullIsland(lat: number, lon: number): boolean {
+  return lat === 0 && lon === 0;
+}
+
 function gpxTrack(bytes: Uint8Array): TrackPoint[] {
   const text = new TextDecoder().decode(bytes);
   const points: TrackPoint[] = [];
   for (const [, attributes] of text.matchAll(/<trkpt\b([^>]*)>/g)) {
     const lat = /\blat="([-\d.]+)"/.exec(attributes ?? "");
     const lon = /\blon="([-\d.]+)"/.exec(attributes ?? "");
-    if (lat?.[1] && lon?.[1]) {
+    if (lat?.[1] && lon?.[1] && !nullIsland(Number(lat[1]), Number(lon[1]))) {
       points.push([Number(lat[1]), Number(lon[1])]);
     }
   }
@@ -77,7 +84,7 @@ function tcxTrack(bytes: Uint8Array): TrackPoint[] {
   const pattern =
     /<LatitudeDegrees>([-\d.]+)<\/LatitudeDegrees>\s*<LongitudeDegrees>([-\d.]+)<\/LongitudeDegrees>/g;
   for (const [, lat, lon] of text.matchAll(pattern)) {
-    if (lat && lon) {
+    if (lat && lon && !nullIsland(Number(lat), Number(lon))) {
       points.push([Number(lat), Number(lon)]);
     }
   }

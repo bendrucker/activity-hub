@@ -1,5 +1,5 @@
 import { appendFileSync } from "node:fs";
-import { readdir } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { parseActivitiesCsv, type ExportActivity } from "../src/import/csv";
@@ -69,7 +69,22 @@ const placements = new Map<string, ReturnType<typeof placeActivity>>();
 const resolvedTimezones = new Map<string, string>();
 
 let processed = 0;
-for (const activity of activities) {
+for (let activity of activities) {
+  if (
+    activity.filename &&
+    !(await Bun.file(path.join(exportDir, activity.filename)).exists())
+  ) {
+    // A CSV row can reference a file absent from the archive. Treat the
+    // activity as file-less so staging and raw_keys stay consistent with
+    // what actually exists.
+    failures.push({
+      sourceId: activity.sourceId,
+      filename: activity.filename,
+      error: "missing from archive",
+    });
+    activity = { ...activity, filename: null };
+  }
+
   const placement = placeActivity(activity, mediaAvailable);
   placements.set(activity.sourceId, placement);
 
@@ -81,9 +96,14 @@ for (const activity of activities) {
       const points = await extractTrack(bytes, activity.filename);
       if (points.length > 0) {
         polylines.set(activity.sourceId, polylineDocument(points));
-        const timezone = trackTimezone(points);
-        if (timezone !== null) {
-          resolvedTimezones.set(activity.sourceId, timezone);
+        // Virtual rides carry in-game course GPS (Zwift's Watopia sits in
+        // the Solomon Islands), which says nothing about where the athlete
+        // was. Leave the zone unresolved so it is inferred from neighbors.
+        if (!activity.sportType.startsWith("Virtual")) {
+          const timezone = trackTimezone(points);
+          if (timezone !== null) {
+            resolvedTimezones.set(activity.sourceId, timezone);
+          }
         }
       }
     } catch (error) {
@@ -131,6 +151,10 @@ if (flags["dry-run"]) {
 const staging = flags.staging;
 const objectsDir = path.join(staging, "objects");
 console.log(`building staging tree in ${staging}`);
+
+// A previous run may have staged objects this export no longer produces.
+// Wiping first keeps the upload set equal to what this run staged.
+await rm(objectsDir, { recursive: true, force: true });
 
 let objectCount = 0;
 for (const activity of activities) {
@@ -202,9 +226,17 @@ function report(
   console.log("by extension:", Object.fromEntries(byExtension));
   console.log(`no file: ${noFile}`);
   console.log(`tracks extracted: ${polylines.size}`);
-  console.log(
-    `timezone inferred from nearest GPS activity: ${activities.length - resolvedTimezones.size}`,
-  );
+  // inferTimezones only reaches the fallback when no activity resolved a
+  // zone, so the unresolved count is entirely one bucket or the other.
+  if (resolvedTimezones.size > 0) {
+    console.log(
+      `timezone inferred from nearest GPS activity: ${activities.length - resolvedTimezones.size}`,
+    );
+  } else {
+    console.log(
+      `no GPS activity resolved a zone: all ${activities.length} fell back to ${FALLBACK_TIMEZONE}`,
+    );
+  }
   console.log(`parse failures: ${failures.length}`);
   for (const failure of failures) {
     console.log(`  ${failure.sourceId} ${failure.filename}: ${failure.error}`);
@@ -291,9 +323,11 @@ async function upload(objectsDir: string): Promise<void> {
   console.log(
     "no R2 S3 token in env: falling back to wrangler r2 object put (slow)",
   );
-  // Uploaded keys are logged next to the objects dir so an interrupted run
-  // resumes where it left off. Failures are collected, not fatal: with
-  // thousands of puts, one flaky request must not abandon the rest.
+  // Uploads are logged next to the objects dir as key + content hash so an
+  // interrupted run resumes where it left off, while a re-run that staged
+  // different bytes for a key uploads it again. Failures are collected, not
+  // fatal: with thousands of puts, one flaky request must not abandon the
+  // rest.
   const doneLog = `${objectsDir}.uploaded`;
   const done = new Set(
     (
@@ -304,14 +338,21 @@ async function upload(objectsDir: string): Promise<void> {
       .split("\n")
       .filter(Boolean),
   );
-  const files = (
+  const staged = (
     await readdir(objectsDir, { recursive: true, withFileTypes: true })
   )
     .filter((entry) => entry.isFile())
     .map((entry) =>
       path.relative(objectsDir, path.join(entry.parentPath, entry.name)),
-    )
-    .filter((entry) => !done.has(entry));
+    );
+  const files: { entry: string; stamp: string }[] = [];
+  for (const entry of staged) {
+    const bytes = await Bun.file(path.join(objectsDir, entry)).bytes();
+    const stamp = `${entry}\t${Bun.hash(bytes).toString(16)}`;
+    if (!done.has(stamp)) {
+      files.push({ entry, stamp });
+    }
+  }
   let uploaded = 0;
   const failures: string[] = [];
   const queue = [...files];
@@ -319,11 +360,11 @@ async function upload(objectsDir: string): Promise<void> {
     { length: UPLOAD_CONCURRENCY },
     async (): Promise<void> => {
       for (;;) {
-        const entry = queue.shift();
-        if (!entry) {
+        const item = queue.shift();
+        if (!item) {
           return;
         }
-        const key = entry.split(path.sep).join("/");
+        const key = item.entry.split(path.sep).join("/");
         const started = Date.now();
         const proc = Bun.spawn(
           [
@@ -337,7 +378,7 @@ async function upload(objectsDir: string): Promise<void> {
             "put",
             `${BUCKET}/${key}`,
             "--file",
-            path.join(objectsDir, entry),
+            path.join(objectsDir, item.entry),
             "--remote",
           ],
           { stdio: ["ignore", "ignore", "inherit"] },
@@ -348,7 +389,7 @@ async function upload(objectsDir: string): Promise<void> {
           await Bun.sleep(1400 - elapsed);
         }
         if (code === 0) {
-          appendFileSync(doneLog, entry + "\n");
+          appendFileSync(doneLog, item.stamp + "\n");
           uploaded += 1;
         } else {
           failures.push(key);
