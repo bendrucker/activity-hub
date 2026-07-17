@@ -71,7 +71,7 @@ raw/
     workouts/{wahoo_id}/original.fit
 ```
 
-At ~3,700 activities and ~45 MB of files per the 2025 export analysis, a decade fits comfortably inside R2's 10 GB free tier.
+The 2026 bulk export measured 4,118 activities and ~876 MB unpacked ([export.md](export.md)), so a decade fits comfortably inside R2's 10 GB free tier.
 
 #### Transform Job
 
