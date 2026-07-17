@@ -1,5 +1,5 @@
 import { ulid } from "ulid";
-import { matchActivity } from "../match";
+import { MAX_START_DELTA_S, matchActivity } from "../match";
 import type { Source, SourceRecord } from "../record";
 import type { Sport } from "../sport";
 
@@ -38,7 +38,9 @@ export interface Delta {
 // Batch counterpart of upsertSourceRecord: the same match-or-mint rules run
 // against an in-memory snapshot of the registry, emitting a SQL delta instead
 // of executing per-row queries. Re-running over unchanged state emits no
-// statements.
+// statements. The statements are not applied transactionally, but an
+// interruption self-heals: an activities row orphaned by a missed source
+// INSERT is an exact match candidate on the next run, which attaches to it.
 export function buildDelta(
   state: RegistryState,
   records: readonly SourceRecord[],
@@ -48,28 +50,43 @@ export function buildDelta(
     state.sources.map((row) => [`${row.source}:${row.sourceId}`, row]),
   );
   const sourced = new Map<string, Set<Source>>();
-  for (const row of state.sources) {
-    let set = sourced.get(row.activityId);
+  const markSourced = (activityId: string, source: Source): void => {
+    let set = sourced.get(activityId);
     if (!set) {
       set = new Set();
-      sourced.set(row.activityId, set);
+      sourced.set(activityId, set);
     }
-    set.add(row.source);
+    set.add(source);
+  };
+  for (const row of state.sources) {
+    markSourced(row.activityId, row.source);
   }
   const activities = [...state.activities];
+  const startTimes = new Map(
+    activities.map((activity) => [
+      activity.activityId,
+      Date.parse(activity.startedAt),
+    ]),
+  );
 
   const statements: string[] = [];
   const results: DeltaRecordResult[] = [];
 
   for (const record of records) {
+    // The attach branch below only touches updated_at. Attaching a Wahoo
+    // record must also overwrite started_at, duration_s, and timezone with
+    // the device telemetry (see upsertSourceRecord), which is unimplemented
+    // here, so anything but Strava is refused rather than written wrong.
     if (record.source !== "strava") {
       throw new Error(`unsupported import source ${record.source}`);
     }
 
     const existing = sources.get(`${record.source}:${record.sourceId}`);
     if (existing) {
-      const merged = { ...existing.rawKeys, ...record.rawKeys };
-      if (JSON.stringify(merged) === JSON.stringify(existing.rawKeys)) {
+      const unchanged = Object.entries(record.rawKeys).every(
+        ([key, value]) => existing.rawKeys[key] === value,
+      );
+      if (unchanged) {
         results.push({
           sourceId: record.sourceId,
           activityId: existing.activityId,
@@ -77,6 +94,7 @@ export function buildDelta(
         });
         continue;
       }
+      const merged = { ...existing.rawKeys, ...record.rawKeys };
       statements.push(
         `UPDATE activity_sources SET raw_keys = ${text(JSON.stringify(merged))}, updated_at = ${text(now)} WHERE source = ${text(record.source)} AND source_id = ${text(record.sourceId)};`,
       );
@@ -98,7 +116,11 @@ export function buildDelta(
     const startedAt = new Date(startedAtMs).toISOString();
 
     const candidates = activities.filter(
-      (activity) => !sourced.get(activity.activityId)?.has(record.source),
+      (activity) =>
+        activity.sport === record.sport &&
+        Math.abs((startTimes.get(activity.activityId) ?? NaN) - startedAtMs) <=
+          MAX_START_DELTA_S * 1000 &&
+        !sourced.get(activity.activityId)?.has(record.source),
     );
     const match = matchActivity(
       { startedAt, sport: record.sport, durationS: record.durationS },
@@ -122,14 +144,10 @@ export function buildDelta(
         sport: record.sport,
         durationS: record.durationS,
       });
+      startTimes.set(activityId, startedAtMs);
     }
 
-    let set = sourced.get(activityId);
-    if (!set) {
-      set = new Set();
-      sourced.set(activityId, set);
-    }
-    set.add(record.source);
+    markSourced(activityId, record.source);
     sources.set(`${record.source}:${record.sourceId}`, {
       source: record.source,
       sourceId: record.sourceId,

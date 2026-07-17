@@ -38,13 +38,17 @@ function fitTrack(bytes: Uint8Array): TrackPoint[] {
     throw new Error("not a FIT file");
   }
   const { messages, errors } = decoder.read();
-  const records = messages.recordMesgs ?? [];
-  if (records.length === 0 && errors.length > 0) {
+  if (errors.length > 0) {
     throw new Error(`FIT decode failed: ${errors[0]}`);
   }
   const points: TrackPoint[] = [];
-  for (const record of records) {
+  for (const record of messages.recordMesgs ?? []) {
     if (record.positionLat == null || record.positionLong == null) {
+      continue;
+    }
+    // Some devices log (0, 0) before satellite lock. A real track point at
+    // null island is not a case this athlete's history contains.
+    if (record.positionLat === 0 && record.positionLong === 0) {
       continue;
     }
     points.push([

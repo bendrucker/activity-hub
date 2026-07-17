@@ -13,7 +13,7 @@ import {
   extractTrack,
   polylineDocument,
   trackTimezone,
-  type TrackPoint,
+  type PolylineDocument,
 } from "../src/import/track";
 import type { SourceRecord } from "../src/record";
 
@@ -57,7 +57,7 @@ const mediaAvailable = new Set<string>(
   ),
 );
 
-const tracks = new Map<string, TrackPoint[]>();
+const polylines = new Map<string, PolylineDocument>();
 const failures: ParseFailure[] = [];
 const records: SourceRecord[] = [];
 const placements = new Map<string, ReturnType<typeof placeActivity>>();
@@ -75,7 +75,7 @@ for (const activity of activities) {
       ).bytes();
       const points = await extractTrack(bytes, activity.filename);
       if (points.length > 0) {
-        tracks.set(activity.sourceId, points);
+        polylines.set(activity.sourceId, polylineDocument(points));
         timezone = trackTimezone(points);
       }
     } catch (error) {
@@ -99,7 +99,7 @@ const state = readRegistryState();
 const now = new Date().toISOString();
 const delta = buildDelta(state, records, now);
 
-report(activities, tracks, failures, delta);
+report(activities, polylines, failures, delta);
 
 if (flags["dry-run"]) {
   console.log("dry run: nothing written");
@@ -123,11 +123,11 @@ for (const activity of activities) {
     );
     objectCount += 1;
   }
-  const points = tracks.get(activity.sourceId);
-  if (points && points.length > 0) {
+  const polyline = polylines.get(activity.sourceId);
+  if (polyline) {
     await Bun.write(
       path.join(objectsDir, placement.polylineKey),
-      JSON.stringify(polylineDocument(points)),
+      JSON.stringify(polyline),
     );
     objectCount += 1;
   }
@@ -153,7 +153,7 @@ console.log("registry now:", JSON.stringify(counts[0]));
 
 function report(
   activities: ExportActivity[],
-  tracks: Map<string, TrackPoint[]>,
+  polylines: Map<string, PolylineDocument>,
   failures: ParseFailure[],
   delta: ReturnType<typeof buildDelta>,
 ): void {
@@ -179,7 +179,10 @@ function report(
   console.log("by sport:", Object.fromEntries(bySport));
   console.log("by extension:", Object.fromEntries(byExtension));
   console.log(`no file: ${noFile}`);
-  console.log(`tracks extracted: ${tracks.size}`);
+  console.log(`tracks extracted: ${polylines.size}`);
+  console.log(
+    `timezone defaulted to UTC (no track): ${activities.length - polylines.size}`,
+  );
   console.log(`parse failures: ${failures.length}`);
   for (const failure of failures) {
     console.log(`  ${failure.sourceId} ${failure.filename}: ${failure.error}`);
@@ -266,13 +269,13 @@ async function upload(objectsDir: string): Promise<void> {
   console.log(
     "no R2 S3 token in env: falling back to wrangler r2 object put (slow)",
   );
-  const files: string[] = [];
-  for (const entry of await readdir(objectsDir, { recursive: true })) {
-    const full = path.join(objectsDir, entry);
-    if (await Bun.file(full).exists()) {
-      files.push(entry);
-    }
-  }
+  const files = (
+    await readdir(objectsDir, { recursive: true, withFileTypes: true })
+  )
+    .filter((entry) => entry.isFile())
+    .map((entry) =>
+      path.relative(objectsDir, path.join(entry.parentPath, entry.name)),
+    );
   let uploaded = 0;
   const queue = [...files];
   const workers = Array.from(
