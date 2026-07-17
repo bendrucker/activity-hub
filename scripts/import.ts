@@ -1,3 +1,4 @@
+import { appendFileSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -269,14 +270,29 @@ async function upload(objectsDir: string): Promise<void> {
   console.log(
     "no R2 S3 token in env: falling back to wrangler r2 object put (slow)",
   );
+  // Uploaded keys are logged next to the objects dir so an interrupted run
+  // resumes where it left off. Failures are collected, not fatal: with
+  // thousands of puts, one flaky request must not abandon the rest.
+  const doneLog = `${objectsDir}.uploaded`;
+  const done = new Set(
+    (
+      await Bun.file(doneLog)
+        .text()
+        .catch(() => "")
+    ) //
+      .split("\n")
+      .filter(Boolean),
+  );
   const files = (
     await readdir(objectsDir, { recursive: true, withFileTypes: true })
   )
     .filter((entry) => entry.isFile())
     .map((entry) =>
       path.relative(objectsDir, path.join(entry.parentPath, entry.name)),
-    );
+    )
+    .filter((entry) => !done.has(entry));
   let uploaded = 0;
+  const failures: string[] = [];
   const queue = [...files];
   const workers = Array.from(
     { length: UPLOAD_CONCURRENCY },
@@ -305,16 +321,26 @@ async function upload(objectsDir: string): Promise<void> {
           { stdio: ["ignore", "ignore", "inherit"] },
         );
         const code = await proc.exited;
-        if (code !== 0) {
-          throw new Error(`r2 object put ${key} failed (${code})`);
+        if (code === 0) {
+          appendFileSync(doneLog, entry + "\n");
+          uploaded += 1;
+        } else {
+          failures.push(key);
+          console.error(`failed: ${key} (${code})`);
         }
-        uploaded += 1;
-        if (uploaded % 100 === 0) {
-          console.log(`uploaded ${uploaded}/${files.length}`);
+        if ((uploaded + failures.length) % 100 === 0) {
+          console.log(
+            `uploaded ${uploaded}/${files.length} (${failures.length} failed)`,
+          );
         }
       }
     },
   );
   await Promise.all(workers);
   console.log(`uploaded ${uploaded}/${files.length}`);
+  if (failures.length > 0) {
+    throw new Error(
+      `${failures.length} uploads failed; re-run to retry (successes are skipped via ${doneLog})`,
+    );
+  }
 }
