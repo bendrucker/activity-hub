@@ -22,7 +22,10 @@ const BUCKET = "activity-hub-raw";
 const DATABASE = "activity-hub-registry";
 const S3_ENDPOINT =
   "https://72bdc77341dc52a3cf4a94097f9ad96f.r2.cloudflarestorage.com";
-const UPLOAD_CONCURRENCY = 8;
+// The Cloudflare API allows 1,200 requests per 5 minutes. Eight workers
+// putting small objects exceed it and draw 429s, so the fallback stays
+// under ~3 puts/second.
+const UPLOAD_CONCURRENCY = 4;
 
 interface ParseFailure {
   sourceId: string;
@@ -303,6 +306,7 @@ async function upload(objectsDir: string): Promise<void> {
           return;
         }
         const key = entry.split(path.sep).join("/");
+        const started = Date.now();
         const proc = Bun.spawn(
           [
             "bun",
@@ -321,6 +325,10 @@ async function upload(objectsDir: string): Promise<void> {
           { stdio: ["ignore", "ignore", "inherit"] },
         );
         const code = await proc.exited;
+        const elapsed = Date.now() - started;
+        if (elapsed < 1400) {
+          await Bun.sleep(1400 - elapsed);
+        }
         if (code === 0) {
           appendFileSync(doneLog, entry + "\n");
           uploaded += 1;
