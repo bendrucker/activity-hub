@@ -10,10 +10,10 @@ import {
   type RegistryState,
 } from "../src/import/delta";
 import { placeActivity, toSourceRecord } from "../src/import/placement";
+import { inferTimezones, trackTimezone } from "../src/import/timezone";
 import {
   extractTrack,
   polylineDocument,
-  trackTimezone,
   type PolylineDocument,
 } from "../src/import/track";
 import type { SourceRecord } from "../src/record";
@@ -26,6 +26,8 @@ const S3_ENDPOINT =
 // putting small objects exceed it and draw 429s, so the fallback stays
 // under ~3 puts/second.
 const UPLOAD_CONCURRENCY = 4;
+// Last resort when no activity in the export resolved a zone. Home base.
+const FALLBACK_TIMEZONE = "America/Los_Angeles";
 
 interface ParseFailure {
   sourceId: string;
@@ -63,15 +65,14 @@ const mediaAvailable = new Set<string>(
 
 const polylines = new Map<string, PolylineDocument>();
 const failures: ParseFailure[] = [];
-const records: SourceRecord[] = [];
 const placements = new Map<string, ReturnType<typeof placeActivity>>();
+const resolvedTimezones = new Map<string, string>();
 
 let processed = 0;
 for (const activity of activities) {
   const placement = placeActivity(activity, mediaAvailable);
   placements.set(activity.sourceId, placement);
 
-  let timezone = "UTC";
   if (activity.filename) {
     try {
       const bytes = await Bun.file(
@@ -80,7 +81,10 @@ for (const activity of activities) {
       const points = await extractTrack(bytes, activity.filename);
       if (points.length > 0) {
         polylines.set(activity.sourceId, polylineDocument(points));
-        timezone = trackTimezone(points);
+        const timezone = trackTimezone(points);
+        if (timezone !== null) {
+          resolvedTimezones.set(activity.sourceId, timezone);
+        }
       }
     } catch (error) {
       failures.push({
@@ -91,12 +95,26 @@ for (const activity of activities) {
     }
   }
 
-  records.push(toSourceRecord(activity, timezone, placement.rawKeys));
   processed += 1;
   if (processed % 500 === 0) {
     console.log(`parsed ${processed}/${activities.length}`);
   }
 }
+
+const timezones = inferTimezones(
+  activities.map((activity) => ({
+    startedAt: activity.startedAt,
+    timezone: resolvedTimezones.get(activity.sourceId) ?? null,
+  })),
+  FALLBACK_TIMEZONE,
+);
+const records: SourceRecord[] = activities.map((activity, index) =>
+  toSourceRecord(
+    activity,
+    timezones[index] ?? FALLBACK_TIMEZONE,
+    placements.get(activity.sourceId)?.rawKeys ?? {},
+  ),
+);
 
 console.log("reading registry state");
 const state = readRegistryState();
@@ -185,7 +203,7 @@ function report(
   console.log(`no file: ${noFile}`);
   console.log(`tracks extracted: ${polylines.size}`);
   console.log(
-    `timezone defaulted to UTC (no track): ${activities.length - polylines.size}`,
+    `timezone inferred from nearest GPS activity: ${activities.length - resolvedTimezones.size}`,
   );
   console.log(`parse failures: ${failures.length}`);
   for (const failure of failures) {

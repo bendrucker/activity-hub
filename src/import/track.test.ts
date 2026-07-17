@@ -7,12 +7,7 @@ import {
 } from "@garmin/fitsdk";
 import { decode } from "@mapbox/polyline";
 import { describe, expect, it } from "vitest";
-import {
-  extractTrack,
-  polylineDocument,
-  trackTimezone,
-  type TrackPoint,
-} from "./track";
+import { extractTrack, polylineDocument, type TrackPoint } from "./track";
 
 // Synthetic route near Golden Gate Park. Not a real ride.
 const LAT = 37.7715;
@@ -147,16 +142,5 @@ describe("polylineDocument", () => {
     expect(document.points).toBe(3);
     expect(document.polyline).toBe("_p~iF~ps|U_ulLnnqC_mqNvxq`@");
     expect(decode(document.polyline)).toEqual(points);
-  });
-});
-
-describe("trackTimezone", () => {
-  it("resolves the zone of the first point", () => {
-    expect(trackTimezone([[LAT, LON]])).toBe("America/Los_Angeles");
-    expect(trackTimezone([[40.7259, -74.0014]])).toBe("America/New_York");
-  });
-
-  it("falls back to UTC without points", () => {
-    expect(trackTimezone([])).toBe("UTC");
   });
 });

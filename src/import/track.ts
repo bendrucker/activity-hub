@@ -1,6 +1,5 @@
 import { Decoder, Stream } from "@garmin/fitsdk";
 import polyline from "@mapbox/polyline";
-import tzlookup from "tz-lookup";
 
 export type TrackPoint = [latitude: number, longitude: number];
 
@@ -92,16 +91,4 @@ export interface PolylineDocument {
 
 export function polylineDocument(points: TrackPoint[]): PolylineDocument {
   return { polyline: polyline.encode(points), points: points.length };
-}
-
-export function trackTimezone(points: TrackPoint[]): string {
-  const first = points[0];
-  if (!first) {
-    return "UTC";
-  }
-  try {
-    return tzlookup(first[0], first[1]);
-  } catch {
-    return "UTC";
-  }
 }
