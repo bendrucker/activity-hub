@@ -1,9 +1,9 @@
 import { ulid } from "ulid";
 import { MAX_START_DELTA_S, matchActivity } from "./match";
-import type { SourceRecord } from "./record";
+import type { Source, SourceRecord } from "./record";
 import type { Sport } from "./sport";
 
-export type { Source, SourceRecord } from "./record";
+export type { Source, SourceRecord };
 
 export interface UpsertResult {
   activityId: string;
@@ -28,9 +28,11 @@ export async function upsertSourceRecord(
       ...JSON.parse(existing.raw_keys),
       ...record.rawKeys,
     };
+    // A fresh upsert means the source is live upstream again, so it also
+    // reverses any earlier soft delete.
     await db
       .prepare(
-        "UPDATE activity_sources SET raw_keys = ?1, updated_at = ?2 WHERE source = ?3 AND source_id = ?4",
+        "UPDATE activity_sources SET raw_keys = ?1, updated_at = ?2, deleted_at = NULL WHERE source = ?3 AND source_id = ?4",
       )
       .bind(JSON.stringify(rawKeys), now, record.source, record.sourceId)
       .run();
@@ -127,6 +129,20 @@ export async function upsertSourceRecord(
     insertSource(db, record, activityId, now),
   ]);
   return { activityId, outcome: "minted" };
+}
+
+export async function markSourceDeleted(
+  db: D1Database,
+  source: Source,
+  sourceId: string,
+): Promise<void> {
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      "UPDATE activity_sources SET deleted_at = ?1, updated_at = ?1 WHERE source = ?2 AND source_id = ?3",
+    )
+    .bind(now, source, sourceId)
+    .run();
 }
 
 function insertSource(
