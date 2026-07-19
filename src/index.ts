@@ -1,8 +1,16 @@
+import { handleAuthorize, handleCallback } from "./strava/routes";
+
 export default {
-  async fetch(request): Promise<Response> {
+  async fetch(request, env): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/health") {
       return Response.json({ ok: true });
+    }
+    if (url.pathname === "/auth/strava") {
+      return handleAuthorize(url, env);
+    }
+    if (url.pathname === "/auth/strava/callback") {
+      return handleCallback(url, env);
     }
     return new Response("Not Found", { status: 404 });
   },

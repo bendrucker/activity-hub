@@ -8,6 +8,19 @@
   "observability": {
     "enabled": true,
   },
+  "vars": {
+    // App and athlete identity are public identifiers, safe to commit. The
+    // athlete ID gates the OAuth callback to my account.
+    "STRAVA_CLIENT_ID": "12215",
+    "STRAVA_ATHLETE_ID": "5723594",
+    // The June 2027 migration moves the API to www.api-v3.strava.com with
+    // header-only auth, so both bases are config rather than constants.
+    "STRAVA_API_BASE": "https://www.strava.com/api/v3",
+    "STRAVA_OAUTH_BASE": "https://www.strava.com/oauth",
+  },
+  "kv_namespaces": [
+    { "binding": "TOKENS", "id": "bc72d180846d490395293eb92370f99b" },
+  ],
   "r2_buckets": [
     { "binding": "RAW", "bucket_name": "activity-hub-raw" },
     { "binding": "LAKE", "bucket_name": "activity-hub-lake" },
