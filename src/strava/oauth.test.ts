@@ -34,7 +34,11 @@ beforeEach(async () => {
 
 describe("oauthConfig", () => {
   it("reads the OAuth settings from the environment", () => {
-    const config = oauthConfig({ ...env, STRAVA_CLIENT_SECRET: "shh" });
+    const config = oauthConfig({
+      ...env,
+      STRAVA_CLIENT_SECRET: "shh",
+      STRAVA_VERIFY_TOKEN: "verify-me",
+    });
     expect(config).toEqual({
       oauthBase: env.STRAVA_OAUTH_BASE,
       clientId: env.STRAVA_CLIENT_ID,

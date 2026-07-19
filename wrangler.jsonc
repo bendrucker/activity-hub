@@ -17,6 +17,9 @@
     // header-only auth, so both bases are config rather than constants.
     "STRAVA_API_BASE": "https://www.strava.com/api/v3",
     "STRAVA_OAUTH_BASE": "https://www.strava.com/oauth",
+    // Filled with the real subscription id after `scripts/strava-subscription.ts create`
+    // runs. Empty rejects all events.
+    "STRAVA_SUBSCRIPTION_ID": "",
   },
   "kv_namespaces": [
     { "binding": "TOKENS", "id": "bc72d180846d490395293eb92370f99b" },
