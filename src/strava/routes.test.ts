@@ -23,6 +23,10 @@ function stubExchange(athleteId: number): typeof fetch {
   return async () => Response.json({ ...EXCHANGE, athlete: { id: athleteId } });
 }
 
+function stubFailedExchange(): typeof fetch {
+  return async () => new Response("Bad Request", { status: 400 });
+}
+
 beforeEach(async () => {
   await env.TOKENS.delete(TOKENS_KEY);
 });
@@ -71,6 +75,18 @@ describe("handleCallback", () => {
     );
     expect(response.status).toBe(400);
     expect(await response.text()).toContain("activity:read_all");
+  });
+
+  it("reports a failed code exchange as a client error", async () => {
+    const response = await handleCallback(
+      callbackUrl({ code: "expired", scope: "read,activity:read_all" }),
+      testEnv,
+      stubFailedExchange(),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("/auth/strava");
+    expect(await readTokens(env.TOKENS)).toBeNull();
   });
 
   it("rejects another athlete without storing tokens", async () => {

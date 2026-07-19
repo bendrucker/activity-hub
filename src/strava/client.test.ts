@@ -1,5 +1,6 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
+import { stubFetch, type FetchStub } from "../../test/fetch-stub";
 import { REFRESH_MARGIN_S, StravaClient } from "./client";
 import { TOKENS_KEY, readTokens, writeTokens } from "./oauth";
 
@@ -9,31 +10,26 @@ const OAUTH = {
   clientSecret: "shh",
 };
 
+const TOKEN_URL = "https://oauth.example/oauth/token";
+
 function nowS(): number {
   return Math.floor(Date.now() / 1000);
 }
 
-interface Stub {
-  fetchImpl: typeof fetch;
-  requests: Request[];
-}
-
-function stubFetch(respond: (request: Request) => Response): Stub {
-  const requests: Request[] = [];
-  const fetchImpl: typeof fetch = async (input, init) => {
-    const request = new Request(input, init);
-    requests.push(request);
-    return respond(request);
-  };
-  return { fetchImpl, requests };
-}
-
-function client(stub: Stub): StravaClient {
+function client(stub: FetchStub): StravaClient {
   return new StravaClient({
     apiBase: "https://api.example/api/v3",
     oauth: OAUTH,
     tokens: env.TOKENS,
     fetchImpl: stub.fetchImpl,
+  });
+}
+
+function refreshResponse(): Response {
+  return Response.json({
+    access_token: "fresh",
+    refresh_token: "next-refresh",
+    expires_at: nowS() + 21_600,
   });
 }
 
@@ -73,12 +69,8 @@ describe("StravaClient", () => {
       expiresAt: nowS() + 30,
     });
     const stub = stubFetch((request) => {
-      if (request.url === "https://oauth.example/oauth/token") {
-        return Response.json({
-          access_token: "fresh",
-          refresh_token: "next-refresh",
-          expires_at: nowS() + 21_600,
-        });
+      if (request.url === TOKEN_URL) {
+        return refreshResponse();
       }
       return Response.json({ id: 42 });
     });
@@ -86,10 +78,39 @@ describe("StravaClient", () => {
     await client(stub).fetch("/athlete");
 
     expect(stub.requests).toHaveLength(2);
-    expect(stub.requests[0]!.url).toBe("https://oauth.example/oauth/token");
+    expect(stub.requests[0]!.url).toBe(TOKEN_URL);
     expect(stub.requests[1]!.headers.get("Authorization")).toBe("Bearer fresh");
     const stored = await readTokens(env.TOKENS);
     expect(stored?.accessToken).toBe("fresh");
     expect(stored?.refreshToken).toBe("next-refresh");
+  });
+
+  it("refreshes and retries once when a live token gets a 401", async () => {
+    await writeTokens(env.TOKENS, {
+      accessToken: "revoked",
+      refreshToken: "refresh",
+      expiresAt: nowS() + REFRESH_MARGIN_S * 2,
+    });
+    const stub = stubFetch((request) => {
+      if (request.url === TOKEN_URL) {
+        return refreshResponse();
+      }
+      if (request.headers.get("Authorization") === "Bearer revoked") {
+        return new Response("Unauthorized", { status: 401 });
+      }
+      return Response.json({ id: 42 });
+    });
+
+    const response = await client(stub).fetch("/athlete");
+
+    expect(response.status).toBe(200);
+    expect(stub.requests.map((request) => request.url)).toEqual([
+      "https://api.example/api/v3/athlete",
+      TOKEN_URL,
+      "https://api.example/api/v3/athlete",
+    ]);
+    expect(stub.requests[2]!.headers.get("Authorization")).toBe("Bearer fresh");
+    const stored = await readTokens(env.TOKENS);
+    expect(stored?.accessToken).toBe("fresh");
   });
 });

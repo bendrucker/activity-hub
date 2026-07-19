@@ -1,7 +1,9 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
+import { stubFetch } from "../../test/fetch-stub";
 import {
   exchangeCode,
+  oauthConfig,
   readTokens,
   refreshTokens,
   TOKENS_KEY,
@@ -22,20 +24,30 @@ const TOKENS: StravaTokens = {
   expiresAt: 1_800_000_000,
 };
 
-function stubFetch(
-  status: number,
-  body: unknown,
-): { fetchImpl: typeof fetch; requests: Request[] } {
-  const requests: Request[] = [];
-  const fetchImpl: typeof fetch = async (input, init) => {
-    requests.push(new Request(input, init));
-    return new Response(JSON.stringify(body), { status });
-  };
-  return { fetchImpl, requests };
+function respondJson(status: number, body: unknown): () => Response {
+  return () => new Response(JSON.stringify(body), { status });
 }
 
 beforeEach(async () => {
   await env.TOKENS.delete(TOKENS_KEY);
+});
+
+describe("oauthConfig", () => {
+  it("reads the OAuth settings from the environment", () => {
+    const config = oauthConfig({ ...env, STRAVA_CLIENT_SECRET: "shh" });
+    expect(config).toEqual({
+      oauthBase: env.STRAVA_OAUTH_BASE,
+      clientId: env.STRAVA_CLIENT_ID,
+      clientSecret: "shh",
+    });
+  });
+
+  it("throws when the client secret is unset", () => {
+    const unset = { ...env, STRAVA_CLIENT_SECRET: undefined };
+    expect(() => oauthConfig(unset as unknown as Env)).toThrow(
+      /STRAVA_CLIENT_SECRET/,
+    );
+  });
 });
 
 describe("token storage", () => {
@@ -48,12 +60,14 @@ describe("token storage", () => {
 
 describe("exchangeCode", () => {
   it("posts the code with client credentials", async () => {
-    const { fetchImpl, requests } = stubFetch(200, {
-      access_token: "access",
-      refresh_token: "refresh",
-      expires_at: 1_800_000_000,
-      athlete: { id: 42 },
-    });
+    const { fetchImpl, requests } = stubFetch(
+      respondJson(200, {
+        access_token: "access",
+        refresh_token: "refresh",
+        expires_at: 1_800_000_000,
+        athlete: { id: 42 },
+      }),
+    );
 
     const { tokens, athleteId } = await exchangeCode(CONFIG, "abc", fetchImpl);
 
@@ -69,18 +83,20 @@ describe("exchangeCode", () => {
   });
 
   it("throws on a failed exchange", async () => {
-    const { fetchImpl } = stubFetch(400, { message: "Bad Request" });
+    const { fetchImpl } = stubFetch(respondJson(400, { message: "Bad" }));
     await expect(exchangeCode(CONFIG, "abc", fetchImpl)).rejects.toThrow(/400/);
   });
 });
 
 describe("refreshTokens", () => {
   it("posts the refresh token grant", async () => {
-    const { fetchImpl, requests } = stubFetch(200, {
-      access_token: "next-access",
-      refresh_token: "next-refresh",
-      expires_at: 1_900_000_000,
-    });
+    const { fetchImpl, requests } = stubFetch(
+      respondJson(200, {
+        access_token: "next-access",
+        refresh_token: "next-refresh",
+        expires_at: 1_900_000_000,
+      }),
+    );
 
     const tokens = await refreshTokens(CONFIG, "refresh", fetchImpl);
 

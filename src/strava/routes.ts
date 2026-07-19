@@ -1,14 +1,6 @@
-import { exchangeCode, type OAuthConfig, writeTokens } from "./oauth";
+import { exchangeCode, oauthConfig, writeTokens } from "./oauth";
 
 export const SCOPE = "activity:read_all";
-
-export function oauthConfig(env: Env): OAuthConfig {
-  return {
-    oauthBase: env.STRAVA_OAUTH_BASE,
-    clientId: env.STRAVA_CLIENT_ID,
-    clientSecret: env.STRAVA_CLIENT_SECRET,
-  };
-}
 
 export function handleAuthorize(url: URL, env: Env): Response {
   const params = new URLSearchParams({
@@ -48,16 +40,23 @@ export async function handleCallback(
     );
   }
 
-  const { tokens, athleteId } = await exchangeCode(
-    oauthConfig(env),
-    code,
-    fetchImpl,
-  );
+  const config = oauthConfig(env);
+  let exchange;
+  try {
+    exchange = await exchangeCode(config, code, fetchImpl);
+  } catch {
+    // Codes are single-use and short-lived, so a reloaded callback URL
+    // fails here. Restarting the flow is the fix, so keep it a 4xx.
+    return new Response(
+      "authorization code exchange failed, restart at /auth/strava",
+      { status: 400 },
+    );
+  }
 
-  if (athleteId !== Number(env.STRAVA_ATHLETE_ID)) {
+  if (exchange.athleteId !== Number(env.STRAVA_ATHLETE_ID)) {
     return new Response("unauthorized athlete", { status: 403 });
   }
 
-  await writeTokens(env.TOKENS, tokens);
+  await writeTokens(env.TOKENS, exchange.tokens);
   return new Response("Strava connected", { status: 200 });
 }

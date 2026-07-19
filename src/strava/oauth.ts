@@ -4,6 +4,19 @@ export interface OAuthConfig {
   clientSecret: string;
 }
 
+export function oauthConfig(env: Env): OAuthConfig {
+  if (!env.STRAVA_CLIENT_SECRET) {
+    throw new Error(
+      "STRAVA_CLIENT_SECRET is not set. Run `wrangler secret put STRAVA_CLIENT_SECRET`.",
+    );
+  }
+  return {
+    oauthBase: env.STRAVA_OAUTH_BASE,
+    clientId: env.STRAVA_CLIENT_ID,
+    clientSecret: env.STRAVA_CLIENT_SECRET,
+  };
+}
+
 export interface StravaTokens {
   accessToken: string;
   refreshToken: string;
