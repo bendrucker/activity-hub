@@ -1,18 +1,9 @@
 import { ulid } from "ulid";
 import { MAX_START_DELTA_S, matchActivity } from "./match";
+import type { SourceRecord } from "./record";
 import type { Sport } from "./sport";
 
-export type Source = "strava" | "wahoo";
-
-export interface SourceRecord {
-  source: Source;
-  sourceId: string;
-  startedAt: string;
-  timezone: string;
-  sport: Sport;
-  durationS: number;
-  rawKeys: Record<string, string>;
-}
+export type { Source, SourceRecord } from "./record";
 
 export interface UpsertResult {
   activityId: string;
