@@ -1,4 +1,5 @@
 import { handleAuthorize, handleCallback } from "./strava/routes";
+import { handleWebhookEvent, handleWebhookVerify } from "./strava/webhook";
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -11,6 +12,15 @@ export default {
     }
     if (url.pathname === "/auth/strava/callback") {
       return handleCallback(url, env);
+    }
+    if (url.pathname === "/webhooks/strava") {
+      if (request.method === "GET") {
+        return handleWebhookVerify(url, env);
+      }
+      if (request.method === "POST") {
+        return handleWebhookEvent(request, env);
+      }
+      return new Response("Method Not Allowed", { status: 405 });
     }
     return new Response("Not Found", { status: 404 });
   },

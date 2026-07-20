@@ -3,7 +3,11 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { readTokens, TOKENS_KEY } from "./oauth";
 import { handleAuthorize, handleCallback } from "./routes";
 
-const testEnv: Env = { ...env, STRAVA_CLIENT_SECRET: "shh" };
+const testEnv: Env = {
+  ...env,
+  STRAVA_CLIENT_SECRET: "shh",
+  STRAVA_VERIFY_TOKEN: "verify-me",
+};
 
 const EXCHANGE = {
   access_token: "access",

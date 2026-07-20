@@ -26,16 +26,20 @@ See [docs/design.md](docs/design.md) for the full design and [docs/sources.md](d
 
 Inventory of every credential the system needs and where it lives.
 
-| Secret                                    | Location                               | Consumer                                                                             |
-| ----------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------ |
-| `CLOUDFLARE_API_TOKEN`                    | GitHub Actions repo secret             | `deploy.yml` (migrations + `wrangler deploy`)                                        |
-| `STRAVA_CLIENT_SECRET`                    | Worker secret (`wrangler secret put`)  | Strava OAuth + webhooks ([#7](https://github.com/bendrucker/activity-hub/issues/7))  |
-| `WAHOO_CLIENT_ID` / `WAHOO_CLIENT_SECRET` | Worker secrets (`wrangler secret put`) | Wahoo OAuth + webhooks ([#11](https://github.com/bendrucker/activity-hub/issues/11)) |
-| R2 token: read `activity-hub-raw`         | GitHub Actions repo secret             | DuckDB batch job ([#14](https://github.com/bendrucker/activity-hub/issues/14))       |
-| R2 token: write `activity-hub-lake`       | GitHub Actions repo secret             | DuckDB batch job ([#14](https://github.com/bendrucker/activity-hub/issues/14))       |
+| Secret                                    | Location                               | Consumer                                                                                    |
+| ----------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `CLOUDFLARE_API_TOKEN`                    | GitHub Actions repo secret             | `deploy.yml` (migrations + `wrangler deploy`)                                               |
+| `STRAVA_CLIENT_SECRET`                    | Worker secret (`wrangler secret put`)  | Strava OAuth + webhooks ([#7](https://github.com/bendrucker/activity-hub/issues/7))         |
+| `STRAVA_VERIFY_TOKEN`                     | Worker secret (`wrangler secret put`)  | Webhook subscription validation ([#8](https://github.com/bendrucker/activity-hub/issues/8)) |
+| `WAHOO_CLIENT_ID` / `WAHOO_CLIENT_SECRET` | Worker secrets (`wrangler secret put`) | Wahoo OAuth + webhooks ([#11](https://github.com/bendrucker/activity-hub/issues/11))        |
+| R2 token: read `activity-hub-raw`         | GitHub Actions repo secret             | DuckDB batch job ([#14](https://github.com/bendrucker/activity-hub/issues/14))              |
+| R2 token: write `activity-hub-lake`       | GitHub Actions repo secret             | DuckDB batch job ([#14](https://github.com/bendrucker/activity-hub/issues/14))              |
 
 `STRAVA_CLIENT_ID` and `STRAVA_ATHLETE_ID` are public identifiers, committed as
-vars in `wrangler.jsonc`.
+vars in `wrangler.jsonc`. `STRAVA_SUBSCRIPTION_ID` is also a committed var,
+left empty until `scripts/strava-subscription.ts create` creates the push
+subscription and returns its id. A value for `STRAVA_VERIFY_TOKEN` can be
+generated with `openssl rand -hex 16`.
 
 R2 API tokens apply a single permission level across the buckets they cover, so
 raw reads and lake writes are two separate tokens. Both get created in the
