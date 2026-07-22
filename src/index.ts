@@ -1,5 +1,12 @@
+import { RateLimitedError, type IngestMessage } from "./ingest";
+import { consumeStravaEvent } from "./strava/consume";
 import { handleAuthorize, handleCallback } from "./strava/routes";
 import { handleWebhookEvent, handleWebhookVerify } from "./strava/webhook";
+
+// A 429 clears when the 15-minute budget window rolls over, so waiting out
+// one full window beats exponential guessing.
+const RATE_LIMIT_WINDOW_S = 15 * 60;
+const RETRY_DELAY_S = 60;
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -25,10 +32,19 @@ export default {
     return new Response("Not Found", { status: 404 });
   },
 
-  async queue(batch): Promise<void> {
-    // Ack everything so nothing dead-letters until real consumers exist.
+  async queue(batch, env): Promise<void> {
     for (const message of batch.messages) {
-      message.ack();
+      try {
+        await consumeStravaEvent(message.body, env);
+        message.ack();
+      } catch (error) {
+        if (error instanceof RateLimitedError) {
+          message.retry({ delaySeconds: RATE_LIMIT_WINDOW_S });
+          continue;
+        }
+        console.error(`failed to consume Strava event: ${String(error)}`);
+        message.retry({ delaySeconds: RETRY_DELAY_S });
+      }
     }
   },
-} satisfies ExportedHandler<Env>;
+} satisfies ExportedHandler<Env, IngestMessage>;
