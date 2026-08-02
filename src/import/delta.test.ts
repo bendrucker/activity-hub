@@ -17,6 +17,7 @@ function record(overrides: Partial<SourceRecord> = {}): SourceRecord {
     sourceId: "12345",
     startedAt: START,
     timezone: "America/Los_Angeles",
+    timezoneInferred: false,
     sport: "ride",
     durationS: 3600,
     rawKeys: { original: "raw/strava/activities/12345/original.fit.gz" },
@@ -86,7 +87,11 @@ describe("buildDelta", () => {
   });
 
   it("emits valid SQL that upserts into D1", async () => {
-    const delta = buildDelta(empty(), [record()], NOW);
+    const delta = buildDelta(
+      empty(),
+      [record({ timezoneInferred: true })],
+      NOW,
+    );
     await apply(delta.statements);
 
     const state = await loadState();
@@ -97,6 +102,10 @@ describe("buildDelta", () => {
       sourceId: "12345",
       rawKeys: { original: "raw/strava/activities/12345/original.fit.gz" },
     });
+    const activity = await env.REGISTRY.prepare(
+      "SELECT timezone_inferred FROM activities",
+    ).first<{ timezone_inferred: number }>();
+    expect(activity?.timezone_inferred).toBe(1);
   });
 
   it("emits an empty delta when re-run over its own output", async () => {
@@ -205,7 +214,11 @@ describe("buildDelta", () => {
   });
 
   it("overwrites telemetry when a Wahoo record attaches", async () => {
-    const first = buildDelta(empty(), [record()], NOW);
+    const first = buildDelta(
+      empty(),
+      [record({ timezoneInferred: true })],
+      NOW,
+    );
     await apply(first.statements);
 
     const second = buildDelta(
@@ -230,5 +243,10 @@ describe("buildDelta", () => {
       startedAt: "2026-07-01T14:00:30.000Z",
       durationS: 3650,
     });
+    // The Wahoo device zone replaces the inferred one, so the flag clears.
+    const activity = await env.REGISTRY.prepare(
+      "SELECT timezone_inferred FROM activities",
+    ).first<{ timezone_inferred: number }>();
+    expect(activity?.timezone_inferred).toBe(0);
   });
 });

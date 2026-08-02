@@ -55,6 +55,7 @@ export function placeActivity(
 export function toSourceRecord(
   activity: ExportActivity,
   timezone: string,
+  timezoneInferred: boolean,
   rawKeys: Record<string, string>,
 ): SourceRecord {
   return {
@@ -62,6 +63,7 @@ export function toSourceRecord(
     sourceId: activity.sourceId,
     startedAt: activity.startedAt,
     timezone,
+    timezoneInferred,
     sport: sportFromStrava(activity.sportType),
     durationS: activity.elapsedS,
     rawKeys,

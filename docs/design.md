@@ -89,7 +89,7 @@ bendrucker.me exposes a named `WorkerEntrypoint` (`Publish`) that owns writes to
 
 The hub mints its own activity ID. Source records attach as overlays:
 
-- `activities`: `activity_id` (hub-native), `started_at`, `timezone`, `sport`, `duration_s`
+- `activities`: `activity_id` (hub-native), `started_at`, `timezone`, `timezone_inferred`, `sport`, `duration_s`
 - `activity_sources`: `activity_id`, `source` (`strava` | `wahoo`), `source_id`, raw object keys
 
 Wahoo and Strava describe the same physical ride, so ingest matches before minting: same sport class, start times within 2 minutes, durations within 5%. Wahoo wins for telemetry (original FIT). Strava wins for presentation (title, description, gear, photos). Activities that exist in only one source (manual Strava entries, workouts that never synced to Strava) are first-class.

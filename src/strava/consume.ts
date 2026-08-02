@@ -167,7 +167,9 @@ async function upsertDetail(
     source: "strava",
     sourceId: String(activityId),
     startedAt: detail.start_date,
+    // Strava reports the zone itself, so it is never inferred here.
     timezone: parseTimezone(detail.timezone),
+    timezoneInferred: false,
     sport: sportFromStrava(detail.sport_type),
     durationS: detail.elapsed_time,
     rawKeys,

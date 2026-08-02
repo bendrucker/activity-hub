@@ -1,0 +1,1 @@
+ALTER TABLE activities ADD COLUMN timezone_inferred INTEGER NOT NULL DEFAULT 0;

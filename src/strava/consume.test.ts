@@ -160,6 +160,7 @@ describe("consumeStravaEvent", () => {
     expect(activity).toMatchObject({
       sport: "ride",
       timezone: "America/Los_Angeles",
+      timezone_inferred: 0,
       started_at: "2026-07-01T14:00:00.000Z",
       duration_s: 3600,
     });

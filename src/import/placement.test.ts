@@ -60,6 +60,7 @@ describe("toSourceRecord", () => {
     const record = toSourceRecord(
       activity({ sportType: "VirtualRide" }),
       "America/Los_Angeles",
+      true,
       { original: "raw/strava/activities/19324502491/original.fit.gz" },
     );
     expect(record).toMatchObject({
@@ -68,6 +69,7 @@ describe("toSourceRecord", () => {
       sport: "ride",
       durationS: 6770,
       timezone: "America/Los_Angeles",
+      timezoneInferred: true,
     });
   });
 
@@ -75,8 +77,10 @@ describe("toSourceRecord", () => {
     const record = toSourceRecord(
       activity({ sportType: "Windsurf" }),
       "UTC",
+      false,
       {},
     );
     expect(record.sport).toBe("other");
+    expect(record.timezoneInferred).toBe(false);
   });
 });
