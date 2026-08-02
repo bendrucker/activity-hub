@@ -1,7 +1,12 @@
-import { ulid } from "ulid";
-import { MAX_START_DELTA_S, matchActivity } from "../match";
+import { MAX_START_DELTA_S } from "../match";
 import type { Source, SourceRecord } from "../record";
 import type { Sport } from "../sport";
+import {
+  parseStartedAt,
+  planMatchOrMint,
+  planSourceUpdate,
+  type Statement,
+} from "../upsert";
 
 export interface RegistryActivity {
   activityId: string;
@@ -73,20 +78,12 @@ export function buildDelta(
   const results: DeltaRecordResult[] = [];
 
   for (const record of records) {
-    // The attach branch below only touches updated_at. Attaching a Wahoo
-    // record must also overwrite started_at, duration_s, and timezone with
-    // the device telemetry (see upsertSourceRecord), which is unimplemented
-    // here, so anything but Strava is refused rather than written wrong.
-    if (record.source !== "strava") {
-      throw new Error(`unsupported import source ${record.source}`);
-    }
-
     const existing = sources.get(`${record.source}:${record.sourceId}`);
     if (existing) {
-      const unchanged = Object.entries(record.rawKeys).every(
-        ([key, value]) => existing.rawKeys[key] === value,
-      );
-      if (unchanged) {
+      const update = planSourceUpdate(record, existing.rawKeys, now);
+      // Unlike the worker upsert, an unchanged record emits nothing, so the
+      // delta stays empty when re-run over its own output.
+      if (!update.changed) {
         results.push({
           sourceId: record.sourceId,
           activityId: existing.activityId,
@@ -94,11 +91,8 @@ export function buildDelta(
         });
         continue;
       }
-      const merged = { ...existing.rawKeys, ...record.rawKeys };
-      statements.push(
-        `UPDATE activity_sources SET raw_keys = ${text(JSON.stringify(merged))}, updated_at = ${text(now)} WHERE source = ${text(record.source)} AND source_id = ${text(record.sourceId)};`,
-      );
-      existing.rawKeys = merged;
+      statements.push(render(update.statement));
+      existing.rawKeys = update.rawKeys;
       results.push({
         sourceId: record.sourceId,
         activityId: existing.activityId,
@@ -107,13 +101,7 @@ export function buildDelta(
       continue;
     }
 
-    const startedAtMs = Date.parse(record.startedAt);
-    if (Number.isNaN(startedAtMs)) {
-      throw new Error(
-        `unparseable startedAt ${JSON.stringify(record.startedAt)} for ${record.source}:${record.sourceId}`,
-      );
-    }
-    const startedAt = new Date(startedAtMs).toISOString();
+    const startedAtMs = parseStartedAt(record);
 
     // A superset prefilter for performance only: the time window bounds the
     // scan cheaply, matchActivity applies the real rules (sport, duration).
@@ -123,61 +111,57 @@ export function buildDelta(
           MAX_START_DELTA_S * 1000 &&
         !sourced.get(activity.activityId)?.has(record.source),
     );
-    const match = matchActivity(
-      { startedAt, sport: record.sport, durationS: record.durationS },
-      candidates,
+    const plan = planMatchOrMint(record, candidates, now);
+
+    for (const statement of plan.statements) {
+      statements.push(render(statement));
+    }
+    if (plan.outcome === "minted") {
+      activities.push(plan.activity);
+    } else {
+      // A Wahoo attach overwrites the matched activity's telemetry, so the
+      // in-memory row must follow for later records to match against.
+      activities[
+        activities.findIndex(
+          (activity) => activity.activityId === plan.activity.activityId,
+        )
+      ] = plan.activity;
+    }
+    startTimes.set(
+      plan.activity.activityId,
+      Date.parse(plan.activity.startedAt),
     );
 
-    const activityId = match?.activityId ?? ulid(startedAtMs);
-    if (match) {
-      statements.push(
-        insertSource(record, activityId, now),
-        `UPDATE activities SET updated_at = ${text(now)} WHERE activity_id = ${text(activityId)};`,
-      );
-    } else {
-      statements.push(
-        `INSERT INTO activities (activity_id, started_at, timezone, sport, duration_s, created_at, updated_at) VALUES (${values(activityId, startedAt, record.timezone, record.sport, record.durationS, now, now)});`,
-        insertSource(record, activityId, now),
-      );
-      activities.push({
-        activityId,
-        startedAt,
-        sport: record.sport,
-        durationS: record.durationS,
-      });
-      startTimes.set(activityId, startedAtMs);
-    }
-
-    markSourced(activityId, record.source);
+    markSourced(plan.activity.activityId, record.source);
     sources.set(`${record.source}:${record.sourceId}`, {
       source: record.source,
       sourceId: record.sourceId,
-      activityId,
+      activityId: plan.activity.activityId,
       rawKeys: record.rawKeys,
     });
 
     results.push({
       sourceId: record.sourceId,
-      activityId,
-      outcome: match ? "attached" : "minted",
+      activityId: plan.activity.activityId,
+      outcome: plan.outcome,
     });
   }
 
   return { statements, results };
 }
 
-function insertSource(
-  record: SourceRecord,
-  activityId: string,
-  now: string,
-): string {
-  return `INSERT INTO activity_sources (source, source_id, activity_id, raw_keys, created_at, updated_at) VALUES (${values(record.source, record.sourceId, activityId, JSON.stringify(record.rawKeys), now, now)});`;
-}
-
-function values(...items: (string | number)[]): string {
-  return items
-    .map((item) => (typeof item === "number" ? String(item) : text(item)))
-    .join(", ");
+// The delta is applied as a SQL file, so bound parameters are inlined as
+// escaped literals.
+function render(statement: Statement): string {
+  return (
+    statement.sql.replace(/\?(\d+)/g, (placeholder, index: string) => {
+      const param = statement.params[Number(index) - 1];
+      if (param === undefined) {
+        throw new Error(`missing parameter ${placeholder}: ${statement.sql}`);
+      }
+      return typeof param === "number" ? String(param) : text(param);
+    }) + ";"
+  );
 }
 
 function text(value: string): string {
