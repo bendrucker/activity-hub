@@ -1,5 +1,6 @@
 import { RateLimitedError, type IngestMessage } from "./ingest";
 import { consumeStravaEvent } from "./strava/consume";
+import { reconcileStravaActivities } from "./strava/reconcile";
 import { handleAuthorize, handleCallback } from "./strava/routes";
 import { handleWebhookEvent, handleWebhookVerify } from "./strava/webhook";
 
@@ -30,6 +31,20 @@ export default {
       return new Response("Method Not Allowed", { status: 405 });
     }
     return new Response("Not Found", { status: 404 });
+  },
+
+  async scheduled(_controller, env): Promise<void> {
+    try {
+      await reconcileStravaActivities(env);
+    } catch (error) {
+      if (error instanceof RateLimitedError) {
+        // The next daily run resumes from the same high-water mark, so
+        // there's nothing to retry now.
+        console.warn("Strava reconciliation rate limited, ending run");
+        return;
+      }
+      throw error;
+    }
   },
 
   async queue(batch, env): Promise<void> {

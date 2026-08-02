@@ -21,6 +21,11 @@
     // runs. Empty rejects all events.
     "STRAVA_SUBSCRIPTION_ID": "",
   },
+  "triggers": {
+    // Daily Strava reconciliation. Strava drops a webhook event after three
+    // failed deliveries, so the sweep bounds any loss to a day's delay.
+    "crons": ["0 6 * * *"],
+  },
   "kv_namespaces": [
     { "binding": "TOKENS", "id": "bc72d180846d490395293eb92370f99b" },
   ],
