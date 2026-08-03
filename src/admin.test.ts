@@ -191,6 +191,26 @@ describe("handleReconcile", () => {
     expect(response.status).toBe(429);
     expect(await response.text()).toContain("rate limited");
   });
+
+  it("returns the failure to the caller instead of throwing", async () => {
+    const stub = stubFetch(() => new Response("boom", { status: 500 }));
+
+    const response = await handleReconcile(
+      reconcileRequest("Bearer admin-secret"),
+      testEnv(),
+      { client: apiClient(stub) },
+    );
+
+    expect(response.status).toBe(500);
+    const body = (await response.json()) as {
+      ok: boolean;
+      error: string;
+      stack?: string;
+    };
+    expect(body.ok).toBe(false);
+    expect(body.error).toContain("Strava activity list failed: 500");
+    expect(body.stack).toContain("Error");
+  });
 });
 
 describe("handleWahooBackfill", () => {
@@ -276,5 +296,20 @@ describe("handleWahooBackfill", () => {
 
     expect(response.status).toBe(429);
     expect(await response.text()).toContain("rate limited");
+  });
+
+  it("returns the failure to the caller instead of throwing", async () => {
+    const stub = stubFetch(() => new Response("boom", { status: 500 }));
+
+    const response = await handleWahooBackfill(
+      backfillRequest("Bearer admin-secret"),
+      testEnv(),
+      { client: wahooApiClient(stub) },
+    );
+
+    expect(response.status).toBe(500);
+    const body = (await response.json()) as { ok: boolean; error: string };
+    expect(body.ok).toBe(false);
+    expect(body.error).toContain("500");
   });
 });
