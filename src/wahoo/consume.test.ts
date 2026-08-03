@@ -7,11 +7,13 @@ import {
 } from "@garmin/fitsdk";
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { stubFetch } from "../../test/fetch-stub";
+import { stubFetch, type FetchStub } from "../../test/fetch-stub";
 import { SECRETS } from "../../test/secrets";
-import type { WahooIngestMessage } from "../ingest";
+import { RateLimitedError, type WahooIngestMessage } from "../ingest";
 import { upsertSourceRecord } from "../registry";
+import { WahooClient } from "./client";
 import { consumeWahooEvent } from "./consume";
+import { writeTokens } from "./oauth";
 import type { WahooWorkoutSummary } from "./summary";
 
 const testEnv: Env = { ...env, ...SECRETS };
@@ -92,6 +94,36 @@ function message(summary: WahooWorkoutSummary = SUMMARY): WahooIngestMessage {
   };
 }
 
+// What backfill enqueues: the list entry, no summary.
+function backfillMessage(): WahooIngestMessage {
+  return {
+    source: "wahoo",
+    kind: "workout",
+    workoutId: WORKOUT_ID,
+    workout: { ...SUMMARY.workout, name: "morning ride" },
+  };
+}
+
+const SUMMARY_PATH = `/v1/workouts/${WORKOUT_ID}/workout_summary`;
+
+function summaryResponse(): Response {
+  const { workout: _nested, ...summary } = SUMMARY;
+  return new Response(JSON.stringify(summary));
+}
+
+function apiClient(stub: FetchStub): WahooClient {
+  return new WahooClient({
+    apiBase: "https://api.example",
+    oauth: {
+      oauthBase: "https://api.example/oauth",
+      clientId: "123",
+      clientSecret: "shh",
+    },
+    tokens: env.TOKENS,
+    fetchImpl: stub.fetchImpl,
+  });
+}
+
 function summaryKey(id: number): string {
   return `raw/wahoo/workouts/${id}/summary.json`;
 }
@@ -119,6 +151,12 @@ async function activityRow(
 }
 
 beforeEach(async () => {
+  await env.TOKENS.delete("wahoo:tokens");
+  await writeTokens(env.TOKENS, {
+    accessToken: "at",
+    refreshToken: "rt",
+    expiresAt: Math.floor(Date.now() / 1000) + 7200,
+  });
   await env.REGISTRY.batch([
     env.REGISTRY.prepare("DELETE FROM activity_sources"),
     env.REGISTRY.prepare("DELETE FROM activities"),
@@ -264,5 +302,96 @@ describe("consumeWahooEvent", () => {
     expect(await env.RAW.get(fitKey(WORKOUT_ID))).toBeNull();
     expect(await env.RAW.get(summaryKey(WORKOUT_ID))).toBeNull();
     expect(await sourceRow(String(WORKOUT_ID))).toBeNull();
+  });
+
+  it("fetches the summary for a backfill message and ingests it", async () => {
+    const api = stubFetch(() => summaryResponse());
+    const download = stubFetch(() => new Response(syntheticFit(5)));
+
+    await consumeWahooEvent(backfillMessage(), testEnv, {
+      fetchImpl: download.fetchImpl,
+      client: apiClient(api),
+    });
+
+    expect(new URL(api.requests[0]!.url).pathname).toBe(SUMMARY_PATH);
+    expect(download.requests[0]!.url).toBe(SUMMARY.file.url);
+
+    const storedSummary = await env.RAW.get(summaryKey(WORKOUT_ID));
+    expect(await storedSummary?.json()).toEqual({
+      ...SUMMARY,
+      workout: { ...SUMMARY.workout, name: "morning ride" },
+    });
+
+    const row = await sourceRow(String(WORKOUT_ID));
+    const activity = await activityRow(row!.activity_id as string);
+    expect(activity).toMatchObject({
+      sport: "ride",
+      started_at: "2026-07-01T14:00:00.000Z",
+      duration_s: 275,
+    });
+  });
+
+  it("skips a backfill workout whose summary 404s", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const api = stubFetch(() => new Response("not found", { status: 404 }));
+
+    await consumeWahooEvent(backfillMessage(), testEnv, {
+      client: apiClient(api),
+    });
+
+    expect(await sourceRow(String(WORKOUT_ID))).toBeNull();
+    expect(await env.RAW.get(summaryKey(WORKOUT_ID))).toBeNull();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  // Wahoo answers for a workout that never recorded with a 401 as often as a
+  // 404. The client retries once on a refreshed token, so a second 401 is the
+  // workout's, not the token's.
+  it("skips a backfill workout whose summary 401s after a token refresh", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const api = stubFetch((request) =>
+      new URL(request.url).pathname === "/oauth/token"
+        ? new Response(
+            JSON.stringify({
+              access_token: "fresh",
+              refresh_token: "rt2",
+              expires_in: 7200,
+            }),
+          )
+        : new Response("unauthorized", { status: 401 }),
+    );
+
+    await consumeWahooEvent(backfillMessage(), testEnv, {
+      client: apiClient(api),
+    });
+
+    expect(
+      api.requests.map((request) => new URL(request.url).pathname),
+    ).toEqual([SUMMARY_PATH, "/oauth/token", SUMMARY_PATH]);
+    expect(await sourceRow(String(WORKOUT_ID))).toBeNull();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("throws RateLimitedError when the summary fetch is rate limited", async () => {
+    const api = stubFetch(() => new Response("slow down", { status: 429 }));
+
+    await expect(
+      consumeWahooEvent(backfillMessage(), testEnv, { client: apiClient(api) }),
+    ).rejects.toThrow(RateLimitedError);
+  });
+
+  it("skips a backfill workout whose summary carries no file URL", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const api = stubFetch(() => new Response(JSON.stringify({ id: 8297 })));
+
+    await consumeWahooEvent(backfillMessage(), testEnv, {
+      client: apiClient(api),
+    });
+
+    expect(await sourceRow(String(WORKOUT_ID))).toBeNull();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 });
