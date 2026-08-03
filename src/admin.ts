@@ -13,6 +13,19 @@ function authorized(request: Request, env: Env): boolean {
   );
 }
 
+// The admin surface is bearer-authenticated and worker logs are not always
+// reachable, so the caller gets the failure itself instead of a bare 1101.
+function errorResponse(error: unknown): Response {
+  return Response.json(
+    {
+      ok: false,
+      error: String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    },
+    { status: 500 },
+  );
+}
+
 export async function handleReconcile(
   request: Request,
   env: Env,
@@ -31,7 +44,7 @@ export async function handleReconcile(
         status: 429,
       });
     }
-    throw error;
+    return errorResponse(error);
   }
 
   return Response.json({ ok: true, ...report });
@@ -66,6 +79,6 @@ export async function handleWahooBackfill(
         status: 429,
       });
     }
-    throw error;
+    return errorResponse(error);
   }
 }
