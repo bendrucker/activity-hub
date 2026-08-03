@@ -29,7 +29,9 @@ export class StravaClient {
   private readonly fetchImpl: typeof fetch;
 
   constructor(private readonly config: StravaClientConfig) {
-    this.fetchImpl = config.fetchImpl ?? fetch;
+    // workerd's native fetch throws "Illegal invocation" when called with a
+    // foreign `this`. An arrow wrapper keeps late binding without that risk.
+    this.fetchImpl = config.fetchImpl ?? ((input, init) => fetch(input, init));
   }
 
   async fetch(path: string, init: RequestInit = {}): Promise<Response> {
