@@ -113,4 +113,36 @@ describe("StravaClient", () => {
     const stored = await readTokens(env.TOKENS);
     expect(stored?.accessToken).toBe("fresh");
   });
+
+  it("calls the default fetch without workerd's illegal-invocation this", async () => {
+    await writeTokens(env.TOKENS, {
+      accessToken: "live",
+      refreshToken: "refresh",
+      expiresAt: nowS() + REFRESH_MARGIN_S * 2,
+    });
+    const noFetchImplClient = new StravaClient({
+      apiBase: "https://api.example/api/v3",
+      oauth: OAUTH,
+      tokens: env.TOKENS,
+    });
+    const originalFetch = globalThis.fetch;
+    // workerd's native fetch throws "Illegal invocation" when invoked with a
+    // `this` other than undefined or globalThis. This stub mimics that check
+    // to catch a regression to the old `this.fetchImpl = fetch` assignment.
+    globalThis.fetch = async function (this: unknown) {
+      if (this !== undefined && this !== globalThis) {
+        throw new TypeError(
+          "Illegal invocation: function called with incorrect 'this' reference",
+        );
+      }
+      return Response.json({ id: 42 });
+    } as typeof fetch;
+
+    try {
+      const response = await noFetchImplClient.fetch("/athlete");
+      expect(response.status).toBe(200);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
