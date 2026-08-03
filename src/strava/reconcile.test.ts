@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { stubFetch, type FetchStub } from "../../test/fetch-stub";
+import { stubQueue, type QueueStub } from "../../test/queue-stub";
 import { SECRETS } from "../../test/secrets";
 import { RateLimitedError, type StravaIngestMessage } from "../ingest";
 import { StravaClient } from "./client";
@@ -11,31 +12,7 @@ import {
   reconcileStravaActivities,
 } from "./reconcile";
 
-interface QueueStub extends Queue<StravaIngestMessage> {
-  messages: StravaIngestMessage[];
-}
-
-function stubQueue(): QueueStub {
-  const messages: StravaIngestMessage[] = [];
-  return {
-    messages,
-    async send(message) {
-      messages.push(message);
-      return { metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } } };
-    },
-    async sendBatch(batch) {
-      for (const item of batch) {
-        messages.push(item.body);
-      }
-      return { metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } } };
-    },
-    async metrics() {
-      return { backlogCount: 0, backlogBytes: 0 };
-    },
-  };
-}
-
-function testEnv(queue: QueueStub): Env {
+function testEnv(queue: QueueStub<StravaIngestMessage>): Env {
   return {
     ...env,
     ...SECRETS,
@@ -91,7 +68,7 @@ beforeEach(async () => {
 describe("reconcileStravaActivities", () => {
   it("enqueues a create message for each listed activity on an empty registry", async () => {
     const stub = stubFetch(() => listResponse([101, 102]));
-    const queue = stubQueue();
+    const queue = stubQueue<StravaIngestMessage>();
 
     await reconcileStravaActivities(testEnv(queue), {
       client: apiClient(stub),
@@ -121,16 +98,54 @@ describe("reconcileStravaActivities", () => {
     expect(url.searchParams.get("after")).toBeNull();
   });
 
-  it("skips ids already present in activity_sources", async () => {
+  it("enqueues a refresh for ids already present in activity_sources", async () => {
     await insertStravaSource("101", "2026-07-01T14:00:00.000Z");
     const stub = stubFetch(() => listResponse([101, 102]));
-    const queue = stubQueue();
+    const queue = stubQueue<StravaIngestMessage>();
 
-    await reconcileStravaActivities(testEnv(queue), {
+    const report = await reconcileStravaActivities(testEnv(queue), {
       client: apiClient(stub),
     });
 
-    expect(queue.messages.map((message) => message.objectId)).toEqual([102]);
+    expect(queue.messages).toEqual([
+      { source: "strava", kind: "refresh", objectId: 101 },
+      {
+        source: "strava",
+        kind: "create",
+        objectType: "activity",
+        objectId: 102,
+        updates: {},
+      },
+    ]);
+    expect(report).toEqual({ enqueued: 1, refreshed: 1 });
+  });
+
+  it("refreshes only the known activities Strava lists inside the window", async () => {
+    // The lookback runs 30 days back from the newest ingested activity, so
+    // May 1 is outside a window that starts June 15.
+    await insertStravaSource("101", "2026-05-01T14:00:00.000Z");
+    await insertStravaSource("102", "2026-07-15T12:00:00.000Z");
+    const stub = stubFetch((request) => {
+      const after = Number(new URL(request.url).searchParams.get("after"));
+      return listResponse(
+        [
+          { id: 101, startedAt: "2026-05-01T14:00:00.000Z" },
+          { id: 102, startedAt: "2026-07-15T12:00:00.000Z" },
+        ]
+          .filter(({ startedAt }) => Date.parse(startedAt) / 1000 > after)
+          .map(({ id }) => id),
+      );
+    });
+    const queue = stubQueue<StravaIngestMessage>();
+
+    const report = await reconcileStravaActivities(testEnv(queue), {
+      client: apiClient(stub),
+    });
+
+    expect(queue.messages).toEqual([
+      { source: "strava", kind: "refresh", objectId: 102 },
+    ]);
+    expect(report).toEqual({ enqueued: 0, refreshed: 1 });
   });
 
   it("lists after the max started_at minus the overlap window", async () => {
@@ -139,7 +154,7 @@ describe("reconcileStravaActivities", () => {
     await insertStravaSource("102", startedAt);
     const stub = stubFetch(() => listResponse([]));
 
-    await reconcileStravaActivities(testEnv(stubQueue()), {
+    await reconcileStravaActivities(testEnv(stubQueue<StravaIngestMessage>()), {
       client: apiClient(stub),
     });
 
@@ -155,7 +170,7 @@ describe("reconcileStravaActivities", () => {
       const page = new URL(request.url).searchParams.get("page");
       return page === "1" ? listResponse(fullPage) : listResponse([999]);
     });
-    const queue = stubQueue();
+    const queue = stubQueue<StravaIngestMessage>();
 
     await reconcileStravaActivities(testEnv(queue), {
       client: apiClient(stub),
@@ -171,7 +186,7 @@ describe("reconcileStravaActivities", () => {
     const stub = stubFetch(() => new Response("slow down", { status: 429 }));
 
     await expect(
-      reconcileStravaActivities(testEnv(stubQueue()), {
+      reconcileStravaActivities(testEnv(stubQueue<StravaIngestMessage>()), {
         client: apiClient(stub),
       }),
     ).rejects.toThrow(RateLimitedError);
@@ -181,7 +196,7 @@ describe("reconcileStravaActivities", () => {
     const stub = stubFetch(() => new Response("boom", { status: 500 }));
 
     await expect(
-      reconcileStravaActivities(testEnv(stubQueue()), {
+      reconcileStravaActivities(testEnv(stubQueue<StravaIngestMessage>()), {
         client: apiClient(stub),
       }),
     ).rejects.toThrow("Strava activity list failed: 500");

@@ -2,6 +2,7 @@ import { RateLimitedError } from "./ingest";
 import {
   reconcileStravaActivities,
   type ReconcileOptions,
+  type ReconcileReport,
 } from "./strava/reconcile";
 import { backfillWahooWorkouts, type BackfillOptions } from "./wahoo/backfill";
 
@@ -21,9 +22,9 @@ export async function handleReconcile(
     return new Response("Forbidden", { status: 403 });
   }
 
-  let enqueued: number;
+  let report: ReconcileReport;
   try {
-    enqueued = await reconcileStravaActivities(env, options);
+    report = await reconcileStravaActivities(env, options);
   } catch (error) {
     if (error instanceof RateLimitedError) {
       return new Response("Strava rate limited, retry after the 15m window", {
@@ -33,7 +34,7 @@ export async function handleReconcile(
     throw error;
   }
 
-  return Response.json({ ok: true, enqueued });
+  return Response.json({ ok: true, ...report });
 }
 
 // Wahoo has no date-filtered listing, so history comes back one page at a

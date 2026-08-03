@@ -53,11 +53,12 @@ function parseTimezone(raw: string): string {
   return index === -1 ? raw : raw.slice(index + marker.length);
 }
 
-async function fetchDetail(
+// The body comes back as text so a refresh can compare it byte for byte
+// against what R2 already holds.
+async function fetchDetailText(
   client: StravaClient,
-  env: Env,
   activityId: number,
-): Promise<StravaActivityDetail | null> {
+): Promise<string | null> {
   const response = await fetchOrThrow(client, `/activities/${activityId}`);
   if (response.status === 404) {
     console.warn(`Strava activity ${activityId} not found, skipping`);
@@ -68,9 +69,7 @@ async function fetchDetail(
       `Strava activity ${activityId} fetch failed: ${response.status} ${await response.text()}`,
     );
   }
-  const text = await response.text();
-  await env.RAW.put(detailKey(activityId), text);
-  return JSON.parse(text) as StravaActivityDetail;
+  return response.text();
 }
 
 async function fetchStreams(
@@ -98,14 +97,66 @@ function largestPhotoUrl(photo: StravaPhoto): string | undefined {
   return photo.urls["5000"] ?? Object.values(photo.urls)[0];
 }
 
+interface PhotoSync {
+  stored: number;
+  added: number;
+}
+
+async function storedPhotoIds(
+  env: Env,
+  activityId: number,
+): Promise<Set<string>> {
+  const prefix = photosPrefix(activityId);
+  const listing = await env.RAW.list({ prefix });
+  return new Set(
+    listing.objects.map((object) =>
+      object.key.slice(prefix.length).replace(/\.jpg$/, ""),
+    ),
+  );
+}
+
+async function downloadPhoto(
+  env: Env,
+  activityId: number,
+  photo: StravaPhoto,
+  fetchImpl: typeof fetch,
+): Promise<boolean> {
+  const url = largestPhotoUrl(photo);
+  if (!url) {
+    return false;
+  }
+  try {
+    const download = await fetchImpl(url);
+    if (!download.ok) {
+      console.warn(
+        `Strava photo ${activityId}/${photo.unique_id} download failed: ${download.status}`,
+      );
+      return false;
+    }
+    await env.RAW.put(
+      `${photosPrefix(activityId)}${photo.unique_id}.jpg`,
+      await download.arrayBuffer(),
+    );
+    return true;
+  } catch (error) {
+    console.warn(
+      `Strava photo ${activityId}/${photo.unique_id} download errored: ${String(error)}`,
+    );
+    return false;
+  }
+}
+
 // Undocumented endpoint, so any failure (bad response, bad JSON, download
 // error) is failure-tolerant: warn and move on rather than fail the event.
-async function fetchPhotos(
+// Photo bytes are immutable under their unique id, so anything already in R2
+// is skipped and the listing is only a source of ids to add.
+async function syncPhotos(
   client: StravaClient,
   env: Env,
   activityId: number,
   fetchImpl: typeof fetch,
-): Promise<boolean> {
+): Promise<PhotoSync> {
+  const stored = await storedPhotoIds(env, activityId);
   const response = await fetchOrThrow(
     client,
     `/activities/${activityId}/photos?size=5000&photo_sources=true`,
@@ -114,7 +165,7 @@ async function fetchPhotos(
     console.warn(
       `Strava photos ${activityId} fetch failed: ${response.status}`,
     );
-    return false;
+    return { stored: stored.size, added: 0 };
   }
 
   let photos: StravaPhoto[];
@@ -122,39 +173,17 @@ async function fetchPhotos(
     photos = (await response.json()) as StravaPhoto[];
   } catch {
     console.warn(`Strava photos ${activityId} returned invalid JSON`);
-    return false;
+    return { stored: stored.size, added: 0 };
   }
 
   // CDN downloads don't count against the API read budget, so they can
   // overlap freely.
   const wrote = await Promise.all(
-    photos.map(async (photo) => {
-      const url = largestPhotoUrl(photo);
-      if (!url) {
-        return false;
-      }
-      try {
-        const download = await fetchImpl(url);
-        if (!download.ok) {
-          console.warn(
-            `Strava photo ${activityId}/${photo.unique_id} download failed: ${download.status}`,
-          );
-          return false;
-        }
-        await env.RAW.put(
-          `${photosPrefix(activityId)}${photo.unique_id}.jpg`,
-          await download.arrayBuffer(),
-        );
-        return true;
-      } catch (error) {
-        console.warn(
-          `Strava photo ${activityId}/${photo.unique_id} download errored: ${String(error)}`,
-        );
-        return false;
-      }
-    }),
+    photos
+      .filter((photo) => !stored.has(photo.unique_id))
+      .map((photo) => downloadPhoto(env, activityId, photo, fetchImpl)),
   );
-  return wrote.some(Boolean);
+  return { stored: stored.size, added: wrote.filter(Boolean).length };
 }
 
 async function upsertDetail(
@@ -176,11 +205,69 @@ async function upsertDetail(
   });
 }
 
+// Nothing about an activity is fetched twice unless it can have changed: the
+// detail body is compared against R2 before it is rewritten, streams are
+// immutable once recorded, and photos are diffed by id.
+async function refreshActivity(
+  activityId: number,
+  env: Env,
+  options: ConsumeOptions,
+): Promise<void> {
+  const client = options.client ?? stravaClient(env);
+  const text = await fetchDetailText(client, activityId);
+  if (text === null) {
+    return;
+  }
+
+  const stored = await env.RAW.get(detailKey(activityId));
+  const detailChanged = (await stored?.text()) !== text;
+  if (detailChanged) {
+    await env.RAW.put(detailKey(activityId), text);
+  }
+
+  const rawKeys: Record<string, string> = { detail: detailKey(activityId) };
+
+  const hadStreams = (await env.RAW.head(streamsKey(activityId))) !== null;
+  const streamsAdded =
+    !hadStreams && (await fetchStreams(client, env, activityId));
+  if (hadStreams || streamsAdded) {
+    rawKeys.streams = streamsKey(activityId);
+  }
+
+  const photos = await syncPhotos(
+    client,
+    env,
+    activityId,
+    options.fetchImpl ?? fetch,
+  );
+  if (photos.stored + photos.added > 0) {
+    rawKeys.photos = photosPrefix(activityId);
+  }
+
+  if (!detailChanged && !streamsAdded && photos.added === 0) {
+    return;
+  }
+
+  console.log(
+    `Strava activity ${activityId} refreshed: detail ${detailChanged ? "changed" : "unchanged"}, ${photos.added} new photos, streams ${streamsAdded ? "filled" : "unchanged"}`,
+  );
+  await upsertDetail(
+    env,
+    activityId,
+    JSON.parse(text) as StravaActivityDetail,
+    rawKeys,
+  );
+}
+
 export async function consumeStravaEvent(
   message: StravaIngestMessage,
   env: Env,
   options: ConsumeOptions = {},
 ): Promise<void> {
+  if (message.kind === "refresh") {
+    return refreshActivity(message.objectId, env, options);
+  }
+
   if (message.objectType === "athlete") {
     console.warn("ignoring Strava athlete event; handled manually");
     return;
@@ -194,10 +281,11 @@ export async function consumeStravaEvent(
     return;
   }
 
-  const detail = await fetchDetail(client, env, activityId);
-  if (!detail) {
+  const text = await fetchDetailText(client, activityId);
+  if (text === null) {
     return;
   }
+  await env.RAW.put(detailKey(activityId), text);
 
   const rawKeys: Record<string, string> = { detail: detailKey(activityId) };
 
@@ -205,11 +293,21 @@ export async function consumeStravaEvent(
     if (await fetchStreams(client, env, activityId)) {
       rawKeys.streams = streamsKey(activityId);
     }
-    const fetchImpl = options.fetchImpl ?? fetch;
-    if (await fetchPhotos(client, env, activityId, fetchImpl)) {
+    const photos = await syncPhotos(
+      client,
+      env,
+      activityId,
+      options.fetchImpl ?? fetch,
+    );
+    if (photos.stored + photos.added > 0) {
       rawKeys.photos = photosPrefix(activityId);
     }
   }
 
-  await upsertDetail(env, activityId, detail, rawKeys);
+  await upsertDetail(
+    env,
+    activityId,
+    JSON.parse(text) as StravaActivityDetail,
+    rawKeys,
+  );
 }

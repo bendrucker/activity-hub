@@ -78,7 +78,10 @@ export default {
 
   async scheduled(_controller, env): Promise<void> {
     try {
-      await reconcileStravaActivities(env);
+      const { enqueued, refreshed } = await reconcileStravaActivities(env);
+      console.log(
+        `Strava reconciliation enqueued ${enqueued} new and ${refreshed} refresh messages`,
+      );
     } catch (error) {
       if (error instanceof RateLimitedError) {
         // The next daily run resumes from the same high-water mark, so

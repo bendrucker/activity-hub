@@ -4,13 +4,26 @@ import type { WahooWorkoutSummary } from "./wahoo/summary";
 // backs off for a full budget window instead of the plain retry delay.
 export class RateLimitedError extends Error {}
 
-export interface StravaIngestMessage {
+// Strava webhook payloads carry ids only, plus the field names that changed
+// on an update, so the consumer fetches the activity itself.
+export interface StravaWebhookMessage {
   source: "strava";
   kind: "create" | "update" | "delete";
   objectType: "activity" | "athlete";
   objectId: number;
   updates: Record<string, string>;
 }
+
+// Titles and photos land after upload, and an edit that never produced a
+// webhook is otherwise never revisited. Reconciliation sweeps the activities
+// it already holds and the consumer writes only what actually differs.
+export interface StravaRefreshMessage {
+  source: "strava";
+  kind: "refresh";
+  objectId: number;
+}
+
+export type StravaIngestMessage = StravaWebhookMessage | StravaRefreshMessage;
 
 // Wahoo webhook events carry the full workout summary, FIT file URL
 // included, so the message carries it too and the consumer never calls the

@@ -2,7 +2,11 @@ import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { stubFetch, type FetchStub } from "../../test/fetch-stub";
 import { SECRETS } from "../../test/secrets";
-import { RateLimitedError, type StravaIngestMessage } from "../ingest";
+import {
+  RateLimitedError,
+  type StravaIngestMessage,
+  type StravaRefreshMessage,
+} from "../ingest";
 import { StravaClient } from "./client";
 import { consumeStravaEvent } from "./consume";
 import { writeTokens } from "./oauth";
@@ -34,6 +38,23 @@ const PHOTOS_JSON = JSON.stringify([
     },
   },
 ]);
+
+const TWO_PHOTOS_JSON = JSON.stringify([
+  {
+    unique_id: "photo-1",
+    urls: { "5000": "https://cdn.example/photo-1-5000.jpg" },
+  },
+  {
+    unique_id: "photo-2",
+    urls: { "5000": "https://cdn.example/photo-2-5000.jpg" },
+  },
+]);
+
+const REFRESH_MESSAGE: StravaRefreshMessage = {
+  source: "strava",
+  kind: "refresh",
+  objectId: ACTIVITY_ID,
+};
 
 function message(
   overrides: Partial<StravaIngestMessage> = {},
@@ -67,6 +88,10 @@ function detailKey(id: number): string {
 
 function streamsKey(id: number): string {
   return `raw/strava/activities/${id}/streams.json`;
+}
+
+function photosPrefix(id: number): string {
+  return `raw/strava/activities/${id}/photos/`;
 }
 
 async function sourceRow(
@@ -340,6 +365,178 @@ describe("consumeStravaEvent", () => {
     });
 
     expect(stub.requests).toHaveLength(0);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});
+
+const SEEDED_UPDATED_AT = "2000-01-01T00:00:00.000Z";
+
+// A put replaces custom metadata, so a surviving seal proves the object was
+// left alone. Comparing timestamps would not: two writes can land in the same
+// millisecond.
+async function sealDetail(text: string): Promise<void> {
+  await env.RAW.put(detailKey(ACTIVITY_ID), text, {
+    customMetadata: { seal: "intact" },
+  });
+}
+
+async function detailSeal(): Promise<string | undefined> {
+  const object = await env.RAW.head(detailKey(ACTIVITY_ID));
+  return object?.customMetadata?.seal;
+}
+
+// Leaves the activity as a create would: detail and streams in R2, a registry
+// row, no photos. The row's updated_at is backdated so any later upsert shows.
+async function seedActivity(): Promise<void> {
+  const stub = stubFetch(
+    respondByPath({
+      [`/api/v3/activities/${ACTIVITY_ID}`]: () => new Response(DETAIL_JSON),
+      [`/api/v3/activities/${ACTIVITY_ID}/streams`]: () =>
+        new Response(STREAMS_JSON),
+      [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () => new Response("[]"),
+    }),
+  );
+  await consumeStravaEvent(message(), testEnv, { client: apiClient(stub) });
+  await env.REGISTRY.prepare(
+    "UPDATE activity_sources SET updated_at = ?1 WHERE source = 'strava' AND source_id = ?2",
+  )
+    .bind(SEEDED_UPDATED_AT, String(ACTIVITY_ID))
+    .run();
+  await sealDetail(DETAIL_JSON);
+}
+
+describe("consumeStravaEvent on a refresh", () => {
+  it("writes nothing when the detail matches what R2 holds", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await seedActivity();
+    const stub = stubFetch(
+      respondByPath({
+        [`/api/v3/activities/${ACTIVITY_ID}`]: () => new Response(DETAIL_JSON),
+        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () => new Response("[]"),
+      }),
+    );
+
+    await consumeStravaEvent(REFRESH_MESSAGE, testEnv, {
+      client: apiClient(stub),
+    });
+
+    expect(await detailSeal()).toBe("intact");
+    const row = await sourceRow(String(ACTIVITY_ID));
+    expect(row!.updated_at).toBe(SEEDED_UPDATED_AT);
+    expect(log).not.toHaveBeenCalled();
+    log.mockRestore();
+  });
+
+  it("rewrites detail and upserts when the title changed", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await seedActivity();
+    const retitled = DETAIL_JSON.replace("Morning Gravel", "Evening Gravel");
+    const stub = stubFetch(
+      respondByPath({
+        [`/api/v3/activities/${ACTIVITY_ID}`]: () => new Response(retitled),
+        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () => new Response("[]"),
+      }),
+    );
+
+    await consumeStravaEvent(REFRESH_MESSAGE, testEnv, {
+      client: apiClient(stub),
+    });
+
+    const stored = await env.RAW.get(detailKey(ACTIVITY_ID));
+    expect(await stored?.text()).toBe(retitled);
+    expect(await detailSeal()).toBeUndefined();
+    const row = await sourceRow(String(ACTIVITY_ID));
+    expect(row!.updated_at).not.toBe(SEEDED_UPDATED_AT);
+    expect(JSON.parse(row!.raw_keys as string)).toEqual({
+      detail: detailKey(ACTIVITY_ID),
+      streams: streamsKey(ACTIVITY_ID),
+    });
+    expect(log).toHaveBeenCalledTimes(1);
+    log.mockRestore();
+  });
+
+  it("downloads a new photo and leaves the one already in R2 alone", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await seedActivity();
+    await env.RAW.put(
+      `${photosPrefix(ACTIVITY_ID)}photo-1.jpg`,
+      new Uint8Array([9]),
+    );
+    const stub = stubFetch(
+      respondByPath({
+        [`/api/v3/activities/${ACTIVITY_ID}`]: () => new Response(DETAIL_JSON),
+        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () =>
+          new Response(TWO_PHOTOS_JSON),
+      }),
+    );
+    const photoStub = stubFetch(() => new Response(new Uint8Array([1, 2, 3])));
+
+    await consumeStravaEvent(REFRESH_MESSAGE, testEnv, {
+      client: apiClient(stub),
+      fetchImpl: photoStub.fetchImpl,
+    });
+
+    expect(photoStub.requests.map((request) => request.url)).toEqual([
+      "https://cdn.example/photo-2-5000.jpg",
+    ]);
+    const kept = await env.RAW.get(`${photosPrefix(ACTIVITY_ID)}photo-1.jpg`);
+    expect(new Uint8Array(await kept!.arrayBuffer())).toEqual(
+      new Uint8Array([9]),
+    );
+    expect(
+      await env.RAW.head(`${photosPrefix(ACTIVITY_ID)}photo-2.jpg`),
+    ).not.toBeNull();
+
+    const row = await sourceRow(String(ACTIVITY_ID));
+    expect(row!.updated_at).not.toBe(SEEDED_UPDATED_AT);
+    expect(JSON.parse(row!.raw_keys as string)).toMatchObject({
+      photos: photosPrefix(ACTIVITY_ID),
+    });
+    expect(await detailSeal()).toBe("intact");
+    expect(log).toHaveBeenCalledTimes(1);
+    log.mockRestore();
+  });
+
+  it("fills in streams a create never stored", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await seedActivity();
+    await env.RAW.delete(streamsKey(ACTIVITY_ID));
+    const stub = stubFetch(
+      respondByPath({
+        [`/api/v3/activities/${ACTIVITY_ID}`]: () => new Response(DETAIL_JSON),
+        [`/api/v3/activities/${ACTIVITY_ID}/streams`]: () =>
+          new Response(STREAMS_JSON),
+        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () => new Response("[]"),
+      }),
+    );
+
+    await consumeStravaEvent(REFRESH_MESSAGE, testEnv, {
+      client: apiClient(stub),
+    });
+
+    const stored = await env.RAW.get(streamsKey(ACTIVITY_ID));
+    expect(await stored?.text()).toBe(STREAMS_JSON);
+    const row = await sourceRow(String(ACTIVITY_ID));
+    expect(JSON.parse(row!.raw_keys as string)).toMatchObject({
+      streams: streamsKey(ACTIVITY_ID),
+    });
+    log.mockRestore();
+  });
+
+  it("warns and writes nothing when the activity was deleted upstream", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await seedActivity();
+    const stub = stubFetch(() => new Response("not found", { status: 404 }));
+
+    await consumeStravaEvent(REFRESH_MESSAGE, testEnv, {
+      client: apiClient(stub),
+    });
+
+    expect(stub.requests).toHaveLength(1);
+    expect(await detailSeal()).toBe("intact");
+    const row = await sourceRow(String(ACTIVITY_ID));
+    expect(row!.updated_at).toBe(SEEDED_UPDATED_AT);
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });

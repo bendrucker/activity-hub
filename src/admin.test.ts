@@ -144,10 +144,39 @@ describe("handleReconcile", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true, enqueued: 2 });
+    expect(await response.json()).toEqual({
+      ok: true,
+      enqueued: 2,
+      refreshed: 0,
+    });
     expect(queue.messages.map((message) => message.objectId)).toEqual([
       101, 102,
     ]);
+  });
+
+  it("counts a known activity as refreshed rather than enqueued", async () => {
+    const now = new Date().toISOString();
+    await env.REGISTRY.batch([
+      env.REGISTRY.prepare(
+        "INSERT INTO activities (activity_id, started_at, timezone, sport, duration_s, created_at, updated_at) VALUES ('activity-101', '2026-07-01T14:00:00.000Z', 'America/Los_Angeles', 'ride', 3600, ?1, ?1)",
+      ).bind(now),
+      env.REGISTRY.prepare(
+        "INSERT INTO activity_sources (source, source_id, activity_id, raw_keys, created_at, updated_at) VALUES ('strava', '101', 'activity-101', '{}', ?1, ?1)",
+      ).bind(now),
+    ]);
+    const stub = stubFetch(() => listResponse([101, 102]));
+
+    const response = await handleReconcile(
+      reconcileRequest("Bearer admin-secret"),
+      testEnv(),
+      { client: apiClient(stub) },
+    );
+
+    expect(await response.json()).toEqual({
+      ok: true,
+      enqueued: 1,
+      refreshed: 1,
+    });
   });
 
   it("reports a Strava rate limit as a 429", async () => {
