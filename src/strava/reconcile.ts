@@ -1,4 +1,4 @@
-import { RateLimitedError, type IngestMessage } from "../ingest";
+import { RateLimitedError, sendBatched, type IngestMessage } from "../ingest";
 import { stravaClient, type StravaClient } from "./client";
 
 // Activities can be uploaded long after they were recorded, so listing from
@@ -37,8 +37,8 @@ export async function reconcileStravaActivities(
   for (let page = 1; ; page++) {
     const activities = await listPage(client, page, after);
     const known = await knownIds(env.REGISTRY, activities);
-    for (const { id } of activities) {
-      const message: IngestMessage = known.has(String(id))
+    const messages: IngestMessage[] = activities.map(({ id }) =>
+      known.has(String(id))
         ? { source: "strava", kind: "refresh", objectId: id }
         : {
             source: "strava",
@@ -46,8 +46,10 @@ export async function reconcileStravaActivities(
             objectType: "activity",
             objectId: id,
             updates: {},
-          };
-      await env.INGEST_QUEUE.send(message);
+          },
+    );
+    await sendBatched(env.INGEST_QUEUE, messages);
+    for (const message of messages) {
       if (message.kind === "refresh") {
         report.refreshed++;
       } else {

@@ -49,3 +49,17 @@ export interface WahooWorkoutMessage {
 export type WahooIngestMessage = WahooSummaryMessage | WahooWorkoutMessage;
 
 export type IngestMessage = StravaIngestMessage | WahooIngestMessage;
+
+// Queues caps a batch at 100 messages, so a page-sized sweep sends one
+// subrequest per chunk instead of one per message.
+const QUEUE_BATCH_LIMIT = 100;
+
+export async function sendBatched<T>(
+  queue: Queue<T>,
+  messages: T[],
+): Promise<void> {
+  for (let offset = 0; offset < messages.length; offset += QUEUE_BATCH_LIMIT) {
+    const chunk = messages.slice(offset, offset + QUEUE_BATCH_LIMIT);
+    await queue.sendBatch(chunk.map((body) => ({ body })));
+  }
+}
