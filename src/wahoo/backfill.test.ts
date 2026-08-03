@@ -4,12 +4,7 @@ import { stubFetch, type FetchStub } from "../../test/fetch-stub";
 import { stubQueue, type QueueStub } from "../../test/queue-stub";
 import { SECRETS } from "../../test/secrets";
 import { RateLimitedError, type WahooIngestMessage } from "../ingest";
-import {
-  backfillWahooWorkouts,
-  PAGES_PER_RUN,
-  PER_PAGE,
-  REQUEST_BUDGET,
-} from "./backfill";
+import { backfillWahooWorkouts, PER_PAGE } from "./backfill";
 import { WahooClient } from "./client";
 import { writeTokens } from "./oauth";
 
@@ -107,7 +102,7 @@ beforeEach(async () => {
 });
 
 describe("backfillWahooWorkouts", () => {
-  it("enqueues an ingest message per workout, rebuilt into the webhook shape", async () => {
+  it("enqueues the list entry per workout without fetching its summary", async () => {
     const stub = stubFetch(() => listResponse([workout(101)]));
     const queue = stubQueue<WahooIngestMessage>();
 
@@ -119,33 +114,44 @@ describe("backfillWahooWorkouts", () => {
       pagesFetched: 1,
       workoutsSeen: 1,
       enqueued: 1,
-      skipped: 0,
-      apiRequests: 1,
       oldestStartedAt: "2026-07-01T14:00:00.000Z",
       done: true,
     });
     expect(queue.messages).toEqual([
       {
         source: "wahoo",
-        kind: "workout_summary",
+        kind: "workout",
         workoutId: 101,
-        summary: {
-          ...summaryPayload(101),
-          workout: {
-            id: 101,
-            starts: "2026-07-01T14:00:00.000Z",
-            minutes: 60,
-            workout_type_id: 0,
-            name: "workout 101",
-          },
+        workout: {
+          id: 101,
+          starts: "2026-07-01T14:00:00.000Z",
+          minutes: 60,
+          workout_type_id: 0,
+          name: "workout 101",
         },
       },
     ]);
 
+    expect(stub.requests).toHaveLength(1);
     const url = new URL(stub.requests[0]!.url);
     expect(url.pathname).toBe("/v1/workouts");
     expect(url.searchParams.get("page")).toBe("1");
     expect(url.searchParams.get("per_page")).toBe(String(PER_PAGE));
+  });
+
+  it("enqueues a workout whose list entry carries no summary at all", async () => {
+    const stub = stubFetch(() =>
+      listResponse([workout(101, { summary: false })]),
+    );
+    const queue = stubQueue<WahooIngestMessage>();
+
+    const result = await backfillWahooWorkouts(testEnv(queue), {
+      client: apiClient(stub),
+    });
+
+    expect(result.enqueued).toBe(1);
+    expect(stub.requests).toHaveLength(1);
+    expect(queue.messages[0]?.workoutId).toBe(101);
   });
 
   it("skips workouts already present in activity_sources", async () => {
@@ -160,88 +166,6 @@ describe("backfillWahooWorkouts", () => {
     expect(result.workoutsSeen).toBe(2);
     expect(result.enqueued).toBe(1);
     expect(queue.messages.map((message) => message.workoutId)).toEqual([102]);
-  });
-
-  it("fetches the workout_summary endpoint when the list entry omits it", async () => {
-    const stub = stubFetch((request) => {
-      const { pathname } = new URL(request.url);
-      return pathname === "/v1/workouts"
-        ? listResponse([workout(101, { summary: false })])
-        : new Response(JSON.stringify(summaryPayload(101)));
-    });
-    const queue = stubQueue<WahooIngestMessage>();
-
-    const result = await backfillWahooWorkouts(testEnv(queue), {
-      client: apiClient(stub),
-    });
-
-    expect(result.enqueued).toBe(1);
-    expect(result.apiRequests).toBe(2);
-    expect(new URL(stub.requests[1]!.url).pathname).toBe(
-      "/v1/workouts/101/workout_summary",
-    );
-    expect(queue.messages[0]?.summary.file.url).toBe(
-      "https://cdn.example/101.fit",
-    );
-  });
-
-  it("skips a workout whose summary is missing entirely", async () => {
-    const stub = stubFetch((request) =>
-      new URL(request.url).pathname === "/v1/workouts"
-        ? listResponse([workout(101, { summary: false })])
-        : new Response("not found", { status: 404 }),
-    );
-    const queue = stubQueue<WahooIngestMessage>();
-
-    const result = await backfillWahooWorkouts(testEnv(queue), {
-      client: apiClient(stub),
-    });
-
-    expect(result.workoutsSeen).toBe(1);
-    expect(result.enqueued).toBe(0);
-    expect(result.skipped).toBe(1);
-    expect(queue.messages).toEqual([]);
-  });
-
-  it("skips a workout whose summary endpoint 401s, without failing the run", async () => {
-    // client.fetch retries a 401 once against a refreshed token before
-    // giving up, so the stub must serve a valid refresh and still 401 the
-    // summary endpoint to reproduce the workout-level (not token-level) 401.
-    const stub = stubFetch((request) => {
-      const { pathname } = new URL(request.url);
-      if (pathname === "/v1/workouts") {
-        return listResponse([
-          workout(101, { summary: false }),
-          workout(102, { summary: false }),
-        ]);
-      }
-      if (pathname === "/oauth/token") {
-        return new Response(
-          JSON.stringify({
-            access_token: "refreshed-at",
-            refresh_token: "refreshed-rt",
-            expires_in: 7200,
-          }),
-        );
-      }
-      return new Response(
-        JSON.stringify({
-          error: "You are not authorized to view this workout summary",
-        }),
-        { status: 401 },
-      );
-    });
-    const queue = stubQueue<WahooIngestMessage>();
-
-    const result = await backfillWahooWorkouts(testEnv(queue), {
-      client: apiClient(stub),
-    });
-
-    expect(result.workoutsSeen).toBe(2);
-    expect(result.enqueued).toBe(0);
-    expect(result.skipped).toBe(2);
-    expect(result.done).toBe(true);
-    expect(queue.messages).toEqual([]);
   });
 
   it("reports the next page when a full page ends the run's page budget", async () => {
@@ -292,6 +216,7 @@ describe("backfillWahooWorkouts", () => {
 
     const result = await backfillWahooWorkouts(testEnv(queue), {
       client: apiClient(stub),
+      pages: 2,
     });
 
     expect(result.done).toBe(true);
@@ -301,28 +226,20 @@ describe("backfillWahooWorkouts", () => {
     expect(queue.messages).toHaveLength(PER_PAGE + 2);
   });
 
-  it("stops on the request budget before the page budget when summaries cost a call each", async () => {
+  it("fetches one page per run so a full page stays inside the subrequest cap", async () => {
     const stub = stubFetch((request) =>
-      new URL(request.url).pathname === "/v1/workouts"
-        ? listResponse(
-            fullPage(requestedPage(request)).map((entry) => ({
-              ...(entry as Record<string, unknown>),
-              workout_summary: undefined,
-            })),
-          )
-        : new Response("not found", { status: 404 }),
+      listResponse(fullPage(requestedPage(request))),
     );
+    const queue = stubQueue<WahooIngestMessage>();
 
-    const result = await backfillWahooWorkouts(
-      testEnv(stubQueue<WahooIngestMessage>()),
-      {
-        client: apiClient(stub),
-      },
-    );
+    const result = await backfillWahooWorkouts(testEnv(queue), {
+      client: apiClient(stub),
+    });
 
-    expect(result.pagesFetched).toBeLessThan(PAGES_PER_RUN);
-    expect(result.apiRequests).toBeGreaterThanOrEqual(REQUEST_BUDGET);
-    expect(result.nextPage).toBe(result.pagesFetched + 1);
+    expect(stub.requests).toHaveLength(1);
+    expect(result.pagesFetched).toBe(1);
+    expect(result.enqueued).toBe(PER_PAGE);
+    expect(result.nextPage).toBe(2);
   });
 
   it("throws RateLimitedError on a 429", async () => {

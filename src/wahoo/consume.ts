@@ -1,8 +1,10 @@
-import type { WahooIngestMessage } from "../ingest";
+import { RateLimitedError, type WahooIngestMessage } from "../ingest";
 import { trackTimezone } from "../import/timezone";
 import { extractTrack } from "../import/track";
 import { upsertSourceRecord } from "../registry";
+import { wahooClient, type WahooClient } from "./client";
 import {
+  isWorkoutSummary,
   summarySourceRecord,
   type ResolvedTimezone,
   type WahooWorkoutSummary,
@@ -10,6 +12,7 @@ import {
 
 export interface ConsumeOptions {
   fetchImpl?: typeof fetch;
+  client?: WahooClient;
 }
 
 function summaryKey(workoutId: number): string {
@@ -69,13 +72,66 @@ async function resolveTimezone(
   };
 }
 
+// A backfill message names a workout the list endpoint reported, and the
+// summary lives behind its own endpoint. Running that fetch here rather than
+// in the backfill route gives every workout a fresh subrequest allowance.
+async function messageSummary(
+  message: WahooIngestMessage,
+  env: Env,
+  options: ConsumeOptions,
+): Promise<WahooWorkoutSummary | null> {
+  if (message.kind === "workout_summary") {
+    return message.summary;
+  }
+
+  const client = options.client ?? wahooClient(env);
+  const fetched = await fetchSummary(client, message.workoutId);
+  if (typeof fetched !== "object" || fetched === null) {
+    return null;
+  }
+  // The summary endpoint returns the summary alone, while ingest reads the
+  // webhook's shape, which nests the workout inside it.
+  const candidate = { ...fetched, workout: message.workout };
+  return isWorkoutSummary(candidate) ? candidate : null;
+}
+
+async function fetchSummary(
+  client: WahooClient,
+  workoutId: number,
+): Promise<unknown> {
+  const response = await client.fetch(
+    `/v1/workouts/${workoutId}/workout_summary`,
+  );
+  // A workout that was planned but never recorded has no summary. Wahoo
+  // answers for one with either a 404 or a 401, and the client has already
+  // retried a 401 on a refreshed token, so this one belongs to the workout.
+  if (response.status === 404 || response.status === 401) {
+    return null;
+  }
+  if (response.status === 429) {
+    throw new RateLimitedError("rate limited on /v1/workouts/:id/summary");
+  }
+  if (!response.ok) {
+    throw new Error(
+      `Wahoo workout summary failed for ${workoutId}: ${response.status} ${await response.text()}`,
+    );
+  }
+  return response.json();
+}
+
 export async function consumeWahooEvent(
   message: WahooIngestMessage,
   env: Env,
   options: ConsumeOptions = {},
 ): Promise<void> {
   const fetchImpl = options.fetchImpl ?? fetch;
-  const { summary, workoutId } = message;
+  const { workoutId } = message;
+
+  const summary = await messageSummary(message, env, options);
+  if (!summary) {
+    console.warn(`skipping Wahoo workout ${workoutId} with no summary file`);
+    return;
+  }
 
   // CDN downloads are exempt from rate limits, and re-downloading on Wahoo's
   // duplicate deliveries is what keeps file-update events correct: same key,

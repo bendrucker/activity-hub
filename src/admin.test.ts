@@ -209,8 +209,6 @@ describe("handleWahooBackfill", () => {
       pagesFetched: 1,
       workoutsSeen: 2,
       enqueued: 2,
-      skipped: 0,
-      apiRequests: 1,
       oldestStartedAt: "2026-07-01T00:00:00.000Z",
       done: true,
     });

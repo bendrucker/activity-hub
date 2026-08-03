@@ -44,10 +44,10 @@ Facts about the source APIs that shaped the design, current as of July 2026. Re-
 #### API Surface
 
 - `GET /v1/workouts` paginates (30/page default) with no date filters, sorted by start descending. Backfill means paging to the end.
-- Cloud history depth is undocumented, and workouts predating Wahoo Cloud sync may be absent. `POST /admin/wahoo-backfill?page=N` measures it: page until the response says `done`, then read `oldestStartedAt`. Depth against my account: pending the first full run.
+- Cloud history depth is undocumented, and workouts predating Wahoo Cloud sync may be absent. `POST /admin/wahoo-backfill?page=N` measures it: one page per call, looping until the response says `done`, then read `oldestStartedAt`. Depth against my account: pending the first full run.
 - `workout_summary` includes `file.url` pointing at the original FIT on `cdn.wahooligan.com`. This is the only API in the system that returns original device files.
-- A list entry nests `workout_summary` inside the workout, the inverse of the webhook payload, and the docs sample omits it entirely. Backfill falls back to `GET /v1/workouts/{id}/workout_summary` for any workout whose list entry carries no file URL, so a run's cost is bounded by request count rather than page count.
-- `GET /v1/workouts/{id}/workout_summary` can 401 for an individual workout even with a valid, fresh token (seen in production against workout 481533297). Backfill treats this as workout-level and skips it like a 404, rather than failing the run.
+- A list entry nests `workout_summary` inside the workout, the inverse of the webhook payload, and in practice it never carries `file.url`. Backfill enqueues the list entry alone and the queue consumer fetches `GET /v1/workouts/{id}/workout_summary`, because each queue message runs in its own Worker invocation with its own subrequest allowance.
+- A workout that was planned but never recorded has no summary, and that endpoint answers for one with either a 404 or a 401. The 401 has been seen for an individual workout even with a valid, fresh token (production, workout 481533297); the consumer treats it like a 404 rather than failing the run.
 
 #### Webhooks
 
