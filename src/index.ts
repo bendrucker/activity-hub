@@ -1,3 +1,4 @@
+import { handleReconcile } from "./admin";
 import { RateLimitedError, type IngestMessage } from "./ingest";
 import { consumeStravaEvent } from "./strava/consume";
 import { reconcileStravaActivities } from "./strava/reconcile";
@@ -27,6 +28,12 @@ export default {
       }
       if (request.method === "POST") {
         return handleWebhookEvent(request, env);
+      }
+      return new Response("Method Not Allowed", { status: 405 });
+    }
+    if (url.pathname === "/admin/reconcile") {
+      if (request.method === "POST") {
+        return handleReconcile(request, env);
       }
       return new Response("Method Not Allowed", { status: 405 });
     }
