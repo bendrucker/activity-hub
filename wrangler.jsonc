@@ -19,7 +19,7 @@
     "STRAVA_OAUTH_BASE": "https://www.strava.com/oauth",
     // Filled with the real subscription id after `scripts/strava-subscription.ts create`
     // runs. Empty rejects all events.
-    "STRAVA_SUBSCRIPTION_ID": "",
+    "STRAVA_SUBSCRIPTION_ID": "363707",
   },
   "kv_namespaces": [
     { "binding": "TOKENS", "id": "bc72d180846d490395293eb92370f99b" },
