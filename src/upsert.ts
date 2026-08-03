@@ -65,11 +65,12 @@ export function planMatchOrMint(
     const wahoo = record.source === "wahoo";
     const updateActivity: Statement = wahoo
       ? {
-          sql: "UPDATE activities SET started_at = ?1, duration_s = ?2, timezone = ?3, updated_at = ?4 WHERE activity_id = ?5",
+          sql: "UPDATE activities SET started_at = ?1, duration_s = ?2, timezone = ?3, timezone_inferred = ?4, updated_at = ?5 WHERE activity_id = ?6",
           params: [
             startedAt,
             record.durationS,
             record.timezone,
+            record.timezoneInferred ? 1 : 0,
             now,
             match.activityId,
           ],
@@ -98,11 +99,12 @@ export function planMatchOrMint(
     },
     statements: [
       {
-        sql: "INSERT INTO activities (activity_id, started_at, timezone, sport, duration_s, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+        sql: "INSERT INTO activities (activity_id, started_at, timezone, timezone_inferred, sport, duration_s, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
         params: [
           activityId,
           startedAt,
           record.timezone,
+          record.timezoneInferred ? 1 : 0,
           record.sport,
           record.durationS,
           now,

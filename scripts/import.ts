@@ -96,15 +96,10 @@ for (let activity of activities) {
       const points = await extractTrack(bytes, activity.filename);
       if (points.length > 0) {
         polylines.set(activity.sourceId, polylineDocument(points));
-        // Virtual rides carry in-game course GPS (Zwift's Watopia sits in
-        // the Solomon Islands), which says nothing about where the athlete
-        // was. Leave the zone unresolved so it is inferred from neighbors.
-        if (!activity.sportType.startsWith("Virtual")) {
-          const timezone = trackTimezone(points);
-          if (timezone !== null) {
-            resolvedTimezones.set(activity.sourceId, timezone);
-          }
-        }
+      }
+      const timezone = trackTimezone(points, activity.sportType);
+      if (timezone !== null) {
+        resolvedTimezones.set(activity.sourceId, timezone);
       }
     } catch (error) {
       failures.push({
@@ -132,6 +127,7 @@ const records: SourceRecord[] = activities.map((activity, index) =>
   toSourceRecord(
     activity,
     timezones[index] ?? FALLBACK_TIMEZONE,
+    !resolvedTimezones.has(activity.sourceId),
     placements.get(activity.sourceId)?.rawKeys ?? {},
   ),
 );

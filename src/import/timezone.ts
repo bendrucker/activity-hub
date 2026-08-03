@@ -1,7 +1,16 @@
 import tzlookup from "tz-lookup";
 import type { TrackPoint } from "./track";
 
-export function trackTimezone(points: TrackPoint[]): string | null {
+// Virtual rides carry in-game course GPS (Zwift's Watopia sits in the
+// Solomon Islands), which says nothing about where the athlete was, so
+// their zone stays unresolved and is inferred from neighbors.
+export function trackTimezone(
+  points: TrackPoint[],
+  sportType: string,
+): string | null {
+  if (sportType.startsWith("Virtual")) {
+    return null;
+  }
   const first = points[0];
   if (!first) {
     return null;

@@ -11,6 +11,7 @@ function strava(overrides: Partial<SourceRecord> = {}): SourceRecord {
     sourceId: "12345",
     startedAt: START,
     timezone: "America/Los_Angeles",
+    timezoneInferred: false,
     sport: "ride",
     durationS: 3600,
     rawKeys: { detail: "raw/strava/12345/detail.json" },
@@ -24,6 +25,7 @@ function wahoo(overrides: Partial<SourceRecord> = {}): SourceRecord {
     sourceId: "67890",
     startedAt: "2026-07-01T14:00:30.000Z",
     timezone: "America/Los_Angeles",
+    timezoneInferred: false,
     sport: "ride",
     durationS: 3650,
     rawKeys: { fit: "raw/wahoo/67890/workout.fit" },
@@ -60,9 +62,24 @@ describe("upsertSourceRecord", () => {
     expect(activity).toMatchObject({
       started_at: START,
       timezone: "America/Los_Angeles",
+      timezone_inferred: 0,
       sport: "ride",
       duration_s: 3600,
     });
+  });
+
+  it("records an inferred timezone on mint", async () => {
+    const result = await upsertSourceRecord(
+      env.REGISTRY,
+      strava({ timezoneInferred: true }),
+    );
+
+    const activity = await env.REGISTRY.prepare(
+      "SELECT timezone_inferred FROM activities WHERE activity_id = ?1",
+    )
+      .bind(result.activityId)
+      .first();
+    expect(activity).toMatchObject({ timezone_inferred: 1 });
   });
 
   it("is idempotent for the same (source, source_id)", async () => {
@@ -86,7 +103,10 @@ describe("upsertSourceRecord", () => {
   });
 
   it("attaches a Wahoo record to a matching Strava activity", async () => {
-    const first = await upsertSourceRecord(env.REGISTRY, strava());
+    const first = await upsertSourceRecord(
+      env.REGISTRY,
+      strava({ timezoneInferred: true }),
+    );
     const second = await upsertSourceRecord(env.REGISTRY, wahoo());
 
     expect(second.outcome).toBe("attached");
@@ -94,13 +114,14 @@ describe("upsertSourceRecord", () => {
     expect(await countActivities()).toBe(1);
 
     const activity = await env.REGISTRY.prepare(
-      "SELECT started_at, duration_s, timezone FROM activities WHERE activity_id = ?1",
+      "SELECT started_at, duration_s, timezone, timezone_inferred FROM activities WHERE activity_id = ?1",
     )
       .bind(first.activityId)
       .first();
     expect(activity).toMatchObject({
       started_at: "2026-07-01T14:00:30.000Z",
       duration_s: 3650,
+      timezone_inferred: 0,
     });
   });
 
