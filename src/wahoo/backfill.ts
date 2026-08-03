@@ -22,6 +22,7 @@ export interface BackfillResult {
   pagesFetched: number;
   workoutsSeen: number;
   enqueued: number;
+  skipped: number;
   apiRequests: number;
   oldestStartedAt: string | null;
   done: boolean;
@@ -64,11 +65,13 @@ export async function backfillWahooWorkouts(
   let pagesFetched = 0;
   let workoutsSeen = 0;
   let enqueued = 0;
+  let skipped = 0;
   let oldestStartedAt: string | null = null;
   const progress = () => ({
     pagesFetched,
     workoutsSeen,
     enqueued,
+    skipped,
     apiRequests: client.requests,
     oldestStartedAt,
   });
@@ -80,7 +83,9 @@ export async function backfillWahooWorkouts(
     for (const workout of workouts) {
       oldestStartedAt = older(oldestStartedAt, workout.starts);
     }
-    enqueued += await enqueueMissing(env, client, workouts);
+    const outcome = await enqueueMissing(env, client, workouts);
+    enqueued += outcome.enqueued;
+    skipped += outcome.skipped;
 
     if (workouts.length < perPage) {
       return { ...progress(), done: true };
@@ -126,15 +131,22 @@ async function listPage(
   return { workouts: body.workouts ?? [], perPage: body.per_page ?? PER_PAGE };
 }
 
+interface EnqueueOutcome {
+  enqueued: number;
+  skipped: number;
+}
+
 async function enqueueMissing(
   env: Env,
   client: MeteredClient,
   workouts: WahooListWorkout[],
-): Promise<number> {
+): Promise<EnqueueOutcome> {
   let enqueued = 0;
+  let skipped = 0;
   for (const workout of await missingWorkouts(env.REGISTRY, workouts)) {
     const summary = await ingestSummary(client, workout);
     if (!summary) {
+      skipped++;
       continue;
     }
     const message: IngestMessage = {
@@ -146,7 +158,7 @@ async function enqueueMissing(
     await env.INGEST_QUEUE.send(message);
     enqueued++;
   }
-  return enqueued;
+  return { enqueued, skipped };
 }
 
 async function missingWorkouts(
@@ -209,6 +221,13 @@ async function fetchSummary(
   );
   // A workout that was planned but never recorded has no summary and no file.
   if (response.status === 404) {
+    return null;
+  }
+  // Wahoo has returned 401 for individual workouts even against a fresh
+  // token, which client.fetch's own 401 retry doesn't fix since it's
+  // workout-level rather than a stale-token issue. Treated as skippable
+  // like 404, logged by the caller alongside every other missing summary.
+  if (response.status === 401) {
     return null;
   }
   if (response.status === 429) {
