@@ -119,6 +119,7 @@ describe("backfillWahooWorkouts", () => {
       pagesFetched: 1,
       workoutsSeen: 1,
       enqueued: 1,
+      skipped: 0,
       apiRequests: 1,
       oldestStartedAt: "2026-07-01T14:00:00.000Z",
       done: true,
@@ -198,6 +199,48 @@ describe("backfillWahooWorkouts", () => {
 
     expect(result.workoutsSeen).toBe(1);
     expect(result.enqueued).toBe(0);
+    expect(result.skipped).toBe(1);
+    expect(queue.messages).toEqual([]);
+  });
+
+  it("skips a workout whose summary endpoint 401s, without failing the run", async () => {
+    // client.fetch retries a 401 once against a refreshed token before
+    // giving up, so the stub must serve a valid refresh and still 401 the
+    // summary endpoint to reproduce the workout-level (not token-level) 401.
+    const stub = stubFetch((request) => {
+      const { pathname } = new URL(request.url);
+      if (pathname === "/v1/workouts") {
+        return listResponse([
+          workout(101, { summary: false }),
+          workout(102, { summary: false }),
+        ]);
+      }
+      if (pathname === "/oauth/token") {
+        return new Response(
+          JSON.stringify({
+            access_token: "refreshed-at",
+            refresh_token: "refreshed-rt",
+            expires_in: 7200,
+          }),
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          error: "You are not authorized to view this workout summary",
+        }),
+        { status: 401 },
+      );
+    });
+    const queue = stubQueue<WahooIngestMessage>();
+
+    const result = await backfillWahooWorkouts(testEnv(queue), {
+      client: apiClient(stub),
+    });
+
+    expect(result.workoutsSeen).toBe(2);
+    expect(result.enqueued).toBe(0);
+    expect(result.skipped).toBe(2);
+    expect(result.done).toBe(true);
     expect(queue.messages).toEqual([]);
   });
 
