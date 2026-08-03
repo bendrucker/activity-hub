@@ -1,17 +1,13 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { stubFetch, type FetchStub } from "../../test/fetch-stub";
-import { RateLimitedError, type IngestMessage } from "../ingest";
+import { SECRETS } from "../../test/secrets";
+import { RateLimitedError, type StravaIngestMessage } from "../ingest";
 import { StravaClient } from "./client";
 import { consumeStravaEvent } from "./consume";
 import { writeTokens } from "./oauth";
 
-const testEnv: Env = {
-  ...env,
-  ADMIN_TOKEN: "admin-secret",
-  STRAVA_CLIENT_SECRET: "shh",
-  STRAVA_VERIFY_TOKEN: "verify-me",
-};
+const testEnv: Env = { ...env, ...SECRETS };
 
 const ACTIVITY_ID = 42;
 
@@ -39,7 +35,9 @@ const PHOTOS_JSON = JSON.stringify([
   },
 ]);
 
-function message(overrides: Partial<IngestMessage> = {}): IngestMessage {
+function message(
+  overrides: Partial<StravaIngestMessage> = {},
+): StravaIngestMessage {
   return {
     source: "strava",
     kind: "create",

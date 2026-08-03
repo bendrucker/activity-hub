@@ -2,13 +2,31 @@ import { handleReconcile } from "./admin";
 import { RateLimitedError, type IngestMessage } from "./ingest";
 import { consumeStravaEvent } from "./strava/consume";
 import { reconcileStravaActivities } from "./strava/reconcile";
-import { handleAuthorize, handleCallback } from "./strava/routes";
-import { handleWebhookEvent, handleWebhookVerify } from "./strava/webhook";
+import {
+  handleAuthorize as stravaAuthorize,
+  handleCallback as stravaCallback,
+} from "./strava/routes";
+import {
+  handleWebhookEvent as stravaWebhookEvent,
+  handleWebhookVerify as stravaWebhookVerify,
+} from "./strava/webhook";
+import { consumeWahooEvent } from "./wahoo/consume";
+import {
+  handleAuthorize as wahooAuthorize,
+  handleCallback as wahooCallback,
+} from "./wahoo/routes";
+import { handleWebhookEvent as wahooWebhookEvent } from "./wahoo/webhook";
 
 // A 429 clears when the 15-minute budget window rolls over, so waiting out
 // one full window beats exponential guessing.
 const RATE_LIMIT_WINDOW_S = 15 * 60;
 const RETRY_DELAY_S = 60;
+
+function consumeEvent(message: IngestMessage, env: Env): Promise<void> {
+  return message.source === "wahoo"
+    ? consumeWahooEvent(message, env)
+    : consumeStravaEvent(message, env);
+}
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -17,17 +35,29 @@ export default {
       return Response.json({ ok: true });
     }
     if (url.pathname === "/auth/strava") {
-      return handleAuthorize(url, env);
+      return stravaAuthorize(url, env);
     }
     if (url.pathname === "/auth/strava/callback") {
-      return handleCallback(url, env);
+      return stravaCallback(url, env);
     }
     if (url.pathname === "/webhooks/strava") {
       if (request.method === "GET") {
-        return handleWebhookVerify(url, env);
+        return stravaWebhookVerify(url, env);
       }
       if (request.method === "POST") {
-        return handleWebhookEvent(request, env);
+        return stravaWebhookEvent(request, env);
+      }
+      return new Response("Method Not Allowed", { status: 405 });
+    }
+    if (url.pathname === "/auth/wahoo") {
+      return wahooAuthorize(url, env);
+    }
+    if (url.pathname === "/auth/wahoo/callback") {
+      return wahooCallback(url, env);
+    }
+    if (url.pathname === "/webhooks/wahoo") {
+      if (request.method === "POST") {
+        return wahooWebhookEvent(request, env);
       }
       return new Response("Method Not Allowed", { status: 405 });
     }
@@ -57,14 +87,16 @@ export default {
   async queue(batch, env): Promise<void> {
     for (const message of batch.messages) {
       try {
-        await consumeStravaEvent(message.body, env);
+        await consumeEvent(message.body, env);
         message.ack();
       } catch (error) {
         if (error instanceof RateLimitedError) {
           message.retry({ delaySeconds: RATE_LIMIT_WINDOW_S });
           continue;
         }
-        console.error(`failed to consume Strava event: ${String(error)}`);
+        console.error(
+          `failed to consume ${message.body.source} event: ${String(error)}`,
+        );
         message.retry({ delaySeconds: RETRY_DELAY_S });
       }
     }

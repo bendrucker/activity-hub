@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { stubFetch } from "../../test/fetch-stub";
+import { SECRETS } from "../../test/secrets";
 import {
   exchangeCode,
   oauthConfig,
@@ -34,12 +35,7 @@ beforeEach(async () => {
 
 describe("oauthConfig", () => {
   it("reads the OAuth settings from the environment", () => {
-    const config = oauthConfig({
-      ...env,
-      ADMIN_TOKEN: "admin-secret",
-      STRAVA_CLIENT_SECRET: "shh",
-      STRAVA_VERIFY_TOKEN: "verify-me",
-    });
+    const config = oauthConfig({ ...env, ...SECRETS });
     expect(config).toEqual({
       oauthBase: env.STRAVA_OAUTH_BASE,
       clientId: env.STRAVA_CLIENT_ID,
@@ -48,10 +44,8 @@ describe("oauthConfig", () => {
   });
 
   it("throws when the client secret is unset", () => {
-    const unset = { ...env, STRAVA_CLIENT_SECRET: undefined };
-    expect(() => oauthConfig(unset as unknown as Env)).toThrow(
-      /STRAVA_CLIENT_SECRET/,
-    );
+    const unset = { ...env, ...SECRETS, STRAVA_CLIENT_SECRET: "" };
+    expect(() => oauthConfig(unset)).toThrow(/STRAVA_CLIENT_SECRET/);
   });
 });
 

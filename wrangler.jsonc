@@ -20,6 +20,7 @@
     // Filled with the real subscription id after `scripts/strava-subscription.ts create`
     // runs. Empty rejects all events.
     "STRAVA_SUBSCRIPTION_ID": "363707",
+    "WAHOO_OAUTH_BASE": "https://api.wahooligan.com/oauth",
   },
   "triggers": {
     // Daily Strava reconciliation. Strava drops a webhook event after three
