@@ -1,7 +1,8 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { stubFetch, type FetchStub } from "../../test/fetch-stub";
-import { RateLimitedError, type IngestMessage } from "../ingest";
+import { SECRETS } from "../../test/secrets";
+import { RateLimitedError, type StravaIngestMessage } from "../ingest";
 import { StravaClient } from "./client";
 import { writeTokens } from "./oauth";
 import {
@@ -10,12 +11,12 @@ import {
   reconcileStravaActivities,
 } from "./reconcile";
 
-interface QueueStub extends Queue<IngestMessage> {
-  messages: IngestMessage[];
+interface QueueStub extends Queue<StravaIngestMessage> {
+  messages: StravaIngestMessage[];
 }
 
 function stubQueue(): QueueStub {
-  const messages: IngestMessage[] = [];
+  const messages: StravaIngestMessage[] = [];
   return {
     messages,
     async send(message) {
@@ -37,9 +38,7 @@ function stubQueue(): QueueStub {
 function testEnv(queue: QueueStub): Env {
   return {
     ...env,
-    ADMIN_TOKEN: "admin-secret",
-    STRAVA_CLIENT_SECRET: "shh",
-    STRAVA_VERIFY_TOKEN: "verify-me",
+    ...SECRETS,
     INGEST_QUEUE: queue,
   };
 }
@@ -94,11 +93,10 @@ describe("reconcileStravaActivities", () => {
     const stub = stubFetch(() => listResponse([101, 102]));
     const queue = stubQueue();
 
-    const enqueued = await reconcileStravaActivities(testEnv(queue), {
+    await reconcileStravaActivities(testEnv(queue), {
       client: apiClient(stub),
     });
 
-    expect(enqueued).toBe(2);
     expect(queue.messages).toEqual([
       {
         source: "strava",
@@ -128,11 +126,10 @@ describe("reconcileStravaActivities", () => {
     const stub = stubFetch(() => listResponse([101, 102]));
     const queue = stubQueue();
 
-    const enqueued = await reconcileStravaActivities(testEnv(queue), {
+    await reconcileStravaActivities(testEnv(queue), {
       client: apiClient(stub),
     });
 
-    expect(enqueued).toBe(1);
     expect(queue.messages.map((message) => message.objectId)).toEqual([102]);
   });
 

@@ -157,6 +157,7 @@ describe("consumeWahooEvent", () => {
     expect(activity).toMatchObject({
       sport: "ride",
       timezone: "America/Los_Angeles",
+      timezone_inferred: 0,
       started_at: "2026-07-01T14:00:00.000Z",
       duration_s: 275,
     });
@@ -185,6 +186,7 @@ describe("consumeWahooEvent", () => {
       sourceId: "42",
       startedAt: "2026-07-01T14:00:30.000Z",
       timezone: "America/Chicago",
+      timezoneInferred: false,
       sport: "ride",
       durationS: 280,
       rawKeys: {},
@@ -201,6 +203,7 @@ describe("consumeWahooEvent", () => {
       started_at: "2026-07-01T14:00:00.000Z",
       duration_s: 275,
       timezone: "America/Los_Angeles",
+      timezone_inferred: 0,
     });
   });
 
@@ -210,6 +213,7 @@ describe("consumeWahooEvent", () => {
       sourceId: "41",
       startedAt: "2026-06-25T13:00:00.000Z",
       timezone: "America/Denver",
+      timezoneInferred: false,
       sport: "run",
       durationS: 1800,
       rawKeys: {},
@@ -220,7 +224,10 @@ describe("consumeWahooEvent", () => {
 
     const row = await sourceRow(String(WORKOUT_ID));
     const activity = await activityRow(row!.activity_id as string);
-    expect(activity).toMatchObject({ timezone: "America/Denver" });
+    expect(activity).toMatchObject({
+      timezone: "America/Denver",
+      timezone_inferred: 1,
+    });
   });
 
   it("falls back to UTC when the FIT has no GPS and the registry is empty", async () => {
@@ -230,7 +237,7 @@ describe("consumeWahooEvent", () => {
 
     const row = await sourceRow(String(WORKOUT_ID));
     const activity = await activityRow(row!.activity_id as string);
-    expect(activity).toMatchObject({ timezone: "UTC" });
+    expect(activity).toMatchObject({ timezone: "UTC", timezone_inferred: 1 });
   });
 
   it("archives an undecodable FIT and warns instead of failing", async () => {

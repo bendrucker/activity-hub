@@ -31,14 +31,17 @@ describe("durationS", () => {
 
 describe("summarySourceRecord", () => {
   it("maps the summary onto a SourceRecord", () => {
-    const record = summarySourceRecord(SUMMARY, "America/Los_Angeles", {
-      summary: "raw/wahoo/workouts/56519/summary.json",
-    });
+    const record = summarySourceRecord(
+      SUMMARY,
+      { timezone: "America/Los_Angeles", inferred: false },
+      { summary: "raw/wahoo/workouts/56519/summary.json" },
+    );
     expect(record).toEqual({
       source: "wahoo",
       sourceId: "56519",
       startedAt: "2026-07-01T14:00:00.000Z",
       timezone: "America/Los_Angeles",
+      timezoneInferred: false,
       sport: "ride",
       durationS: 275,
       rawKeys: { summary: "raw/wahoo/workouts/56519/summary.json" },

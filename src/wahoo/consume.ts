@@ -2,7 +2,11 @@ import type { WahooIngestMessage } from "../ingest";
 import { trackTimezone } from "../import/timezone";
 import { extractTrack } from "../import/track";
 import { upsertSourceRecord } from "../registry";
-import { summarySourceRecord, type WahooWorkoutSummary } from "./summary";
+import {
+  summarySourceRecord,
+  type ResolvedTimezone,
+  type WahooWorkoutSummary,
+} from "./summary";
 
 export interface ConsumeOptions {
   fetchImpl?: typeof fetch;
@@ -16,11 +20,16 @@ function fitKey(workoutId: number): string {
   return `raw/wahoo/workouts/${workoutId}/original.fit`;
 }
 
+// BIKING_INDOOR_VIRTUAL and RUNNING_INDOOR_VIRTUAL carry in-game course
+// GPS, which says nothing about where the athlete was.
+const VIRTUAL_WORKOUT_TYPES = new Set([68, 71]);
+
 // A FIT that fails to decode still gets archived. It just cannot vote on
-// timezone.
+// timezone. The virtual-workout guard already ran, so the sport type
+// passed to trackTimezone is never virtual.
 async function fitTimezone(bytes: Uint8Array): Promise<string | null> {
   try {
-    return trackTimezone(await extractTrack(bytes, "original.fit"));
+    return trackTimezone(await extractTrack(bytes, "original.fit"), "");
   } catch (error) {
     console.warn(`Wahoo FIT track extraction failed: ${String(error)}`);
     return null;
@@ -48,11 +57,16 @@ async function resolveTimezone(
   env: Env,
   summary: WahooWorkoutSummary,
   fitBytes: Uint8Array,
-): Promise<string> {
-  return (
-    (await fitTimezone(fitBytes)) ??
-    nearestTimezone(env.REGISTRY, summary.workout.starts)
-  );
+): Promise<ResolvedTimezone> {
+  const virtual = VIRTUAL_WORKOUT_TYPES.has(summary.workout.workout_type_id);
+  const fromTrack = virtual ? null : await fitTimezone(fitBytes);
+  if (fromTrack) {
+    return { timezone: fromTrack, inferred: false };
+  }
+  return {
+    timezone: await nearestTimezone(env.REGISTRY, summary.workout.starts),
+    inferred: true,
+  };
 }
 
 export async function consumeWahooEvent(

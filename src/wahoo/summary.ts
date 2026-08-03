@@ -28,16 +28,23 @@ export function durationS(summary: WahooWorkoutSummary): number {
     : summary.workout.minutes * 60;
 }
 
+export interface ResolvedTimezone {
+  timezone: string;
+  // True when the zone came from a fallback rather than the FIT track.
+  inferred: boolean;
+}
+
 export function summarySourceRecord(
   summary: WahooWorkoutSummary,
-  timezone: string,
+  timezone: ResolvedTimezone,
   rawKeys: Record<string, string>,
 ): SourceRecord {
   return {
     source: "wahoo",
     sourceId: String(summary.workout.id),
     startedAt: summary.workout.starts,
-    timezone,
+    timezone: timezone.timezone,
+    timezoneInferred: timezone.inferred,
     sport: sportFromWahoo(summary.workout.workout_type_id),
     durationS: durationS(summary),
     rawKeys,
