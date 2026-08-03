@@ -1,4 +1,4 @@
-import { handleReconcile } from "./admin";
+import { handleReconcile, handleWahooBackfill } from "./admin";
 import { RateLimitedError, type IngestMessage } from "./ingest";
 import { consumeStravaEvent } from "./strava/consume";
 import { reconcileStravaActivities } from "./strava/reconcile";
@@ -64,6 +64,12 @@ export default {
     if (url.pathname === "/admin/reconcile") {
       if (request.method === "POST") {
         return handleReconcile(request, env);
+      }
+      return new Response("Method Not Allowed", { status: 405 });
+    }
+    if (url.pathname === "/admin/wahoo-backfill") {
+      if (request.method === "POST") {
+        return handleWahooBackfill(request, env);
       }
       return new Response("Method Not Allowed", { status: 405 });
     }

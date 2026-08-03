@@ -19,6 +19,28 @@ export interface WahooWorkoutSummary {
   workout: WahooWorkout;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+export function isWorkoutSummary(
+  value: unknown,
+): value is WahooWorkoutSummary & Record<string, unknown> {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const { file, workout } = value;
+  return (
+    isRecord(file) &&
+    typeof file.url === "string" &&
+    isRecord(workout) &&
+    Number.isInteger(workout.id) &&
+    typeof workout.starts === "string" &&
+    typeof workout.minutes === "number" &&
+    typeof workout.workout_type_id === "number"
+  );
+}
+
 // duration_total_accum is elapsed seconds as a decimal string. minutes is
 // rounded, so it is only the fallback.
 export function durationS(summary: WahooWorkoutSummary): number {

@@ -1,9 +1,9 @@
-export interface QueueStub extends Queue<unknown> {
-  messages: unknown[];
+export interface QueueStub<T = unknown> extends Queue<T> {
+  messages: T[];
 }
 
-export function stubQueue(): QueueStub {
-  const messages: unknown[] = [];
+export function stubQueue<T = unknown>(): QueueStub<T> {
+  const messages: T[] = [];
   return {
     messages,
     async send(message) {
