@@ -43,9 +43,10 @@ Facts about the source APIs that shaped the design, current as of July 2026. Re-
 
 #### API Surface
 
-- `GET /v1/workouts` paginates (30/page default) with no date filters. Backfill means paging to the end.
-- Cloud history depth is undocumented. Workouts predating Wahoo Cloud sync may be absent. Verify by paging to the end against my account.
+- `GET /v1/workouts` paginates (30/page default) with no date filters, sorted by start descending. Backfill means paging to the end.
+- Cloud history depth is undocumented, and workouts predating Wahoo Cloud sync may be absent. `POST /admin/wahoo-backfill?page=N` measures it: page until the response says `done`, then read `oldestStartedAt`. Depth against my account: pending the first full run.
 - `workout_summary` includes `file.url` pointing at the original FIT on `cdn.wahooligan.com`. This is the only API in the system that returns original device files.
+- A list entry nests `workout_summary` inside the workout, the inverse of the webhook payload, and the docs sample omits it entirely. Backfill falls back to `GET /v1/workouts/{id}/workout_summary` for any workout whose list entry carries no file URL, so a run's cost is bounded by request count rather than page count.
 
 #### Webhooks
 

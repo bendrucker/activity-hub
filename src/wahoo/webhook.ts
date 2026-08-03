@@ -1,25 +1,5 @@
 import type { IngestMessage } from "../ingest";
-import type { WahooWorkoutSummary } from "./summary";
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function isWorkoutSummary(value: unknown): value is WahooWorkoutSummary {
-  if (!isRecord(value)) {
-    return false;
-  }
-  const { file, workout } = value;
-  return (
-    isRecord(file) &&
-    typeof file.url === "string" &&
-    isRecord(workout) &&
-    Number.isInteger(workout.id) &&
-    typeof workout.starts === "string" &&
-    typeof workout.minutes === "number" &&
-    typeof workout.workout_type_id === "number"
-  );
-}
+import { isWorkoutSummary } from "./summary";
 
 export async function handleWebhookEvent(
   request: Request,

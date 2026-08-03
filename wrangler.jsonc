@@ -21,6 +21,7 @@
     // runs. Empty rejects all events.
     "STRAVA_SUBSCRIPTION_ID": "363707",
     "WAHOO_OAUTH_BASE": "https://api.wahooligan.com/oauth",
+    "WAHOO_API_BASE": "https://api.wahooligan.com",
   },
   "triggers": {
     // Daily Strava reconciliation. Strava drops a webhook event after three
