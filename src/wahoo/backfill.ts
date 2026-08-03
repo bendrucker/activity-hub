@@ -1,4 +1,4 @@
-import { RateLimitedError, type IngestMessage } from "../ingest";
+import { RateLimitedError, sendBatched, type IngestMessage } from "../ingest";
 import { wahooClient, type WahooClient } from "./client";
 
 // /v1/workouts takes no date filters and sorts by start descending, so the
@@ -112,18 +112,18 @@ async function enqueueMissing(
   workouts: WahooListWorkout[],
 ): Promise<number> {
   const missing = await missingWorkouts(env.REGISTRY, workouts);
-  for (const entry of missing) {
+  const messages: IngestMessage[] = missing.map((entry) => {
     // The list nests a summary that never carries a file URL in practice.
     // Dropping it keeps the message small and the consumer's fetch honest.
     const { workout_summary: _listed, ...workout } = entry;
-    const message: IngestMessage = {
+    return {
       source: "wahoo",
       kind: "workout",
       workoutId: entry.id,
       workout,
     };
-    await env.INGEST_QUEUE.send(message);
-  }
+  });
+  await sendBatched(env.INGEST_QUEUE, messages);
   return missing.length;
 }
 
