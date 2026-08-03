@@ -204,9 +204,31 @@ describe("buildDelta", () => {
     });
   });
 
-  it("rejects non-Strava records", () => {
-    expect(() =>
-      buildDelta(empty(), [record({ source: "wahoo" })], NOW),
-    ).toThrow("unsupported import source");
+  it("overwrites telemetry when a Wahoo record attaches", async () => {
+    const first = buildDelta(empty(), [record()], NOW);
+    await apply(first.statements);
+
+    const second = buildDelta(
+      await loadState(),
+      [
+        record({
+          source: "wahoo",
+          sourceId: "67890",
+          startedAt: "2026-07-01T14:00:30.000Z",
+          durationS: 3650,
+          rawKeys: { fit: "raw/wahoo/67890/workout.fit" },
+        }),
+      ],
+      NOW,
+    );
+    expect(second.results[0]?.outcome).toBe("attached");
+    await apply(second.statements);
+
+    const state = await loadState();
+    expect(state.activities).toHaveLength(1);
+    expect(state.activities[0]).toMatchObject({
+      startedAt: "2026-07-01T14:00:30.000Z",
+      durationS: 3650,
+    });
   });
 });

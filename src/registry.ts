@@ -1,7 +1,12 @@
-import { ulid } from "ulid";
-import { MAX_START_DELTA_S, matchActivity } from "./match";
+import { MAX_START_DELTA_S } from "./match";
 import type { Source, SourceRecord } from "./record";
 import type { Sport } from "./sport";
+import {
+  parseStartedAt,
+  planMatchOrMint,
+  planSourceUpdate,
+  type Statement,
+} from "./upsert";
 
 export type { Source, SourceRecord };
 
@@ -24,28 +29,18 @@ export async function upsertSourceRecord(
   const now = new Date().toISOString();
 
   if (existing) {
-    const rawKeys: Record<string, string> = {
-      ...JSON.parse(existing.raw_keys),
-      ...record.rawKeys,
-    };
-    // A fresh upsert means the source is live upstream again, so it also
-    // reverses any earlier soft delete.
-    await db
-      .prepare(
-        "UPDATE activity_sources SET raw_keys = ?1, updated_at = ?2, deleted_at = NULL WHERE source = ?3 AND source_id = ?4",
-      )
-      .bind(JSON.stringify(rawKeys), now, record.source, record.sourceId)
-      .run();
+    // The update runs even when it carries no new raw keys: a fresh upsert
+    // is a liveness signal, and the statement reverses any soft delete.
+    const update = planSourceUpdate(
+      record,
+      JSON.parse(existing.raw_keys) as Record<string, string>,
+      now,
+    );
+    await prepare(db, update.statement).run();
     return { activityId: existing.activity_id, outcome: "existing" };
   }
 
-  const startedAtMs = Date.parse(record.startedAt);
-  if (Number.isNaN(startedAtMs)) {
-    throw new Error(
-      `unparseable startedAt ${JSON.stringify(record.startedAt)} for ${record.source}:${record.sourceId}`,
-    );
-  }
-  const startedAt = new Date(startedAtMs).toISOString();
+  const startedAtMs = parseStartedAt(record);
   const windowStart = new Date(
     startedAtMs - MAX_START_DELTA_S * 1000,
   ).toISOString();
@@ -74,61 +69,18 @@ export async function upsertSourceRecord(
       duration_s: number;
     }>();
 
-  const match = matchActivity(
-    { startedAt, sport: record.sport, durationS: record.durationS },
+  const plan = planMatchOrMint(
+    record,
     results.map((row) => ({
       activityId: row.activity_id,
       startedAt: row.started_at,
       sport: row.sport,
       durationS: row.duration_s,
     })),
+    now,
   );
-
-  if (match) {
-    // Wahoo carries the device telemetry, so its start, duration, and
-    // timezone overwrite whatever the earlier source recorded.
-    let updateActivity: D1PreparedStatement;
-    if (record.source === "wahoo") {
-      updateActivity = db
-        .prepare(
-          "UPDATE activities SET started_at = ?1, duration_s = ?2, timezone = ?3, updated_at = ?4 WHERE activity_id = ?5",
-        )
-        .bind(
-          startedAt,
-          record.durationS,
-          record.timezone,
-          now,
-          match.activityId,
-        );
-    } else {
-      updateActivity = db
-        .prepare("UPDATE activities SET updated_at = ?1 WHERE activity_id = ?2")
-        .bind(now, match.activityId);
-    }
-    await db.batch([
-      insertSource(db, record, match.activityId, now),
-      updateActivity,
-    ]);
-    return { activityId: match.activityId, outcome: "attached" };
-  }
-
-  const activityId = ulid(startedAtMs);
-  await db.batch([
-    db
-      .prepare(
-        "INSERT INTO activities (activity_id, started_at, timezone, sport, duration_s, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
-      )
-      .bind(
-        activityId,
-        startedAt,
-        record.timezone,
-        record.sport,
-        record.durationS,
-        now,
-      ),
-    insertSource(db, record, activityId, now),
-  ]);
-  return { activityId, outcome: "minted" };
+  await db.batch(plan.statements.map((statement) => prepare(db, statement)));
+  return { activityId: plan.activity.activityId, outcome: plan.outcome };
 }
 
 export async function markSourceDeleted(
@@ -145,21 +97,6 @@ export async function markSourceDeleted(
     .run();
 }
 
-function insertSource(
-  db: D1Database,
-  record: SourceRecord,
-  activityId: string,
-  now: string,
-): D1PreparedStatement {
-  return db
-    .prepare(
-      "INSERT INTO activity_sources (source, source_id, activity_id, raw_keys, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
-    )
-    .bind(
-      record.source,
-      record.sourceId,
-      activityId,
-      JSON.stringify(record.rawKeys),
-      now,
-    );
+function prepare(db: D1Database, statement: Statement): D1PreparedStatement {
+  return db.prepare(statement.sql).bind(...statement.params);
 }
