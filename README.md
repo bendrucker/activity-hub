@@ -29,7 +29,7 @@ Inventory of every credential the system needs and where it lives.
 | Secret                                    | Location                               | Consumer                                                                                    |
 | ----------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------- |
 | `CLOUDFLARE_API_TOKEN`                    | GitHub Actions repo secret             | `deploy.yml` (migrations + `wrangler deploy`)                                               |
-| `STRAVA_CLIENT_SECRET`                    | Worker secret (`wrangler secret put`)  | Strava OAuth + webhooks ([#7](https://github.com/bendrucker/activity-hub/issues/7))         |
+| `STRAVA_CLIENT_SECRET`                    | Worker secret (`wrangler secret put`)  | Strava OAuth token refresh and webhook subscription management                              |
 | `STRAVA_VERIFY_TOKEN`                     | Worker secret (`wrangler secret put`)  | Webhook subscription validation ([#8](https://github.com/bendrucker/activity-hub/issues/8)) |
 | `WAHOO_CLIENT_ID` / `WAHOO_CLIENT_SECRET` | Worker secrets (`wrangler secret put`) | Wahoo OAuth + webhooks ([#11](https://github.com/bendrucker/activity-hub/issues/11))        |
 | `WAHOO_WEBHOOK_TOKEN`                     | Worker secret (`wrangler secret put`)  | Wahoo webhook receiver ([#11](https://github.com/bendrucker/activity-hub/issues/11))        |
@@ -48,4 +48,6 @@ Cloudflare dashboard when the batch job lands.
 
 ## Status
 
-Design phase. Supersedes the Strava pipeline previously planned inside bendrucker.me ([#100](https://github.com/bendrucker/bendrucker.me/issues/100)).
+The Strava pipeline is live. The historical export is imported, OAuth and webhooks run, and a daily reconciliation cron catches anything webhooks miss. Wahoo is in progress ([#11](https://github.com/bendrucker/activity-hub/issues/11)). The lake and DuckDB transform job haven't started ([#13](https://github.com/bendrucker/activity-hub/issues/13), [#14](https://github.com/bendrucker/activity-hub/issues/14)).
+
+Supersedes the Strava pipeline previously planned inside bendrucker.me ([#100](https://github.com/bendrucker/bendrucker.me/issues/100)).
