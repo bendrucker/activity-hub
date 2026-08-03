@@ -19,10 +19,11 @@ interface StravaActivitySummary {
 export async function reconcileStravaActivities(
   env: Env,
   options: ReconcileOptions = {},
-): Promise<void> {
+): Promise<number> {
   const client = options.client ?? stravaClient(env);
   const after = await lookbackStart(env.REGISTRY);
 
+  let enqueued = 0;
   for (let page = 1; ; page++) {
     const activities = await listPage(client, page, after);
     for (const id of await missingIds(env.REGISTRY, activities)) {
@@ -34,9 +35,10 @@ export async function reconcileStravaActivities(
         updates: {},
       };
       await env.INGEST_QUEUE.send(message);
+      enqueued++;
     }
     if (activities.length < PER_PAGE) {
-      return;
+      return enqueued;
     }
   }
 }

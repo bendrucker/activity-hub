@@ -36,6 +36,7 @@ describe("oauthConfig", () => {
   it("reads the OAuth settings from the environment", () => {
     const config = oauthConfig({
       ...env,
+      ADMIN_TOKEN: "admin-secret",
       STRAVA_CLIENT_SECRET: "shh",
       STRAVA_VERIFY_TOKEN: "verify-me",
     });

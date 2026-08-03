@@ -37,6 +37,7 @@ function stubQueue(): QueueStub {
 function testEnv(queue: QueueStub): Env {
   return {
     ...env,
+    ADMIN_TOKEN: "admin-secret",
     STRAVA_CLIENT_SECRET: "shh",
     STRAVA_VERIFY_TOKEN: "verify-me",
     INGEST_QUEUE: queue,
@@ -93,10 +94,11 @@ describe("reconcileStravaActivities", () => {
     const stub = stubFetch(() => listResponse([101, 102]));
     const queue = stubQueue();
 
-    await reconcileStravaActivities(testEnv(queue), {
+    const enqueued = await reconcileStravaActivities(testEnv(queue), {
       client: apiClient(stub),
     });
 
+    expect(enqueued).toBe(2);
     expect(queue.messages).toEqual([
       {
         source: "strava",
@@ -126,10 +128,11 @@ describe("reconcileStravaActivities", () => {
     const stub = stubFetch(() => listResponse([101, 102]));
     const queue = stubQueue();
 
-    await reconcileStravaActivities(testEnv(queue), {
+    const enqueued = await reconcileStravaActivities(testEnv(queue), {
       client: apiClient(stub),
     });
 
+    expect(enqueued).toBe(1);
     expect(queue.messages.map((message) => message.objectId)).toEqual([102]);
   });
 

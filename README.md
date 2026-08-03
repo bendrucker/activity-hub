@@ -28,6 +28,7 @@ Inventory of every credential the system needs and where it lives.
 
 | Secret                                    | Location                               | Consumer                                                                                    |
 | ----------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `ADMIN_TOKEN`                             | Worker secret (`wrangler secret put`)  | Manual reconcile trigger (`POST /admin/reconcile`)                                          |
 | `CLOUDFLARE_API_TOKEN`                    | GitHub Actions repo secret             | `deploy.yml` (migrations + `wrangler deploy`)                                               |
 | `STRAVA_CLIENT_SECRET`                    | Worker secret (`wrangler secret put`)  | Strava OAuth token refresh and webhook subscription management                              |
 | `STRAVA_VERIFY_TOKEN`                     | Worker secret (`wrangler secret put`)  | Webhook subscription validation ([#8](https://github.com/bendrucker/activity-hub/issues/8)) |

@@ -38,6 +38,7 @@ interface TestEnvOverrides {
 function testEnv(overrides: TestEnvOverrides = {}): Env {
   return {
     ...env,
+    ADMIN_TOKEN: "admin-secret",
     STRAVA_CLIENT_SECRET: "shh",
     STRAVA_VERIFY_TOKEN: "verify-me",
     STRAVA_SUBSCRIPTION_ID: "999",
