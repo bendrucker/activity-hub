@@ -1,17 +1,18 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { stubFetch, type FetchStub } from "../test/fetch-stub";
+import { SECRETS } from "../test/secrets";
 import { handleReconcile } from "./admin";
-import type { IngestMessage } from "./ingest";
+import type { StravaIngestMessage } from "./ingest";
 import { StravaClient } from "./strava/client";
 import { writeTokens } from "./strava/oauth";
 
-interface QueueStub extends Queue<IngestMessage> {
-  messages: IngestMessage[];
+interface QueueStub extends Queue<StravaIngestMessage> {
+  messages: StravaIngestMessage[];
 }
 
 function stubQueue(): QueueStub {
-  const messages: IngestMessage[] = [];
+  const messages: StravaIngestMessage[] = [];
   return {
     messages,
     async send(message) {
@@ -38,9 +39,7 @@ interface TestEnvOverrides {
 function testEnv(overrides: TestEnvOverrides = {}): Env {
   return {
     ...env,
-    ADMIN_TOKEN: "admin-secret",
-    STRAVA_CLIENT_SECRET: "shh",
-    STRAVA_VERIFY_TOKEN: "verify-me",
+    ...SECRETS,
     INGEST_QUEUE: stubQueue(),
     ...overrides,
   };

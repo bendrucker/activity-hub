@@ -2,26 +2,27 @@ import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { SECRETS } from "../../test/secrets";
 import { readTokens, TOKENS_KEY } from "./oauth";
-import { handleAuthorize, handleCallback } from "./routes";
+import { handleAuthorize, handleCallback, SCOPES } from "./routes";
 
 const testEnv: Env = { ...env, ...SECRETS };
 
 const EXCHANGE = {
   access_token: "access",
   refresh_token: "refresh",
-  expires_at: 1_800_000_000,
+  expires_in: 7200,
+  created_at: 1_800_000_000,
 };
 
 function callbackUrl(params: Record<string, string>): URL {
-  const url = new URL("https://hub.example/auth/strava/callback");
+  const url = new URL("https://hub.example/auth/wahoo/callback");
   for (const [key, value] of Object.entries(params)) {
     url.searchParams.set(key, value);
   }
   return url;
 }
 
-function stubExchange(athleteId: number): typeof fetch {
-  return async () => Response.json({ ...EXCHANGE, athlete: { id: athleteId } });
+function stubExchange(): typeof fetch {
+  return async () => Response.json(EXCHANGE);
 }
 
 function stubFailedExchange(): typeof fetch {
@@ -33,24 +34,33 @@ beforeEach(async () => {
 });
 
 describe("handleAuthorize", () => {
-  it("redirects to Strava with the callback and scope", () => {
+  it("redirects to Wahoo with the callback and scopes", () => {
     const response = handleAuthorize(
-      new URL("https://hub.example/auth/strava"),
+      new URL("https://hub.example/auth/wahoo"),
       testEnv,
     );
 
     expect(response.status).toBe(302);
     const location = new URL(response.headers.get("Location") ?? "");
     expect(location.origin + location.pathname).toBe(
-      `${testEnv.STRAVA_OAUTH_BASE}/authorize`,
+      `${testEnv.WAHOO_OAUTH_BASE}/authorize`,
     );
-    expect(location.searchParams.get("client_id")).toBe(
-      testEnv.STRAVA_CLIENT_ID,
-    );
+    expect(location.searchParams.get("client_id")).toBe("2348");
+    expect(location.searchParams.get("response_type")).toBe("code");
     expect(location.searchParams.get("redirect_uri")).toBe(
-      "https://hub.example/auth/strava/callback",
+      "https://hub.example/auth/wahoo/callback",
     );
-    expect(location.searchParams.get("scope")).toBe("activity:read_all");
+    expect(location.searchParams.get("scope")).toBe(SCOPES);
+  });
+
+  it("throws when the client credentials are unset", () => {
+    expect(() =>
+      handleAuthorize(new URL("https://hub.example/auth/wahoo"), {
+        ...env,
+        ...SECRETS,
+        WAHOO_CLIENT_ID: "",
+      }),
+    ).toThrow(/WAHOO_CLIENT_ID/);
   });
 });
 
@@ -69,50 +79,30 @@ describe("handleCallback", () => {
     expect(response.status).toBe(400);
   });
 
-  it("rejects a grant without activity:read_all", async () => {
-    const response = await handleCallback(
-      callbackUrl({ code: "abc", scope: "read" }),
-      testEnv,
-    );
-    expect(response.status).toBe(400);
-    expect(await response.text()).toContain("activity:read_all");
-  });
-
   it("reports a failed code exchange as a client error", async () => {
     const response = await handleCallback(
-      callbackUrl({ code: "expired", scope: "read,activity:read_all" }),
+      callbackUrl({ code: "expired" }),
       testEnv,
       stubFailedExchange(),
     );
 
     expect(response.status).toBe(400);
-    expect(await response.text()).toContain("/auth/strava");
+    expect(await response.text()).toContain("/auth/wahoo");
     expect(await readTokens(env.TOKENS)).toBeNull();
   });
 
-  it("rejects another athlete without storing tokens", async () => {
+  it("stores tokens on a successful exchange", async () => {
     const response = await handleCallback(
-      callbackUrl({ code: "abc", scope: "read,activity:read_all" }),
+      callbackUrl({ code: "abc" }),
       testEnv,
-      stubExchange(999),
-    );
-
-    expect(response.status).toBe(403);
-    expect(await readTokens(env.TOKENS)).toBeNull();
-  });
-
-  it("stores tokens for the configured athlete", async () => {
-    const response = await handleCallback(
-      callbackUrl({ code: "abc", scope: "read,activity:read_all" }),
-      testEnv,
-      stubExchange(Number(testEnv.STRAVA_ATHLETE_ID)),
+      stubExchange(),
     );
 
     expect(response.status).toBe(200);
     expect(await readTokens(env.TOKENS)).toEqual({
       accessToken: "access",
       refreshToken: "refresh",
-      expiresAt: 1_800_000_000,
+      expiresAt: 1_800_007_200,
     });
   });
 });

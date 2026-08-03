@@ -1,4 +1,4 @@
-import { RateLimitedError, type IngestMessage } from "../ingest";
+import { RateLimitedError, type StravaIngestMessage } from "../ingest";
 import { markSourceDeleted, upsertSourceRecord } from "../registry";
 import { sportFromStrava } from "../sport";
 import { stravaClient, type StravaClient } from "./client";
@@ -177,7 +177,7 @@ async function upsertDetail(
 }
 
 export async function consumeStravaEvent(
-  message: IngestMessage,
+  message: StravaIngestMessage,
   env: Env,
   options: ConsumeOptions = {},
 ): Promise<void> {

@@ -1,31 +1,9 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
+import { stubQueue } from "../../test/queue-stub";
+import { SECRETS } from "../../test/secrets";
 import type { IngestMessage } from "../ingest";
 import { handleWebhookEvent, handleWebhookVerify } from "./webhook";
-
-interface QueueStub extends Queue<unknown> {
-  messages: unknown[];
-}
-
-function stubQueue(): QueueStub {
-  const messages: unknown[] = [];
-  return {
-    messages,
-    async send(message) {
-      messages.push(message);
-      return { metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } } };
-    },
-    async sendBatch(batch) {
-      for (const item of batch) {
-        messages.push(item.body);
-      }
-      return { metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } } };
-    },
-    async metrics() {
-      return { backlogCount: 0, backlogBytes: 0 };
-    },
-  };
-}
 
 interface TestEnvOverrides {
   STRAVA_VERIFY_TOKEN?: string;
@@ -38,9 +16,7 @@ interface TestEnvOverrides {
 function testEnv(overrides: TestEnvOverrides = {}): Env {
   return {
     ...env,
-    ADMIN_TOKEN: "admin-secret",
-    STRAVA_CLIENT_SECRET: "shh",
-    STRAVA_VERIFY_TOKEN: "verify-me",
+    ...SECRETS,
     STRAVA_SUBSCRIPTION_ID: "999",
     INGEST_QUEUE: stubQueue(),
     ...overrides,
