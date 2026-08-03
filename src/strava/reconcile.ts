@@ -12,33 +12,50 @@ export interface ReconcileOptions {
   client?: StravaClient;
 }
 
+export interface ReconcileReport {
+  enqueued: number;
+  refreshed: number;
+}
+
 interface StravaActivitySummary {
   id: number;
 }
 
+// Every listed activity is already inside the lookback window, so an id the
+// registry knows is one whose title or photos may have been edited since it
+// was ingested. Sweeping all of them is bounded by how much I ride, roughly
+// 40 activities a month, and each refresh costs at most three Strava reads
+// against a 1,000/day budget.
 export async function reconcileStravaActivities(
   env: Env,
   options: ReconcileOptions = {},
-): Promise<number> {
+): Promise<ReconcileReport> {
   const client = options.client ?? stravaClient(env);
   const after = await lookbackStart(env.REGISTRY);
 
-  let enqueued = 0;
+  const report: ReconcileReport = { enqueued: 0, refreshed: 0 };
   for (let page = 1; ; page++) {
     const activities = await listPage(client, page, after);
-    for (const id of await missingIds(env.REGISTRY, activities)) {
-      const message: IngestMessage = {
-        source: "strava",
-        kind: "create",
-        objectType: "activity",
-        objectId: id,
-        updates: {},
-      };
+    const known = await knownIds(env.REGISTRY, activities);
+    for (const { id } of activities) {
+      const message: IngestMessage = known.has(String(id))
+        ? { source: "strava", kind: "refresh", objectId: id }
+        : {
+            source: "strava",
+            kind: "create",
+            objectType: "activity",
+            objectId: id,
+            updates: {},
+          };
       await env.INGEST_QUEUE.send(message);
-      enqueued++;
+      if (message.kind === "refresh") {
+        report.refreshed++;
+      } else {
+        report.enqueued++;
+      }
     }
     if (activities.length < PER_PAGE) {
-      return enqueued;
+      return report;
     }
   }
 }
@@ -82,12 +99,12 @@ async function listPage(
   return (await response.json()) as StravaActivitySummary[];
 }
 
-async function missingIds(
+async function knownIds(
   db: D1Database,
   activities: StravaActivitySummary[],
-): Promise<number[]> {
+): Promise<Set<string>> {
   if (activities.length === 0) {
-    return [];
+    return new Set();
   }
   const { results } = await db
     .prepare(
@@ -97,8 +114,5 @@ async function missingIds(
     )
     .bind(JSON.stringify(activities.map((activity) => String(activity.id))))
     .all<{ source_id: string }>();
-  const known = new Set(results.map((row) => row.source_id));
-  return activities
-    .map((activity) => activity.id)
-    .filter((id) => !known.has(String(id)));
+  return new Set(results.map((row) => row.source_id));
 }
