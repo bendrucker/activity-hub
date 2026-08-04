@@ -4,8 +4,10 @@ import { stubFetch, type FetchStub } from "../test/fetch-stub";
 import { stubQueue } from "../test/queue-stub";
 import { SECRETS } from "../test/secrets";
 import {
+  handleConsumeLog,
   handleReconcile,
   handleWahooBackfill,
+  handleWahooIngest,
   handleWahooProbe,
 } from "./admin";
 import type { StravaIngestMessage, WahooIngestMessage } from "./ingest";
@@ -393,5 +395,114 @@ describe("handleWahooProbe", () => {
     expect(body.summary.status).toBe(404);
     expect(body.summary.body).toBe("Not Found");
     expect(body.guardPassed).toBeNull();
+  });
+});
+
+describe("handleWahooIngest", () => {
+  function ingestRequest(authorization?: string, workout?: string): Request {
+    const url = new URL("https://hub.example/admin/wahoo-ingest");
+    if (workout !== undefined) {
+      url.searchParams.set("workout", workout);
+    }
+    return new Request(url, {
+      method: "POST",
+      headers: authorization ? { Authorization: authorization } : {},
+    });
+  }
+
+  it("rejects a request without an Authorization header", async () => {
+    const response = await handleWahooIngest(ingestRequest(), testEnv());
+    expect(response.status).toBe(403);
+  });
+
+  it("rejects a workout that is not a positive integer", async () => {
+    const response = await handleWahooIngest(
+      ingestRequest("Bearer admin-secret", "abc"),
+      testEnv(),
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it("ingests one workout end to end and reports the registry row", async () => {
+    const workout = {
+      id: 101,
+      starts: "2018-01-15T14:10:09.000Z",
+      minutes: 60,
+      workout_type_id: 0,
+      workout_summary: { id: 1010 },
+    };
+    const stub = stubFetch((input) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.endsWith("/workout_summary")) {
+        return new Response(
+          JSON.stringify({
+            id: 1010,
+            duration_total_accum: "3600.0",
+            file: { url: "https://cdn.example/101.fit" },
+          }),
+        );
+      }
+      if (url.startsWith("https://cdn.example/")) {
+        return new Response(new Uint8Array([1, 2, 3]));
+      }
+      return new Response(JSON.stringify(workout));
+    });
+
+    const response = await handleWahooIngest(
+      ingestRequest("Bearer admin-secret", "101"),
+      testEnv(),
+      { client: wahooApiClient(stub), fetchImpl: stub.fetchImpl },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, ingested: true });
+    const row = await env.REGISTRY.prepare(
+      "SELECT source_id FROM activity_sources WHERE source = 'wahoo' AND source_id = '101'",
+    ).first<{ source_id: string }>();
+    expect(row?.source_id).toBe("101");
+  });
+
+  it("reports a missing workout as a 404", async () => {
+    const stub = stubFetch(() => new Response("nope", { status: 404 }));
+
+    const response = await handleWahooIngest(
+      ingestRequest("Bearer admin-secret", "101"),
+      testEnv(),
+      { client: wahooApiClient(stub) },
+    );
+
+    expect(response.status).toBe(404);
+  });
+});
+
+describe("handleConsumeLog", () => {
+  function logRequest(authorization?: string): Request {
+    return new Request("https://hub.example/admin/consume-log", {
+      headers: authorization ? { Authorization: authorization } : {},
+    });
+  }
+
+  it("rejects a request without an Authorization header", async () => {
+    const response = await handleConsumeLog(logRequest(), testEnv());
+    expect(response.status).toBe(403);
+  });
+
+  it("returns the stored trail", async () => {
+    const entry = {
+      at: "2026-08-04T00:00:00.000Z",
+      source: "wahoo",
+      kind: "workout",
+      id: 101,
+      outcome: "ok",
+    };
+    await env.TOKENS.put("debug:consume-log", JSON.stringify([entry]));
+
+    const response = await handleConsumeLog(
+      logRequest("Bearer admin-secret"),
+      testEnv(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual([entry]);
   });
 });

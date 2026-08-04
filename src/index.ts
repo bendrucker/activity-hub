@@ -1,8 +1,15 @@
 import {
+  handleConsumeLog,
   handleReconcile,
   handleWahooBackfill,
+  handleWahooIngest,
   handleWahooProbe,
 } from "./admin";
+import {
+  appendConsumeLog,
+  consumeLogEntry,
+  type ConsumeLogEntry,
+} from "./consumelog";
 import { RateLimitedError, type IngestMessage } from "./ingest";
 import { consumeStravaEvent } from "./strava/consume";
 import { reconcileStravaActivities } from "./strava/reconcile";
@@ -83,6 +90,18 @@ export default {
       }
       return new Response("Method Not Allowed", { status: 405 });
     }
+    if (url.pathname === "/admin/wahoo-ingest") {
+      if (request.method === "POST") {
+        return handleWahooIngest(request, env);
+      }
+      return new Response("Method Not Allowed", { status: 405 });
+    }
+    if (url.pathname === "/admin/consume-log") {
+      if (request.method === "GET") {
+        return handleConsumeLog(request, env);
+      }
+      return new Response("Method Not Allowed", { status: 405 });
+    }
     return new Response("Not Found", { status: 404 });
   },
 
@@ -104,20 +123,29 @@ export default {
   },
 
   async queue(batch, env): Promise<void> {
+    const trail: ConsumeLogEntry[] = [];
     for (const message of batch.messages) {
       try {
         await consumeEvent(message.body, env);
         message.ack();
+        trail.push(consumeLogEntry(message.body, "ok"));
       } catch (error) {
         if (error instanceof RateLimitedError) {
           message.retry({ delaySeconds: RATE_LIMIT_WINDOW_S });
+          trail.push(consumeLogEntry(message.body, "rate-limited"));
           continue;
         }
         console.error(
           `failed to consume ${message.body.source} event: ${String(error)}`,
         );
         message.retry({ delaySeconds: RETRY_DELAY_S });
+        trail.push(consumeLogEntry(message.body, `error: ${String(error)}`));
       }
+    }
+    try {
+      await appendConsumeLog(env.TOKENS, trail);
+    } catch (error) {
+      console.warn(`consume log write failed: ${String(error)}`);
     }
   },
 } satisfies ExportedHandler<Env, IngestMessage>;
