@@ -50,11 +50,16 @@ export class WahooClient {
     }
     if (stored && stored.expiresAt - Date.now() / 1000 > REFRESH_MARGIN_S) {
       // Wahoo answers 401 for individual workouts even on a live token
-      // (observed in production, e.g. workout 481533297). Refreshing on that
-      // quirk rotates the grant for nothing and races every concurrent
-      // invocation into reuse revocation, so a 401 on a live token belongs
-      // to the caller.
-      return response;
+      // (observed in production, e.g. workout 481533297, whose body reads
+      // "You are not authorized to view this workout summary"). Refreshing
+      // on that quirk rotates the grant for nothing and races every
+      // concurrent invocation into reuse revocation, so it belongs to the
+      // caller. A revoked token names the token in its body
+      // ("Access token has been revoked") and does need the refresh.
+      const body = await response.clone().text();
+      if (!/token/i.test(body)) {
+        return response;
+      }
     }
     return this.request(path, init, await this.refresh());
   }

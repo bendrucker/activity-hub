@@ -62,21 +62,52 @@ describe("WahooClient", () => {
     expect(stub.requests[0]!.headers.get("Authorization")).toBe("Bearer live");
   });
 
-  it("passes a 401 through untouched when the token is live", async () => {
+  it("passes a workout-level 401 through when the token is live", async () => {
     await writeTokens(env.TOKENS, {
       accessToken: "live",
       refreshToken: "refresh",
       expiresAt: nowS() + REFRESH_MARGIN_S * 2,
     });
-    const stub = stubFetch(() => new Response("Unauthorized", { status: 401 }));
+    const stub = stubFetch(() =>
+      Response.json(
+        { error: "You are not authorized to view this workout summary" },
+        { status: 401 },
+      ),
+    );
 
     const response = await client(stub).fetch("/v1/workouts/1/workout_summary");
 
     expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({ error: /not authorized/ });
     expect(stub.requests.map((request) => request.url)).toEqual([
       "https://api.example/v1/workouts/1/workout_summary",
     ]);
     expect((await readTokens(env.TOKENS))?.refreshToken).toBe("refresh");
+  });
+
+  it("refreshes when a live token's 401 reports revocation", async () => {
+    await writeTokens(env.TOKENS, {
+      accessToken: "revoked",
+      refreshToken: "refresh",
+      expiresAt: nowS() + REFRESH_MARGIN_S * 2,
+    });
+    const stub = stubFetch((request) => {
+      if (request.url === TOKEN_URL) {
+        return refreshResponse();
+      }
+      if (request.headers.get("Authorization") === "Bearer revoked") {
+        return Response.json(
+          { error: "Access token has been revoked" },
+          { status: 401 },
+        );
+      }
+      return Response.json({ workouts: [] });
+    });
+
+    const response = await client(stub).fetch("/v1/workouts");
+
+    expect(response.status).toBe(200);
+    expect((await readTokens(env.TOKENS))?.refreshToken).toBe("next-refresh");
   });
 
   it("retries with the stored token when another invocation rotated the pair", async () => {
