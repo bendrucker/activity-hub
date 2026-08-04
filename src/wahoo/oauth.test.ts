@@ -7,6 +7,7 @@ import {
   exchangeCode,
   oauthConfig,
   readTokens,
+  refreshStoredTokens,
   refreshTokens,
   TOKENS_KEY,
   writeTokens,
@@ -177,5 +178,61 @@ describe("accessToken", () => {
     );
     const stored = await readTokens(env.TOKENS);
     expect(stored?.refreshToken).toBe("next-refresh");
+  });
+});
+
+describe("refreshStoredTokens", () => {
+  it("persists the rotated pair on success", async () => {
+    await writeTokens(env.TOKENS, TOKENS);
+    const { fetchImpl } = stubFetch(
+      respondJson(200, {
+        access_token: "next-access",
+        refresh_token: "next-refresh",
+        expires_in: 7200,
+        created_at: 1_800_000_000,
+      }),
+    );
+
+    const fresh = await refreshStoredTokens(
+      CONFIG,
+      env.TOKENS,
+      TOKENS,
+      fetchImpl,
+    );
+
+    expect(fresh.accessToken).toBe("next-access");
+    expect((await readTokens(env.TOKENS))?.refreshToken).toBe("next-refresh");
+  });
+
+  it("recovers a lost refresh race from the winner's stored pair", async () => {
+    const winner: WahooTokens = {
+      accessToken: "winner-access",
+      refreshToken: "winner-refresh",
+      expiresAt: 1_800_007_200,
+    };
+    await writeTokens(env.TOKENS, winner);
+    const { fetchImpl } = stubFetch(
+      respondJson(400, { error: "invalid_grant" }),
+    );
+
+    const recovered = await refreshStoredTokens(
+      CONFIG,
+      env.TOKENS,
+      TOKENS,
+      fetchImpl,
+    );
+
+    expect(recovered.accessToken).toBe("winner-access");
+  });
+
+  it("stays fatal when the stored pair is the one that failed", async () => {
+    await writeTokens(env.TOKENS, TOKENS);
+    const { fetchImpl } = stubFetch(
+      respondJson(400, { error: "invalid_grant" }),
+    );
+
+    await expect(
+      refreshStoredTokens(CONFIG, env.TOKENS, TOKENS, fetchImpl),
+    ).rejects.toThrow("invalid_grant");
   });
 });

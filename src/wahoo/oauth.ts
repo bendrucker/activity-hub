@@ -104,6 +104,30 @@ export async function refreshTokens(
   return toTokens(response);
 }
 
+// Wahoo rotates the refresh token on every refresh, so two invocations
+// racing the same stored pair both send it and the loser gets invalid_grant
+// even when the winner already persisted a working replacement. Re-reading
+// the store separates that benign race from a truly revoked grant, which
+// stays fatal and needs /auth/wahoo again.
+export async function refreshStoredTokens(
+  config: OAuthConfig,
+  kv: KVNamespace,
+  used: WahooTokens,
+  fetchImpl: typeof fetch = fetch,
+): Promise<WahooTokens> {
+  try {
+    const fresh = await refreshTokens(config, used.refreshToken, fetchImpl);
+    await writeTokens(kv, fresh);
+    return fresh;
+  } catch (error) {
+    const current = await readTokens(kv);
+    if (current && current.refreshToken !== used.refreshToken) {
+      return current;
+    }
+    throw error;
+  }
+}
+
 // Refresh this far before expiry so a token never dies mid-request chain.
 export const REFRESH_MARGIN_S = 300;
 
@@ -121,7 +145,6 @@ export async function accessToken(
   if (stored.expiresAt - Date.now() / 1000 > REFRESH_MARGIN_S) {
     return stored.accessToken;
   }
-  const fresh = await refreshTokens(config, stored.refreshToken, fetchImpl);
-  await writeTokens(kv, fresh);
+  const fresh = await refreshStoredTokens(config, kv, stored, fetchImpl);
   return fresh.accessToken;
 }
