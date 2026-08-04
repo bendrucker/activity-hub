@@ -3,7 +3,11 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { stubFetch, type FetchStub } from "../test/fetch-stub";
 import { stubQueue } from "../test/queue-stub";
 import { SECRETS } from "../test/secrets";
-import { handleReconcile, handleWahooBackfill } from "./admin";
+import {
+  handleReconcile,
+  handleWahooBackfill,
+  handleWahooProbe,
+} from "./admin";
 import type { StravaIngestMessage, WahooIngestMessage } from "./ingest";
 import { StravaClient } from "./strava/client";
 import { writeTokens } from "./strava/oauth";
@@ -311,5 +315,83 @@ describe("handleWahooBackfill", () => {
     const body = (await response.json()) as { ok: boolean; error: string };
     expect(body.ok).toBe(false);
     expect(body.error).toContain("500");
+  });
+});
+
+describe("handleWahooProbe", () => {
+  function probeRequest(authorization?: string, workout?: string): Request {
+    const url = new URL("https://hub.example/admin/wahoo-probe");
+    if (workout !== undefined) {
+      url.searchParams.set("workout", workout);
+    }
+    return new Request(url, {
+      headers: authorization ? { Authorization: authorization } : {},
+    });
+  }
+
+  it("rejects a request without an Authorization header", async () => {
+    const response = await handleWahooProbe(probeRequest(), testEnv());
+    expect(response.status).toBe(403);
+  });
+
+  it("rejects a workout that is not a positive integer", async () => {
+    const response = await handleWahooProbe(
+      probeRequest("Bearer admin-secret", "abc"),
+      testEnv(),
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it("reports both fetch statuses and the guard verdict", async () => {
+    const workout = {
+      id: 101,
+      starts: "2018-01-15T14:10:09.000Z",
+      minutes: 60,
+      workout_type_id: 0,
+    };
+    const stub = stubFetch((input) =>
+      String(input instanceof Request ? input.url : input).endsWith(
+        "/workout_summary",
+      )
+        ? new Response(
+            JSON.stringify({ id: 1010, file: { url: "https://cdn/101.fit" } }),
+          )
+        : new Response(JSON.stringify(workout)),
+    );
+
+    const response = await handleWahooProbe(
+      probeRequest("Bearer admin-secret", "101"),
+      testEnv(),
+      { client: wahooApiClient(stub) },
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      workout: { status: number };
+      summary: { status: number };
+      guardPassed: boolean | null;
+    };
+    expect(body.workout.status).toBe(200);
+    expect(body.summary.status).toBe(200);
+    expect(body.guardPassed).toBe(true);
+  });
+
+  it("passes through an upstream error status with its body", async () => {
+    const stub = stubFetch(() => new Response("Not Found", { status: 404 }));
+
+    const response = await handleWahooProbe(
+      probeRequest("Bearer admin-secret", "101"),
+      testEnv(),
+      { client: wahooApiClient(stub) },
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      summary: { status: number; body: string };
+      guardPassed: boolean | null;
+    };
+    expect(body.summary.status).toBe(404);
+    expect(body.summary.body).toBe("Not Found");
+    expect(body.guardPassed).toBeNull();
   });
 });
