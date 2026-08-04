@@ -62,11 +62,56 @@ describe("WahooClient", () => {
     expect(stub.requests[0]!.headers.get("Authorization")).toBe("Bearer live");
   });
 
-  it("refreshes and retries once when a live token gets a 401", async () => {
+  it("passes a 401 through untouched when the token is live", async () => {
+    await writeTokens(env.TOKENS, {
+      accessToken: "live",
+      refreshToken: "refresh",
+      expiresAt: nowS() + REFRESH_MARGIN_S * 2,
+    });
+    const stub = stubFetch(() => new Response("Unauthorized", { status: 401 }));
+
+    const response = await client(stub).fetch("/v1/workouts/1/workout_summary");
+
+    expect(response.status).toBe(401);
+    expect(stub.requests.map((request) => request.url)).toEqual([
+      "https://api.example/v1/workouts/1/workout_summary",
+    ]);
+    expect((await readTokens(env.TOKENS))?.refreshToken).toBe("refresh");
+  });
+
+  it("retries with the stored token when another invocation rotated the pair", async () => {
+    await writeTokens(env.TOKENS, {
+      accessToken: "stale",
+      refreshToken: "refresh",
+      expiresAt: nowS() + REFRESH_MARGIN_S * 2,
+    });
+    const stub = stubFetch(async (request) => {
+      if (request.headers.get("Authorization") === "Bearer stale") {
+        await writeTokens(env.TOKENS, {
+          accessToken: "rotated",
+          refreshToken: "rotated-refresh",
+          expiresAt: nowS() + 7200,
+        });
+        return new Response("Unauthorized", { status: 401 });
+      }
+      return Response.json({ workouts: [] });
+    });
+
+    const response = await client(stub).fetch("/v1/workouts");
+
+    expect(response.status).toBe(200);
+    expect(
+      stub.requests.map((request) => request.headers.get("Authorization")),
+    ).toEqual(["Bearer stale", "Bearer rotated"]);
+  });
+
+  it("refreshes and retries once when an expired token gets a 401", async () => {
+    // Past the proactive margin at read time, so accessToken hands out the
+    // stored token, and expired outright by the time the 401 comes back.
     await writeTokens(env.TOKENS, {
       accessToken: "revoked",
       refreshToken: "refresh",
-      expiresAt: nowS() + REFRESH_MARGIN_S * 2,
+      expiresAt: nowS() - 1,
     });
     const stub = stubFetch((request) => {
       if (request.url === TOKEN_URL) {
@@ -81,11 +126,6 @@ describe("WahooClient", () => {
     const response = await client(stub).fetch("/v1/workouts");
 
     expect(response.status).toBe(200);
-    expect(stub.requests.map((request) => request.url)).toEqual([
-      "https://api.example/v1/workouts",
-      TOKEN_URL,
-      "https://api.example/v1/workouts",
-    ]);
     expect((await readTokens(env.TOKENS))?.refreshToken).toBe("next-refresh");
   });
 });

@@ -348,19 +348,9 @@ describe("consumeWahooEvent", () => {
   // Wahoo answers for a workout that never recorded with a 401 as often as a
   // 404. The client retries once on a refreshed token, so a second 401 is the
   // workout's, not the token's.
-  it("skips a backfill workout whose summary 401s after a token refresh", async () => {
+  it("skips a backfill workout whose summary 401s on a live token", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const api = stubFetch((request) =>
-      new URL(request.url).pathname === "/oauth/token"
-        ? new Response(
-            JSON.stringify({
-              access_token: "fresh",
-              refresh_token: "rt2",
-              expires_in: 7200,
-            }),
-          )
-        : new Response("unauthorized", { status: 401 }),
-    );
+    const api = stubFetch(() => new Response("unauthorized", { status: 401 }));
 
     await consumeWahooEvent(backfillMessage(), testEnv, {
       client: apiClient(api),
@@ -368,7 +358,7 @@ describe("consumeWahooEvent", () => {
 
     expect(
       api.requests.map((request) => new URL(request.url).pathname),
-    ).toEqual([SUMMARY_PATH, "/oauth/token", SUMMARY_PATH]);
+    ).toEqual([SUMMARY_PATH]);
     expect(await sourceRow(String(WORKOUT_ID))).toBeNull();
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
