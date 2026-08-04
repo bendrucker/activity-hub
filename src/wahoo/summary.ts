@@ -12,10 +12,14 @@ export interface WahooWorkout {
   workout_type_id: number;
 }
 
+// Wahoo retains no original file for early ELEMNT-era workouts (observed
+// through 2017-12): the summary comes back complete but `file` is empty. The
+// summary is still the raw record for those rides, so `file` is optional and
+// ingest degrades to summary-only.
 export interface WahooWorkoutSummary {
   id: number;
   duration_total_accum?: string;
-  file: { url: string };
+  file?: { url: string } | null;
   workout: WahooWorkout;
 }
 
@@ -30,15 +34,22 @@ export function isWorkoutSummary(
     return false;
   }
   const { file, workout } = value;
+  const fileOk =
+    file === undefined ||
+    file === null ||
+    (isRecord(file) && typeof file.url === "string");
   return (
-    isRecord(file) &&
-    typeof file.url === "string" &&
+    fileOk &&
     isRecord(workout) &&
     Number.isInteger(workout.id) &&
     typeof workout.starts === "string" &&
     typeof workout.minutes === "number" &&
     typeof workout.workout_type_id === "number"
   );
+}
+
+export function summaryFileUrl(summary: WahooWorkoutSummary): string | null {
+  return summary.file?.url ?? null;
 }
 
 // duration_total_accum is elapsed seconds as a decimal string. minutes is

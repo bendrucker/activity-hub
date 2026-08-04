@@ -176,7 +176,7 @@ describe("consumeWahooEvent", () => {
 
     await consumeWahooEvent(message(), testEnv, { fetchImpl: stub.fetchImpl });
 
-    expect(stub.requests[0]!.url).toBe(SUMMARY.file.url);
+    expect(stub.requests[0]!.url).toBe(SUMMARY.file!.url);
 
     const storedSummary = await env.RAW.get(summaryKey(WORKOUT_ID));
     expect(await storedSummary?.json()).toEqual(SUMMARY);
@@ -314,7 +314,7 @@ describe("consumeWahooEvent", () => {
     });
 
     expect(new URL(api.requests[0]!.url).pathname).toBe(SUMMARY_PATH);
-    expect(download.requests[0]!.url).toBe(SUMMARY.file.url);
+    expect(download.requests[0]!.url).toBe(SUMMARY.file!.url);
 
     const storedSummary = await env.RAW.get(summaryKey(WORKOUT_ID));
     expect(await storedSummary?.json()).toEqual({
@@ -382,16 +382,47 @@ describe("consumeWahooEvent", () => {
     ).rejects.toThrow(RateLimitedError);
   });
 
-  it("skips a backfill workout whose summary carries no file URL", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const api = stubFetch(() => new Response(JSON.stringify({ id: 8297 })));
+  it("ingests a backfill workout whose summary carries no file", async () => {
+    const api = stubFetch(
+      () =>
+        new Response(
+          JSON.stringify({ id: 8297, duration_total_accum: "6998.0" }),
+        ),
+    );
 
     await consumeWahooEvent(backfillMessage(), testEnv, {
       client: apiClient(api),
     });
 
-    expect(await sourceRow(String(WORKOUT_ID))).toBeNull();
-    expect(warn).toHaveBeenCalled();
-    warn.mockRestore();
+    const storedSummary = await env.RAW.get(summaryKey(WORKOUT_ID));
+    expect(storedSummary).not.toBeNull();
+    expect(await env.RAW.get(fitKey(WORKOUT_ID))).toBeNull();
+
+    const row = await sourceRow(String(WORKOUT_ID));
+    expect(row).toMatchObject({
+      raw_keys: JSON.stringify({ summary: summaryKey(WORKOUT_ID) }),
+    });
+    const activity = await activityRow(row!.activity_id as string);
+    expect(activity).toMatchObject({
+      sport: "ride",
+      timezone_inferred: 1,
+      duration_s: 6998,
+    });
+  });
+
+  it("ingests a webhook summary whose file is null", async () => {
+    const stub = stubFetch(() => {
+      throw new Error("no fetches expected without a file URL");
+    });
+    const summary: WahooWorkoutSummary = { ...SUMMARY, file: null };
+
+    await consumeWahooEvent(message(summary), testEnv, {
+      fetchImpl: stub.fetchImpl,
+    });
+
+    const row = await sourceRow(String(WORKOUT_ID));
+    expect(row).toMatchObject({
+      raw_keys: JSON.stringify({ summary: summaryKey(WORKOUT_ID) }),
+    });
   });
 });

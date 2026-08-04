@@ -5,6 +5,7 @@ import { upsertSourceRecord } from "../registry";
 import { wahooClient, type WahooClient } from "./client";
 import {
   isWorkoutSummary,
+  summaryFileUrl,
   summarySourceRecord,
   type ResolvedTimezone,
   type WahooWorkoutSummary,
@@ -59,10 +60,11 @@ async function nearestTimezone(
 async function resolveTimezone(
   env: Env,
   summary: WahooWorkoutSummary,
-  fitBytes: Uint8Array,
+  fitBytes: Uint8Array | null,
 ): Promise<ResolvedTimezone> {
   const virtual = VIRTUAL_WORKOUT_TYPES.has(summary.workout.workout_type_id);
-  const fromTrack = virtual ? null : await fitTimezone(fitBytes);
+  const fromTrack =
+    virtual || fitBytes === null ? null : await fitTimezone(fitBytes);
   if (fromTrack) {
     return { timezone: fromTrack, inferred: false };
   }
@@ -135,27 +137,33 @@ export async function consumeWahooEvent(
 
   // CDN downloads are exempt from rate limits, and re-downloading on Wahoo's
   // duplicate deliveries is what keeps file-update events correct: same key,
-  // fresh bytes.
-  const download = await fetchImpl(summary.file.url);
-  if (!download.ok) {
-    throw new Error(
-      `Wahoo FIT download failed for workout ${workoutId}: ${download.status}`,
-    );
+  // fresh bytes. Early ELEMNT-era workouts have no file at all, and their
+  // summary is still worth the registry row.
+  const fileUrl = summaryFileUrl(summary);
+  let fitBytes: Uint8Array | null = null;
+  if (fileUrl !== null) {
+    const download = await fetchImpl(fileUrl);
+    if (!download.ok) {
+      throw new Error(
+        `Wahoo FIT download failed for workout ${workoutId}: ${download.status}`,
+      );
+    }
+    fitBytes = new Uint8Array(await download.arrayBuffer());
   }
-  const fitBytes = new Uint8Array(await download.arrayBuffer());
 
   await env.RAW.put(summaryKey(workoutId), JSON.stringify(summary));
-  await env.RAW.put(fitKey(workoutId), fitBytes);
+  const rawKeys: Record<string, string> = { summary: summaryKey(workoutId) };
+  if (fitBytes !== null) {
+    await env.RAW.put(fitKey(workoutId), fitBytes);
+    rawKeys.original = fitKey(workoutId);
+  }
 
   await upsertSourceRecord(
     env.REGISTRY,
     summarySourceRecord(
       summary,
       await resolveTimezone(env, summary, fitBytes),
-      {
-        summary: summaryKey(workoutId),
-        original: fitKey(workoutId),
-      },
+      rawKeys,
     ),
   );
 }
