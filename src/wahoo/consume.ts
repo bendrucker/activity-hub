@@ -105,8 +105,8 @@ async function fetchSummary(
     `/v1/workouts/${workoutId}/workout_summary`,
   );
   // A workout that was planned but never recorded has no summary. Wahoo
-  // answers for one with either a 404 or a 401, and the client has already
-  // retried a 401 on a refreshed token, so this one belongs to the workout.
+  // answers for one with either a 404 or a 401. The client hands a 401 on a
+  // live token straight back, so this one belongs to the workout.
   if (response.status === 404 || response.status === 401) {
     return null;
   }

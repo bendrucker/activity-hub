@@ -3,6 +3,7 @@ import {
   oauthConfig,
   readTokens,
   refreshStoredTokens,
+  REFRESH_MARGIN_S,
   type OAuthConfig,
 } from "./oauth";
 
@@ -40,7 +41,21 @@ export class WahooClient {
     if (response.status !== 401) {
       return response;
     }
-    // A 401 before recorded expiry means the token was revoked early.
+    const stored = await readTokens(this.config.tokens);
+    if (stored && stored.accessToken !== token) {
+      // Another invocation rotated the pair mid-flight and the rotation
+      // killed the token this request went out with. The replacement is
+      // already stored, so use it rather than refreshing again.
+      return this.request(path, init, stored.accessToken);
+    }
+    if (stored && stored.expiresAt - Date.now() / 1000 > REFRESH_MARGIN_S) {
+      // Wahoo answers 401 for individual workouts even on a live token
+      // (observed in production, e.g. workout 481533297). Refreshing on that
+      // quirk rotates the grant for nothing and races every concurrent
+      // invocation into reuse revocation, so a 401 on a live token belongs
+      // to the caller.
+      return response;
+    }
     return this.request(path, init, await this.refresh());
   }
 
