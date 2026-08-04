@@ -2,8 +2,7 @@ import {
   accessToken,
   oauthConfig,
   readTokens,
-  refreshTokens,
-  writeTokens,
+  refreshStoredTokens,
   type OAuthConfig,
 } from "./oauth";
 
@@ -63,12 +62,12 @@ export class WahooClient {
     if (!stored) {
       throw new Error("no Wahoo tokens stored; authorize at /auth/wahoo");
     }
-    const fresh = await refreshTokens(
+    const fresh = await refreshStoredTokens(
       this.config.oauth,
-      stored.refreshToken,
+      this.config.tokens,
+      stored,
       this.fetchImpl,
     );
-    await writeTokens(this.config.tokens, fresh);
     return fresh.accessToken;
   }
 }
