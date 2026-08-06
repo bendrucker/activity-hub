@@ -109,6 +109,40 @@ describe("consumeBatch", () => {
     error.mockRestore();
   });
 
+  it("parks the rest of a rate-limited source without attempting it", async () => {
+    const messages = [
+      stubMessage(wahooMessage),
+      stubMessage(wahooMessage),
+      stubMessage(wahooMessage),
+    ];
+    const consume = vi.fn(() =>
+      Promise.reject(new RateLimitedError("slow down")),
+    );
+
+    await consumeBatch(batchOf(messages), testEnv, { consume });
+
+    expect(consume).toHaveBeenCalledTimes(1);
+    for (const message of messages) {
+      expect(message.retry).toHaveBeenCalledWith({ delaySeconds: 5 * 60 });
+      expect(message.ack).not.toHaveBeenCalled();
+    }
+  });
+
+  it("keeps draining a source the rate limit did not touch", async () => {
+    const limited = stubMessage(wahooMessage);
+    const other = stubMessage(stravaMessage);
+
+    await consumeBatch(batchOf([limited, other]), testEnv, {
+      consume: (message) =>
+        message.source === "wahoo"
+          ? Promise.reject(new RateLimitedError("slow down"))
+          : Promise.resolve(),
+    });
+
+    expect(limited.retry).toHaveBeenCalledWith({ delaySeconds: 5 * 60 });
+    expect(other.ack).toHaveBeenCalled();
+  });
+
   it("records each message's outcome in the consume log", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const failed = stubMessage(wahooMessage);

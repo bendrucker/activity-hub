@@ -50,7 +50,11 @@
     "consumers": [
       {
         "queue": "activity-hub-ingest",
-        "max_retries": 3,
+        // Rate-limit parking spends a retry, and a backlog large enough to
+        // outlast the source's budget window can park the same message many
+        // times before it ever gets a turn. Three retries sent that message
+        // to the dead letter queue instead.
+        "max_retries": 50,
         "dead_letter_queue": "activity-hub-ingest-dlq",
         // upsertSourceRecord is read-then-write with no cross-statement
         // transaction. A single consumer keeps concurrent events for the
