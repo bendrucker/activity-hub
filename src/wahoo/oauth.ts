@@ -13,14 +13,21 @@ export function oauthConfig(env: Env): OAuthConfig {
   };
 }
 
-// Where the pair lived before the broker owned it. The broker still reads
-// this key once per instance to adopt the tokens already authorized.
+// Where the pair lived before the broker owned it. The broker seeds itself
+// from this key and mirrors every pair back to it.
 export const TOKENS_KEY = "wahoo:tokens";
 
 export async function readTokens(
   kv: KVNamespace,
 ): Promise<StoredTokens | null> {
   return kv.get<StoredTokens>(TOKENS_KEY, "json");
+}
+
+export async function writeTokens(
+  kv: KVNamespace,
+  tokens: StoredTokens,
+): Promise<void> {
+  await kv.put(TOKENS_KEY, JSON.stringify(tokens));
 }
 
 interface TokenResponse {
