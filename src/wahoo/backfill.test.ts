@@ -1,12 +1,13 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
+import { clearTokens } from "../../test/broker";
 import { stubFetch, type FetchStub } from "../../test/fetch-stub";
 import { stubQueue, type QueueStub } from "../../test/queue-stub";
 import { SECRETS } from "../../test/secrets";
 import { RateLimitedError, type WahooIngestMessage } from "../ingest";
+import { tokenBroker } from "../tokens/broker";
 import { backfillWahooWorkouts, PER_PAGE } from "./backfill";
 import { WahooClient } from "./client";
-import { writeTokens } from "./oauth";
 
 function testEnv(queue: QueueStub<WahooIngestMessage>): Env {
   return { ...env, ...SECRETS, INGEST_QUEUE: queue };
@@ -15,12 +16,7 @@ function testEnv(queue: QueueStub<WahooIngestMessage>): Env {
 function apiClient(stub: FetchStub): WahooClient {
   return new WahooClient({
     apiBase: "https://api.example",
-    oauth: {
-      oauthBase: "https://api.example/oauth",
-      clientId: "123",
-      clientSecret: "shh",
-    },
-    tokens: env.TOKENS,
+    tokens: tokenBroker(env, "wahoo"),
     fetchImpl: stub.fetchImpl,
   });
 }
@@ -89,8 +85,8 @@ async function insertWahooSource(sourceId: string): Promise<void> {
 }
 
 beforeEach(async () => {
-  await env.TOKENS.delete("wahoo:tokens");
-  await writeTokens(env.TOKENS, {
+  await clearTokens("wahoo");
+  await tokenBroker(env, "wahoo").store({
     accessToken: "at",
     refreshToken: "rt",
     expiresAt: Math.floor(Date.now() / 1000) + 7200,

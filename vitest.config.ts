@@ -4,6 +4,7 @@ import {
   readD1Migrations,
 } from "@cloudflare/vitest-pool-workers";
 import { defineConfig } from "vitest/config";
+import { SECRETS } from "./test/secrets";
 
 export default defineConfig(async () => {
   const migrations = await readD1Migrations(
@@ -15,7 +16,7 @@ export default defineConfig(async () => {
       cloudflareTest({
         wrangler: { configPath: "./wrangler.jsonc" },
         miniflare: {
-          bindings: { TEST_MIGRATIONS: migrations },
+          bindings: { TEST_MIGRATIONS: migrations, ...SECRETS },
         },
       }),
     ],

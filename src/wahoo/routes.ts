@@ -1,4 +1,5 @@
-import { exchangeCode, oauthConfig, writeTokens } from "./oauth";
+import { tokenBroker } from "../tokens/broker";
+import { exchangeCode, oauthConfig } from "./oauth";
 
 // user_read is mandatory (Wahoo 403s without it), offline_data grants
 // refresh tokens and webhooks.
@@ -66,6 +67,6 @@ export async function handleCallback(
     return new Response("unauthorized Wahoo user", { status: 403 });
   }
 
-  await writeTokens(env.TOKENS, tokens);
+  await tokenBroker(env, "wahoo").store(tokens);
   return new Response("Wahoo connected", { status: 200 });
 }

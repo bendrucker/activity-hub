@@ -122,7 +122,7 @@ The importer runs locally rather than in a Worker: the archive exceeds Workers' 
 
 ## Operations
 
-- OAuth tokens for both sources live in Workers KV with refresh-before-use. Wahoo requires `offline_data` scope for background refresh and webhooks.
+- OAuth tokens for both sources live in a `TokenBroker` Durable Object, one instance per source, with refresh-before-use. Wahoo rotates the refresh token on every refresh and revokes the grant when it sees one reused, so refreshes have to be serialized: KV reads go up to 60 seconds stale, which let two invocations send the same pair. Durable Object storage is strongly consistent and a named instance gives one refresh at a time. Wahoo requires `offline_data` scope for background refresh and webhooks.
 - Strava's June 2027 migration is designed in now: header-only auth and a configurable base URL (`www.api-v3.strava.com`).
 - Wahoo production API access requires human approval. Apply immediately. Sandbox limits (25 req/5 min) may cover single-user use in the meantime.
 - Cost: Workers Paid at $5/month covers the CPU budget for FIT parsing. R2, Queues, D1, and Data Catalog all sit inside free tiers at this scale.

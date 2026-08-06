@@ -1,4 +1,5 @@
-import { exchangeCode, oauthConfig, writeTokens } from "./oauth";
+import { tokenBroker } from "../tokens/broker";
+import { exchangeCode, oauthConfig } from "./oauth";
 
 export const SCOPE = "activity:read_all";
 
@@ -57,6 +58,6 @@ export async function handleCallback(
     return new Response("unauthorized athlete", { status: 403 });
   }
 
-  await writeTokens(env.TOKENS, exchange.tokens);
+  await tokenBroker(env, "strava").store(exchange.tokens);
   return new Response("Strava connected", { status: 200 });
 }

@@ -1,5 +1,6 @@
-// Secrets are set with `wrangler secret put` in production, so miniflare has
-// no bindings for them and tests fill them in.
+// Secrets are set with `wrangler secret put` in production, so wrangler.jsonc
+// declares none and the test config binds these instead. The Durable Object
+// reads them off its own env, which only a binding can reach.
 export const SECRETS = {
   ADMIN_TOKEN: "admin-secret",
   STRAVA_CLIENT_SECRET: "shh",

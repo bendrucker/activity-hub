@@ -2,15 +2,13 @@ import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { stubFetch } from "../../test/fetch-stub";
 import { SECRETS } from "../../test/secrets";
+import type { OAuthConfig, StoredTokens } from "../tokens/source";
 import {
   exchangeCode,
   oauthConfig,
   readTokens,
   refreshTokens,
   TOKENS_KEY,
-  writeTokens,
-  type OAuthConfig,
-  type StravaTokens,
 } from "./oauth";
 
 const CONFIG: OAuthConfig = {
@@ -19,7 +17,7 @@ const CONFIG: OAuthConfig = {
   clientSecret: "shh",
 };
 
-const TOKENS: StravaTokens = {
+const TOKENS: StoredTokens = {
   accessToken: "access",
   refreshToken: "refresh",
   expiresAt: 1_800_000_000,
@@ -49,10 +47,10 @@ describe("oauthConfig", () => {
   });
 });
 
-describe("token storage", () => {
-  it("roundtrips tokens through KV", async () => {
+describe("readTokens", () => {
+  it("reads the pair the broker seeds itself from", async () => {
     expect(await readTokens(env.TOKENS)).toBeNull();
-    await writeTokens(env.TOKENS, TOKENS);
+    await env.TOKENS.put(TOKENS_KEY, JSON.stringify(TOKENS));
     expect(await readTokens(env.TOKENS)).toEqual(TOKENS);
   });
 });
