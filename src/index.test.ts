@@ -20,11 +20,11 @@ const stravaMessage: IngestMessage = {
   objectId: 202,
 };
 
-function stubMessage(body: IngestMessage) {
+function stubMessage(body: IngestMessage, attempts = 1) {
   return {
     id: `${body.source}-message`,
     timestamp: new Date(0),
-    attempts: 1,
+    attempts,
     body,
     ack: vi.fn(),
     retry: vi.fn(),
@@ -68,6 +68,33 @@ describe("consumeBatch", () => {
     });
 
     expect(message.retry).toHaveBeenCalledWith({ delaySeconds: 5 * 60 });
+  });
+
+  it("escalates to the next budget window as attempts accumulate", async () => {
+    // A backlog bigger than the short window's budget keeps the hourly one
+    // exhausted if every retry only waits out five minutes.
+    const third = stubMessage(wahooMessage, 3);
+    const seventh = stubMessage(wahooMessage, 7);
+
+    await consumeBatch(batchOf([third]), testEnv, {
+      consume: rejectWith(new RateLimitedError("slow down")),
+    });
+    await consumeBatch(batchOf([seventh]), testEnv, {
+      consume: rejectWith(new RateLimitedError("slow down")),
+    });
+
+    expect(third.retry).toHaveBeenCalledWith({ delaySeconds: 60 * 60 });
+    expect(seventh.retry).toHaveBeenCalledWith({ delaySeconds: 6 * 60 * 60 });
+  });
+
+  it("prefers the delay the source asked for", async () => {
+    const message = stubMessage(wahooMessage, 5);
+
+    await consumeBatch(batchOf([message]), testEnv, {
+      consume: rejectWith(new RateLimitedError("slow down", 90)),
+    });
+
+    expect(message.retry).toHaveBeenCalledWith({ delaySeconds: 90 });
   });
 
   it("waits out Strava's fifteen-minute budget window on a rate limit", async () => {
@@ -126,6 +153,17 @@ describe("consumeBatch", () => {
       expect(message.retry).toHaveBeenCalledWith({ delaySeconds: 5 * 60 });
       expect(message.ack).not.toHaveBeenCalled();
     }
+  });
+
+  it("parks siblings on the same escalated delay, not the base one", async () => {
+    const first = stubMessage(wahooMessage, 4);
+    const sibling = stubMessage(wahooMessage, 1);
+
+    await consumeBatch(batchOf([first, sibling]), testEnv, {
+      consume: rejectWith(new RateLimitedError("slow down")),
+    });
+
+    expect(sibling.retry).toHaveBeenCalledWith({ delaySeconds: 6 * 60 * 60 });
   });
 
   it("keeps draining a source the rate limit did not touch", async () => {
