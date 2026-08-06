@@ -54,16 +54,26 @@ export async function consumeBatch(
 ): Promise<void> {
   const consume = options.consume ?? consumeEvent;
   const trail: ConsumeLogEntry[] = [];
+  // A 429 means the source's whole budget window is spent, so every later
+  // message from that source would spend a request only to earn the same
+  // 429. Parking them unattempted is what lets the window recover: without
+  // it a large backlog keeps its own budget exhausted and never drains.
+  const exhausted = new Set<IngestMessage["source"]>();
   for (const message of batch.messages) {
+    const source = message.body.source;
+    if (exhausted.has(source)) {
+      message.retry({ delaySeconds: RATE_LIMIT_WINDOW_S[source] });
+      trail.push(consumeLogEntry(message.body, "rate-limited"));
+      continue;
+    }
     try {
       await consume(message.body, env);
       message.ack();
       trail.push(consumeLogEntry(message.body, "ok"));
     } catch (error) {
       if (error instanceof RateLimitedError) {
-        message.retry({
-          delaySeconds: RATE_LIMIT_WINDOW_S[message.body.source],
-        });
+        exhausted.add(source);
+        message.retry({ delaySeconds: RATE_LIMIT_WINDOW_S[source] });
         trail.push(consumeLogEntry(message.body, "rate-limited"));
         continue;
       }
