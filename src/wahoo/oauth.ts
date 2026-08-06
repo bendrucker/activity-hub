@@ -1,8 +1,4 @@
-export interface OAuthConfig {
-  oauthBase: string;
-  clientId: string;
-  clientSecret: string;
-}
+import type { OAuthConfig, StoredTokens } from "../tokens/source";
 
 export function oauthConfig(env: Env): OAuthConfig {
   if (!env.WAHOO_CLIENT_ID || !env.WAHOO_CLIENT_SECRET) {
@@ -17,23 +13,14 @@ export function oauthConfig(env: Env): OAuthConfig {
   };
 }
 
-export interface WahooTokens {
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: number;
-}
-
+// Where the pair lived before the broker owned it. The broker still reads
+// this key once per instance to adopt the tokens already authorized.
 export const TOKENS_KEY = "wahoo:tokens";
 
-export async function readTokens(kv: KVNamespace): Promise<WahooTokens | null> {
-  return kv.get<WahooTokens>(TOKENS_KEY, "json");
-}
-
-export async function writeTokens(
+export async function readTokens(
   kv: KVNamespace,
-  tokens: WahooTokens,
-): Promise<void> {
-  await kv.put(TOKENS_KEY, JSON.stringify(tokens));
+): Promise<StoredTokens | null> {
+  return kv.get<StoredTokens>(TOKENS_KEY, "json");
 }
 
 interface TokenResponse {
@@ -67,7 +54,7 @@ async function requestToken(
 
 // Wahoo reports lifetime as expires_in seconds from created_at, unlike
 // Strava's absolute expires_at, so storage normalizes to an absolute epoch.
-function toTokens(response: TokenResponse): WahooTokens {
+function toTokens(response: TokenResponse): StoredTokens {
   const issuedAt = response.created_at ?? Math.floor(Date.now() / 1000);
   return {
     accessToken: response.access_token,
@@ -82,7 +69,7 @@ export async function exchangeCode(
   code: string,
   redirectUri: string,
   fetchImpl: typeof fetch = fetch,
-): Promise<WahooTokens> {
+): Promise<StoredTokens> {
   const response = await requestToken(
     config,
     { grant_type: "authorization_code", code, redirect_uri: redirectUri },
@@ -95,56 +82,11 @@ export async function refreshTokens(
   config: OAuthConfig,
   refreshToken: string,
   fetchImpl: typeof fetch = fetch,
-): Promise<WahooTokens> {
+): Promise<StoredTokens> {
   const response = await requestToken(
     config,
     { grant_type: "refresh_token", refresh_token: refreshToken },
     fetchImpl,
   );
   return toTokens(response);
-}
-
-// Wahoo rotates the refresh token on every refresh, so two invocations
-// racing the same stored pair both send it and the loser gets invalid_grant
-// even when the winner already persisted a working replacement. Re-reading
-// the store separates that benign race from a truly revoked grant, which
-// stays fatal and needs /auth/wahoo again.
-export async function refreshStoredTokens(
-  config: OAuthConfig,
-  kv: KVNamespace,
-  used: WahooTokens,
-  fetchImpl: typeof fetch = fetch,
-): Promise<WahooTokens> {
-  try {
-    const fresh = await refreshTokens(config, used.refreshToken, fetchImpl);
-    await writeTokens(kv, fresh);
-    return fresh;
-  } catch (error) {
-    const current = await readTokens(kv);
-    if (current && current.refreshToken !== used.refreshToken) {
-      return current;
-    }
-    throw error;
-  }
-}
-
-// Refresh this far before expiry so a token never dies mid-request chain.
-export const REFRESH_MARGIN_S = 300;
-
-// Wahoo rotates the refresh token on every refresh, so the fresh pair is
-// persisted before the access token is handed out.
-export async function accessToken(
-  config: OAuthConfig,
-  kv: KVNamespace,
-  fetchImpl: typeof fetch = fetch,
-): Promise<string> {
-  const stored = await readTokens(kv);
-  if (!stored) {
-    throw new Error("no Wahoo tokens stored; authorize at /auth/wahoo");
-  }
-  if (stored.expiresAt - Date.now() / 1000 > REFRESH_MARGIN_S) {
-    return stored.accessToken;
-  }
-  const fresh = await refreshStoredTokens(config, kv, stored, fetchImpl);
-  return fresh.accessToken;
 }

@@ -1,8 +1,4 @@
-export interface OAuthConfig {
-  oauthBase: string;
-  clientId: string;
-  clientSecret: string;
-}
+import type { OAuthConfig, StoredTokens } from "../tokens/source";
 
 export function oauthConfig(env: Env): OAuthConfig {
   if (!env.STRAVA_CLIENT_SECRET) {
@@ -17,25 +13,14 @@ export function oauthConfig(env: Env): OAuthConfig {
   };
 }
 
-export interface StravaTokens {
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: number;
-}
-
+// Where the pair lived before the broker owned it. The broker still reads
+// this key once per instance to adopt the tokens already authorized.
 export const TOKENS_KEY = "strava:tokens";
 
 export async function readTokens(
   kv: KVNamespace,
-): Promise<StravaTokens | null> {
-  return kv.get<StravaTokens>(TOKENS_KEY, "json");
-}
-
-export async function writeTokens(
-  kv: KVNamespace,
-  tokens: StravaTokens,
-): Promise<void> {
-  await kv.put(TOKENS_KEY, JSON.stringify(tokens));
+): Promise<StoredTokens | null> {
+  return kv.get<StoredTokens>(TOKENS_KEY, "json");
 }
 
 interface TokenResponse {
@@ -67,7 +52,7 @@ async function requestToken(
   return response.json();
 }
 
-function toTokens(response: TokenResponse): StravaTokens {
+function toTokens(response: TokenResponse): StoredTokens {
   return {
     accessToken: response.access_token,
     refreshToken: response.refresh_token,
@@ -79,7 +64,7 @@ export async function exchangeCode(
   config: OAuthConfig,
   code: string,
   fetchImpl: typeof fetch = fetch,
-): Promise<{ tokens: StravaTokens; athleteId: number | undefined }> {
+): Promise<{ tokens: StoredTokens; athleteId: number | undefined }> {
   const response = await requestToken(
     config,
     { grant_type: "authorization_code", code },
@@ -92,7 +77,7 @@ export async function refreshTokens(
   config: OAuthConfig,
   refreshToken: string,
   fetchImpl: typeof fetch = fetch,
-): Promise<StravaTokens> {
+): Promise<StoredTokens> {
   const response = await requestToken(
     config,
     { grant_type: "refresh_token", refresh_token: refreshToken },

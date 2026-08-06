@@ -28,6 +28,10 @@ import {
 } from "./wahoo/routes";
 import { handleWebhookEvent as wahooWebhookEvent } from "./wahoo/webhook";
 
+// The runtime resolves the durable_objects binding against the entry point's
+// exports.
+export { TokenBroker } from "./tokens/broker";
+
 // Both sources budget over nested windows: Wahoo 200 per 5 minutes, 1,000
 // per hour and 5,000 per day, Strava 100 per 15 minutes and 1,000 per day.
 // Clearing only the shortest window is not enough, because a backlog bigger

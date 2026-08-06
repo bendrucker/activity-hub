@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
+import { brokerStub, clearTokens } from "../../test/broker";
 import { SECRETS } from "../../test/secrets";
-import { readTokens, TOKENS_KEY } from "./oauth";
 import { handleAuthorize, handleCallback } from "./routes";
 
 const testEnv: Env = { ...env, ...SECRETS };
@@ -29,7 +29,7 @@ function stubFailedExchange(): typeof fetch {
 }
 
 beforeEach(async () => {
-  await env.TOKENS.delete(TOKENS_KEY);
+  await clearTokens("strava");
 });
 
 describe("handleAuthorize", () => {
@@ -87,7 +87,7 @@ describe("handleCallback", () => {
 
     expect(response.status).toBe(400);
     expect(await response.text()).toContain("/auth/strava");
-    expect(await readTokens(env.TOKENS)).toBeNull();
+    expect(await brokerStub("strava").current()).toBeNull();
   });
 
   it("rejects another athlete without storing tokens", async () => {
@@ -98,7 +98,7 @@ describe("handleCallback", () => {
     );
 
     expect(response.status).toBe(403);
-    expect(await readTokens(env.TOKENS)).toBeNull();
+    expect(await brokerStub("strava").current()).toBeNull();
   });
 
   it("stores tokens for the configured athlete", async () => {
@@ -109,9 +109,8 @@ describe("handleCallback", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await readTokens(env.TOKENS)).toEqual({
+    expect(await brokerStub("strava").current()).toEqual({
       accessToken: "access",
-      refreshToken: "refresh",
       expiresAt: 1_800_000_000,
     });
   });

@@ -1,28 +1,38 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
+import {
+  brokerSource,
+  brokerStub,
+  clearTokens,
+  withBroker,
+} from "../../test/broker";
 import { stubFetch, type FetchStub } from "../../test/fetch-stub";
-import { REFRESH_MARGIN_S, StravaClient } from "./client";
-import { TOKENS_KEY, readTokens, writeTokens } from "./oauth";
+import type { TokenBroker } from "../tokens/broker";
+import { REFRESH_MARGIN_S, type StoredTokens } from "../tokens/source";
+import { StravaClient } from "./client";
 
-const OAUTH = {
-  oauthBase: "https://oauth.example/oauth",
-  clientId: "123",
-  clientSecret: "shh",
-};
-
-const TOKEN_URL = "https://oauth.example/oauth/token";
+const TOKEN_URL = `${env.STRAVA_OAUTH_BASE}/token`;
 
 function nowS(): number {
   return Math.floor(Date.now() / 1000);
 }
 
-function client(stub: FetchStub): StravaClient {
+function client(broker: TokenBroker, stub: FetchStub): StravaClient {
   return new StravaClient({
     apiBase: "https://api.example/api/v3",
-    oauth: OAUTH,
-    tokens: env.TOKENS,
+    tokens: brokerSource(broker, { fetchImpl: stub.fetchImpl }),
     fetchImpl: stub.fetchImpl,
   });
+}
+
+function seed(tokens: StoredTokens): Promise<void> {
+  return brokerStub("strava").store(tokens);
+}
+
+function storedAccessToken(): Promise<string | undefined> {
+  return brokerStub("strava")
+    .current()
+    .then((state) => state?.accessToken);
 }
 
 function refreshResponse(): Response {
@@ -34,27 +44,33 @@ function refreshResponse(): Response {
 }
 
 beforeEach(async () => {
-  await env.TOKENS.delete(TOKENS_KEY);
+  await clearTokens("strava");
 });
 
 describe("StravaClient", () => {
   it("throws when no tokens are stored", async () => {
     const stub = stubFetch(() => new Response("{}"));
-    await expect(client(stub).fetch("/athlete")).rejects.toThrow(
-      /auth\/strava/,
-    );
+
+    await withBroker("strava", async (broker) => {
+      await expect(client(broker, stub).fetch("/athlete")).rejects.toThrow(
+        /auth\/strava/,
+      );
+    });
+
     expect(stub.requests).toHaveLength(0);
   });
 
   it("sends bearer auth against the configured base", async () => {
-    await writeTokens(env.TOKENS, {
+    await seed({
       accessToken: "live",
       refreshToken: "refresh",
       expiresAt: nowS() + REFRESH_MARGIN_S * 2,
     });
     const stub = stubFetch(() => Response.json({ id: 42 }));
 
-    const response = await client(stub).fetch("/athlete");
+    const response = await withBroker("strava", (broker) =>
+      client(broker, stub).fetch("/athlete"),
+    );
 
     expect(response.status).toBe(200);
     expect(stub.requests).toHaveLength(1);
@@ -63,7 +79,7 @@ describe("StravaClient", () => {
   });
 
   it("refreshes an expiring token before use and stores the result", async () => {
-    await writeTokens(env.TOKENS, {
+    await seed({
       accessToken: "stale",
       refreshToken: "refresh",
       expiresAt: nowS() + 30,
@@ -75,18 +91,18 @@ describe("StravaClient", () => {
       return Response.json({ id: 42 });
     });
 
-    await client(stub).fetch("/athlete");
+    await withBroker("strava", (broker) =>
+      client(broker, stub).fetch("/athlete"),
+    );
 
     expect(stub.requests).toHaveLength(2);
     expect(stub.requests[0]!.url).toBe(TOKEN_URL);
     expect(stub.requests[1]!.headers.get("Authorization")).toBe("Bearer fresh");
-    const stored = await readTokens(env.TOKENS);
-    expect(stored?.accessToken).toBe("fresh");
-    expect(stored?.refreshToken).toBe("next-refresh");
+    expect(await storedAccessToken()).toBe("fresh");
   });
 
   it("refreshes and retries once when a live token gets a 401", async () => {
-    await writeTokens(env.TOKENS, {
+    await seed({
       accessToken: "revoked",
       refreshToken: "refresh",
       expiresAt: nowS() + REFRESH_MARGIN_S * 2,
@@ -101,7 +117,9 @@ describe("StravaClient", () => {
       return Response.json({ id: 42 });
     });
 
-    const response = await client(stub).fetch("/athlete");
+    const response = await withBroker("strava", (broker) =>
+      client(broker, stub).fetch("/athlete"),
+    );
 
     expect(response.status).toBe(200);
     expect(stub.requests.map((request) => request.url)).toEqual([
@@ -110,20 +128,14 @@ describe("StravaClient", () => {
       "https://api.example/api/v3/athlete",
     ]);
     expect(stub.requests[2]!.headers.get("Authorization")).toBe("Bearer fresh");
-    const stored = await readTokens(env.TOKENS);
-    expect(stored?.accessToken).toBe("fresh");
+    expect(await storedAccessToken()).toBe("fresh");
   });
 
   it("calls the default fetch without workerd's illegal-invocation this", async () => {
-    await writeTokens(env.TOKENS, {
+    await seed({
       accessToken: "live",
       refreshToken: "refresh",
       expiresAt: nowS() + REFRESH_MARGIN_S * 2,
-    });
-    const noFetchImplClient = new StravaClient({
-      apiBase: "https://api.example/api/v3",
-      oauth: OAUTH,
-      tokens: env.TOKENS,
     });
     const originalFetch = globalThis.fetch;
     // workerd's native fetch throws "Illegal invocation" when invoked with a
@@ -139,7 +151,12 @@ describe("StravaClient", () => {
     } as typeof fetch;
 
     try {
-      const response = await noFetchImplClient.fetch("/athlete");
+      const response = await withBroker("strava", (broker) =>
+        new StravaClient({
+          apiBase: "https://api.example/api/v3",
+          tokens: brokerSource(broker),
+        }).fetch("/athlete"),
+      );
       expect(response.status).toBe(200);
     } finally {
       globalThis.fetch = originalFetch;

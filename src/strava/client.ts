@@ -1,27 +1,16 @@
-import {
-  oauthConfig,
-  readTokens,
-  refreshTokens,
-  writeTokens,
-  type OAuthConfig,
-  type StravaTokens,
-} from "./oauth";
-
-// Refresh this far before expiry so a token never dies mid-request chain.
-export const REFRESH_MARGIN_S = 300;
+import { tokenBroker } from "../tokens/broker";
+import type { TokenSource } from "../tokens/source";
 
 export interface StravaClientConfig {
   apiBase: string;
-  oauth: OAuthConfig;
-  tokens: KVNamespace;
+  tokens: TokenSource;
   fetchImpl?: typeof fetch;
 }
 
 export function stravaClient(env: Env): StravaClient {
   return new StravaClient({
     apiBase: env.STRAVA_API_BASE,
-    oauth: oauthConfig(env),
-    tokens: env.TOKENS,
+    tokens: tokenBroker(env, "strava"),
   });
 }
 
@@ -35,12 +24,13 @@ export class StravaClient {
   }
 
   async fetch(path: string, init: RequestInit = {}): Promise<Response> {
-    const response = await this.request(path, init, await this.accessToken());
+    const token = await this.config.tokens.accessToken();
+    const response = await this.request(path, init, token);
     if (response.status !== 401) {
       return response;
     }
     // A 401 before recorded expiry means the token was revoked early.
-    return this.request(path, init, await this.refresh());
+    return this.request(path, init, await this.config.tokens.refresh(token));
   }
 
   private request(
@@ -54,33 +44,5 @@ export class StravaClient {
       ...init,
       headers,
     });
-  }
-
-  private async accessToken(): Promise<string> {
-    const stored = await this.storedTokens();
-    const now = Date.now() / 1000;
-    if (stored.expiresAt - now > REFRESH_MARGIN_S) {
-      return stored.accessToken;
-    }
-    return this.refresh(stored);
-  }
-
-  private async refresh(stored?: StravaTokens): Promise<string> {
-    stored ??= await this.storedTokens();
-    const fresh = await refreshTokens(
-      this.config.oauth,
-      stored.refreshToken,
-      this.fetchImpl,
-    );
-    await writeTokens(this.config.tokens, fresh);
-    return fresh.accessToken;
-  }
-
-  private async storedTokens(): Promise<StravaTokens> {
-    const stored = await readTokens(this.config.tokens);
-    if (!stored) {
-      throw new Error("no Strava tokens stored; authorize at /auth/strava");
-    }
-    return stored;
   }
 }

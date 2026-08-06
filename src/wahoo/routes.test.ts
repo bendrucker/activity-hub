@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
+import { brokerStub, clearTokens } from "../../test/broker";
 import { SECRETS } from "../../test/secrets";
-import { readTokens, TOKENS_KEY } from "./oauth";
 import { handleAuthorize, handleCallback, SCOPES } from "./routes";
 
 const testEnv: Env = { ...env, ...SECRETS };
@@ -42,7 +42,7 @@ function stubFailedExchange(): typeof fetch {
 }
 
 beforeEach(async () => {
-  await env.TOKENS.delete(TOKENS_KEY);
+  await clearTokens("wahoo");
 });
 
 describe("handleAuthorize", () => {
@@ -100,7 +100,7 @@ describe("handleCallback", () => {
 
     expect(response.status).toBe(400);
     expect(await response.text()).toContain("/auth/wahoo");
-    expect(await readTokens(env.TOKENS)).toBeNull();
+    expect(await brokerStub("wahoo").current()).toBeNull();
   });
 
   it("rejects an account that is not the configured user", async () => {
@@ -111,7 +111,7 @@ describe("handleCallback", () => {
     );
 
     expect(response.status).toBe(403);
-    expect(await readTokens(env.TOKENS)).toBeNull();
+    expect(await brokerStub("wahoo").current()).toBeNull();
   });
 
   it("refuses to store tokens it cannot attribute to an account", async () => {
@@ -122,7 +122,7 @@ describe("handleCallback", () => {
     );
 
     expect(response.status).toBe(502);
-    expect(await readTokens(env.TOKENS)).toBeNull();
+    expect(await brokerStub("wahoo").current()).toBeNull();
   });
 
   it("stores tokens on a successful exchange", async () => {
@@ -133,9 +133,8 @@ describe("handleCallback", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await readTokens(env.TOKENS)).toEqual({
+    expect(await brokerStub("wahoo").current()).toEqual({
       accessToken: "access",
-      refreshToken: "refresh",
       expiresAt: 1_800_007_200,
     });
   });

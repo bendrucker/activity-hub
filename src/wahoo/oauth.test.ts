@@ -2,17 +2,13 @@ import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { stubFetch } from "../../test/fetch-stub";
 import { SECRETS } from "../../test/secrets";
+import type { OAuthConfig, StoredTokens } from "../tokens/source";
 import {
-  accessToken,
   exchangeCode,
   oauthConfig,
   readTokens,
-  refreshStoredTokens,
   refreshTokens,
   TOKENS_KEY,
-  writeTokens,
-  type OAuthConfig,
-  type WahooTokens,
 } from "./oauth";
 
 const CONFIG: OAuthConfig = {
@@ -21,7 +17,7 @@ const CONFIG: OAuthConfig = {
   clientSecret: "shh",
 };
 
-const TOKENS: WahooTokens = {
+const TOKENS: StoredTokens = {
   accessToken: "access",
   refreshToken: "refresh",
   expiresAt: 1_800_007_200,
@@ -62,10 +58,10 @@ describe("oauthConfig", () => {
   });
 });
 
-describe("token storage", () => {
-  it("roundtrips tokens through KV", async () => {
+describe("readTokens", () => {
+  it("reads the pair the broker seeds itself from", async () => {
     expect(await readTokens(env.TOKENS)).toBeNull();
-    await writeTokens(env.TOKENS, TOKENS);
+    await env.TOKENS.put(TOKENS_KEY, JSON.stringify(TOKENS));
     expect(await readTokens(env.TOKENS)).toEqual(TOKENS);
   });
 });
@@ -135,104 +131,5 @@ describe("refreshTokens", () => {
     const body = await requests[0]!.formData();
     expect(body.get("grant_type")).toBe("refresh_token");
     expect(body.get("refresh_token")).toBe("refresh");
-  });
-});
-
-describe("accessToken", () => {
-  it("throws when no tokens are stored", async () => {
-    const { fetchImpl } = stubFetch(() => new Response(null));
-    await expect(accessToken(CONFIG, env.TOKENS, fetchImpl)).rejects.toThrow(
-      /\/auth\/wahoo/,
-    );
-  });
-
-  it("returns the stored token while fresh without fetching", async () => {
-    await writeTokens(env.TOKENS, {
-      ...TOKENS,
-      expiresAt: Math.floor(Date.now() / 1000) + 7200,
-    });
-    const { fetchImpl, requests } = stubFetch(() => {
-      throw new Error("fresh tokens should not refresh");
-    });
-
-    expect(await accessToken(CONFIG, env.TOKENS, fetchImpl)).toBe("access");
-    expect(requests).toHaveLength(0);
-  });
-
-  it("refreshes and persists the rotated pair when expired", async () => {
-    await writeTokens(env.TOKENS, {
-      ...TOKENS,
-      expiresAt: Math.floor(Date.now() / 1000) - 60,
-    });
-    const { fetchImpl } = stubFetch(
-      respondJson(200, {
-        access_token: "next-access",
-        refresh_token: "next-refresh",
-        expires_in: 7200,
-        created_at: Math.floor(Date.now() / 1000),
-      }),
-    );
-
-    expect(await accessToken(CONFIG, env.TOKENS, fetchImpl)).toBe(
-      "next-access",
-    );
-    const stored = await readTokens(env.TOKENS);
-    expect(stored?.refreshToken).toBe("next-refresh");
-  });
-});
-
-describe("refreshStoredTokens", () => {
-  it("persists the rotated pair on success", async () => {
-    await writeTokens(env.TOKENS, TOKENS);
-    const { fetchImpl } = stubFetch(
-      respondJson(200, {
-        access_token: "next-access",
-        refresh_token: "next-refresh",
-        expires_in: 7200,
-        created_at: 1_800_000_000,
-      }),
-    );
-
-    const fresh = await refreshStoredTokens(
-      CONFIG,
-      env.TOKENS,
-      TOKENS,
-      fetchImpl,
-    );
-
-    expect(fresh.accessToken).toBe("next-access");
-    expect((await readTokens(env.TOKENS))?.refreshToken).toBe("next-refresh");
-  });
-
-  it("recovers a lost refresh race from the winner's stored pair", async () => {
-    const winner: WahooTokens = {
-      accessToken: "winner-access",
-      refreshToken: "winner-refresh",
-      expiresAt: 1_800_007_200,
-    };
-    await writeTokens(env.TOKENS, winner);
-    const { fetchImpl } = stubFetch(
-      respondJson(400, { error: "invalid_grant" }),
-    );
-
-    const recovered = await refreshStoredTokens(
-      CONFIG,
-      env.TOKENS,
-      TOKENS,
-      fetchImpl,
-    );
-
-    expect(recovered.accessToken).toBe("winner-access");
-  });
-
-  it("stays fatal when the stored pair is the one that failed", async () => {
-    await writeTokens(env.TOKENS, TOKENS);
-    const { fetchImpl } = stubFetch(
-      respondJson(400, { error: "invalid_grant" }),
-    );
-
-    await expect(
-      refreshStoredTokens(CONFIG, env.TOKENS, TOKENS, fetchImpl),
-    ).rejects.toThrow("invalid_grant");
   });
 });

@@ -32,6 +32,10 @@
   "kv_namespaces": [
     { "binding": "TOKENS", "id": "bc72d180846d490395293eb92370f99b" },
   ],
+  "durable_objects": {
+    "bindings": [{ "name": "TOKEN_BROKER", "class_name": "TokenBroker" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TokenBroker"] }],
   "r2_buckets": [
     { "binding": "RAW", "bucket_name": "activity-hub-raw" },
     { "binding": "LAKE", "bucket_name": "activity-hub-lake" },

@@ -1,5 +1,6 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
+import { clearTokens } from "../test/broker";
 import { stubFetch, type FetchStub } from "../test/fetch-stub";
 import { stubQueue } from "../test/queue-stub";
 import { SECRETS } from "../test/secrets";
@@ -12,9 +13,8 @@ import {
 } from "./admin";
 import type { StravaIngestMessage, WahooIngestMessage } from "./ingest";
 import { StravaClient } from "./strava/client";
-import { writeTokens } from "./strava/oauth";
+import { tokenBroker } from "./tokens/broker";
 import { WahooClient } from "./wahoo/client";
-import { writeTokens as writeWahooTokens } from "./wahoo/oauth";
 
 interface TestEnvOverrides {
   ADMIN_TOKEN?: string;
@@ -33,12 +33,7 @@ function testEnv(overrides: TestEnvOverrides = {}): Env {
 function apiClient(stub: FetchStub): StravaClient {
   return new StravaClient({
     apiBase: "https://api.example/api/v3",
-    oauth: {
-      oauthBase: "https://oauth.example/oauth",
-      clientId: "123",
-      clientSecret: "shh",
-    },
-    tokens: env.TOKENS,
+    tokens: tokenBroker(env, "strava"),
     fetchImpl: stub.fetchImpl,
   });
 }
@@ -46,12 +41,7 @@ function apiClient(stub: FetchStub): StravaClient {
 function wahooApiClient(stub: FetchStub): WahooClient {
   return new WahooClient({
     apiBase: "https://api.example",
-    oauth: {
-      oauthBase: "https://api.example/oauth",
-      clientId: "123",
-      clientSecret: "shh",
-    },
-    tokens: env.TOKENS,
+    tokens: tokenBroker(env, "wahoo"),
     fetchImpl: stub.fetchImpl,
   });
 }
@@ -99,14 +89,14 @@ function workoutsResponse(ids: number[]): Response {
 }
 
 beforeEach(async () => {
-  await env.TOKENS.delete("strava:tokens");
-  await env.TOKENS.delete("wahoo:tokens");
-  await writeTokens(env.TOKENS, {
+  await clearTokens("strava");
+  await clearTokens("wahoo");
+  await tokenBroker(env, "strava").store({
     accessToken: "at",
     refreshToken: "rt",
     expiresAt: Math.floor(Date.now() / 1000) + 21_600,
   });
-  await writeWahooTokens(env.TOKENS, {
+  await tokenBroker(env, "wahoo").store({
     accessToken: "wat",
     refreshToken: "wrt",
     expiresAt: Math.floor(Date.now() / 1000) + 7200,

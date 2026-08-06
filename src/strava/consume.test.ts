@@ -1,5 +1,6 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { clearTokens } from "../../test/broker";
 import { stubFetch, type FetchStub } from "../../test/fetch-stub";
 import { SECRETS } from "../../test/secrets";
 import {
@@ -7,9 +8,9 @@ import {
   type StravaIngestMessage,
   type StravaRefreshMessage,
 } from "../ingest";
+import { tokenBroker } from "../tokens/broker";
 import { StravaClient } from "./client";
 import { consumeStravaEvent } from "./consume";
-import { writeTokens } from "./oauth";
 
 const testEnv: Env = { ...env, ...SECRETS };
 
@@ -72,12 +73,7 @@ function message(
 function apiClient(stub: FetchStub): StravaClient {
   return new StravaClient({
     apiBase: "https://api.example/api/v3",
-    oauth: {
-      oauthBase: "https://oauth.example/oauth",
-      clientId: "123",
-      clientSecret: "shh",
-    },
-    tokens: env.TOKENS,
+    tokens: tokenBroker(env, "strava"),
     fetchImpl: stub.fetchImpl,
   });
 }
@@ -105,8 +101,8 @@ async function sourceRow(
 }
 
 beforeEach(async () => {
-  await env.TOKENS.delete("strava:tokens");
-  await writeTokens(env.TOKENS, {
+  await clearTokens("strava");
+  await tokenBroker(env, "strava").store({
     accessToken: "at",
     refreshToken: "rt",
     expiresAt: Math.floor(Date.now() / 1000) + 21_600,

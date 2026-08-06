@@ -7,13 +7,14 @@ import {
 } from "@garmin/fitsdk";
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { clearTokens } from "../../test/broker";
 import { stubFetch, type FetchStub } from "../../test/fetch-stub";
 import { SECRETS } from "../../test/secrets";
 import { RateLimitedError, type WahooIngestMessage } from "../ingest";
 import { upsertSourceRecord } from "../registry";
+import { tokenBroker } from "../tokens/broker";
 import { WahooClient } from "./client";
 import { consumeWahooEvent } from "./consume";
-import { writeTokens } from "./oauth";
 import type { WahooWorkoutSummary } from "./summary";
 
 const testEnv: Env = { ...env, ...SECRETS };
@@ -114,12 +115,7 @@ function summaryResponse(): Response {
 function apiClient(stub: FetchStub): WahooClient {
   return new WahooClient({
     apiBase: "https://api.example",
-    oauth: {
-      oauthBase: "https://api.example/oauth",
-      clientId: "123",
-      clientSecret: "shh",
-    },
-    tokens: env.TOKENS,
+    tokens: tokenBroker(env, "wahoo"),
     fetchImpl: stub.fetchImpl,
   });
 }
@@ -151,8 +147,8 @@ async function activityRow(
 }
 
 beforeEach(async () => {
-  await env.TOKENS.delete("wahoo:tokens");
-  await writeTokens(env.TOKENS, {
+  await clearTokens("wahoo");
+  await tokenBroker(env, "wahoo").store({
     accessToken: "at",
     refreshToken: "rt",
     expiresAt: Math.floor(Date.now() / 1000) + 7200,
