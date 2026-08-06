@@ -63,14 +63,21 @@ function rateLimitDelayS(
   return ladder[step - 1]!;
 }
 
-function consumeEvent(message: IngestMessage, env: Env): Promise<void> {
-  return message.source === "wahoo"
-    ? consumeWahooEvent(message, env)
-    : consumeStravaEvent(message, env);
+// The outcome a consumer returns names what it did when "ok" would not say
+// enough, most of all which kind of workout it declined to ingest.
+async function consumeEvent(
+  message: IngestMessage,
+  env: Env,
+): Promise<string | undefined> {
+  if (message.source === "wahoo") {
+    return consumeWahooEvent(message, env);
+  }
+  await consumeStravaEvent(message, env);
+  return undefined;
 }
 
 export interface BatchOptions {
-  consume?: (message: IngestMessage, env: Env) => Promise<void>;
+  consume?: (message: IngestMessage, env: Env) => Promise<string | undefined>;
 }
 
 export async function consumeBatch(
@@ -94,9 +101,9 @@ export async function consumeBatch(
       continue;
     }
     try {
-      await consume(message.body, env);
+      const outcome = await consume(message.body, env);
       message.ack();
-      trail.push(consumeLogEntry(message.body, "ok"));
+      trail.push(consumeLogEntry(message.body, outcome ?? "ok"));
     } catch (error) {
       if (error instanceof RateLimitedError) {
         const delaySeconds =

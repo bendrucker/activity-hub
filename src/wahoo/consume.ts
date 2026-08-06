@@ -11,6 +11,7 @@ import {
   isWorkoutSummary,
   summaryFileUrl,
   summarySourceRecord,
+  syncStub,
   type ResolvedTimezone,
   type WahooWorkoutSummary,
 } from "./summary";
@@ -128,18 +129,30 @@ async function fetchSummary(
   return response.json();
 }
 
+// A webhook message carries its summary, so only a backfill message can reach
+// the skip with a workout to explain it.
+function skipOutcome(message: WahooIngestMessage): string {
+  const stub = message.kind === "workout" ? syncStub(message.workout) : null;
+  return stub
+    ? `skipped: third-party sync stub, ${stub.app} ${stub.foreignId}`
+    : "skipped: unexplained missing summary";
+}
+
+// Queue invocations leave no reachable console output, so the outcome goes
+// back to the batch handler, which writes it to the consume log.
 export async function consumeWahooEvent(
   message: WahooIngestMessage,
   env: Env,
   options: ConsumeOptions = {},
-): Promise<void> {
+): Promise<string | undefined> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const { workoutId } = message;
 
   const summary = await messageSummary(message, env, options);
   if (!summary) {
-    console.warn(`skipping Wahoo workout ${workoutId} with no summary file`);
-    return;
+    const outcome = skipOutcome(message);
+    console.warn(`Wahoo workout ${workoutId} ${outcome}`);
+    return outcome;
   }
 
   // CDN downloads are exempt from rate limits, and re-downloading on Wahoo's
@@ -173,4 +186,6 @@ export async function consumeWahooEvent(
       rawKeys,
     ),
   );
+
+  return fitBytes === null ? "ok: summary only, no file" : undefined;
 }
