@@ -83,8 +83,20 @@ describe("consumeBatch", () => {
       consume: rejectWith(new RateLimitedError("slow down")),
     });
 
-    expect(third.retry).toHaveBeenCalledWith({ delaySeconds: 60 * 60 });
-    expect(seventh.retry).toHaveBeenCalledWith({ delaySeconds: 6 * 60 * 60 });
+    expect(third.retry).toHaveBeenCalledWith({ delaySeconds: 15 * 60 });
+    expect(seventh.retry).toHaveBeenCalledWith({ delaySeconds: 60 * 60 });
+  });
+
+  it("caps the wait at an hour however many attempts a message has", async () => {
+    // `attempts` never resets, so a message that piled up attempts during an
+    // outage must not stay parked once the hourly budget recovers.
+    const weathered = stubMessage(wahooMessage, 400);
+
+    await consumeBatch(batchOf([weathered]), testEnv, {
+      consume: rejectWith(new RateLimitedError("slow down")),
+    });
+
+    expect(weathered.retry).toHaveBeenCalledWith({ delaySeconds: 60 * 60 });
   });
 
   it("prefers the delay the source asked for", async () => {
@@ -163,7 +175,7 @@ describe("consumeBatch", () => {
       consume: rejectWith(new RateLimitedError("slow down")),
     });
 
-    expect(sibling.retry).toHaveBeenCalledWith({ delaySeconds: 6 * 60 * 60 });
+    expect(sibling.retry).toHaveBeenCalledWith({ delaySeconds: 60 * 60 });
   });
 
   it("keeps draining a source the rate limit did not touch", async () => {

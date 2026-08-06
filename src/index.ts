@@ -34,9 +34,18 @@ import { handleWebhookEvent as wahooWebhookEvent } from "./wahoo/webhook";
 // than that window's budget retries fast enough to keep the longer windows
 // exhausted and never drains. Each attempt therefore walks out to the next
 // window.
+//
+// The ladder stops at an hour because parking every message for an hour
+// already holds the consumer to the hourly budget: it drains until the cap
+// bites, parks, and resumes an hour later. Longer rungs buy no extra
+// headroom and cost dead time, and the errors are asymmetric. Guessing
+// short wastes one probe request per batch, while guessing long strands the
+// whole backlog. `attempts` never resets, so a message that earned high
+// attempts during an outage would otherwise draw the longest rung forever
+// after the budget recovered.
 const RATE_LIMIT_BACKOFF_S: Record<IngestMessage["source"], number[]> = {
-  strava: [15 * 60, 15 * 60, 60 * 60, 6 * 60 * 60],
-  wahoo: [5 * 60, 5 * 60, 60 * 60, 6 * 60 * 60],
+  strava: [15 * 60, 15 * 60, 30 * 60, 60 * 60],
+  wahoo: [5 * 60, 5 * 60, 15 * 60, 60 * 60],
 };
 const RETRY_DELAY_S = 60;
 
