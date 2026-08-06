@@ -63,17 +63,13 @@ function rateLimitDelayS(
   return ladder[step - 1]!;
 }
 
-// The outcome a consumer returns names what it did when "ok" would not say
-// enough, most of all which kind of workout it declined to ingest.
-async function consumeEvent(
+function consumeEvent(
   message: IngestMessage,
   env: Env,
 ): Promise<string | undefined> {
-  if (message.source === "wahoo") {
-    return consumeWahooEvent(message, env);
-  }
-  await consumeStravaEvent(message, env);
-  return undefined;
+  return message.source === "wahoo"
+    ? consumeWahooEvent(message, env)
+    : consumeStravaEvent(message, env);
 }
 
 export interface BatchOptions {

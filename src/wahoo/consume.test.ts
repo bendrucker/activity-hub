@@ -381,6 +381,23 @@ describe("consumeWahooEvent", () => {
     warn.mockRestore();
   });
 
+  // A summary this code cannot read is a defect on this side. Labelling it
+  // like a missing one writes the workout off as an absence at Wahoo.
+  it("skips a backfill workout whose summary does not parse", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const api = stubFetch(() => new Response(JSON.stringify({ id: 8297 })));
+
+    const outcome = await consumeWahooEvent(
+      backfillMessage({ minutes: undefined }),
+      testEnv,
+      { client: apiClient(api) },
+    );
+
+    expect(outcome).toBe("skipped: summary returned but unreadable");
+    expect(await sourceRow(String(WORKOUT_ID))).toBeNull();
+    warn.mockRestore();
+  });
+
   it("throws RateLimitedError when the summary fetch is rate limited", async () => {
     const api = stubFetch(() => new Response("slow down", { status: 429 }));
 

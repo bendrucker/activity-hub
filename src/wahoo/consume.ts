@@ -79,6 +79,10 @@ async function resolveTimezone(
   };
 }
 
+// Wahoo having no summary and this code failing to read one it did return
+// look identical downstream. Only the second is a defect to chase.
+type MissingSummary = "absent" | "unreadable";
+
 // A backfill message names a workout the list endpoint reported, and the
 // summary lives behind its own endpoint. Running that fetch here rather than
 // in the backfill route gives every workout a fresh subrequest allowance.
@@ -86,26 +90,29 @@ async function messageSummary(
   message: WahooIngestMessage,
   env: Env,
   options: ConsumeOptions,
-): Promise<WahooWorkoutSummary | null> {
+): Promise<WahooWorkoutSummary | MissingSummary> {
   if (message.kind === "workout_summary") {
     return message.summary;
   }
 
   const client = options.client ?? wahooClient(env);
   const fetched = await fetchSummary(client, message.workoutId);
-  if (typeof fetched !== "object" || fetched === null) {
-    return null;
+  if (fetched.absent) {
+    return "absent";
+  }
+  if (typeof fetched.body !== "object" || fetched.body === null) {
+    return "unreadable";
   }
   // The summary endpoint returns the summary alone, while ingest reads the
   // webhook's shape, which nests the workout inside it.
-  const candidate = { ...fetched, workout: message.workout };
-  return isWorkoutSummary(candidate) ? candidate : null;
+  const candidate = { ...fetched.body, workout: message.workout };
+  return isWorkoutSummary(candidate) ? candidate : "unreadable";
 }
 
 async function fetchSummary(
   client: WahooClient,
   workoutId: number,
-): Promise<unknown> {
+): Promise<{ absent: true } | { absent: false; body: unknown }> {
   const response = await client.fetch(
     `/v1/workouts/${workoutId}/workout_summary`,
   );
@@ -113,7 +120,7 @@ async function fetchSummary(
   // answers for one with either a 404 or a 401. The client hands a 401 on a
   // live token straight back, so this one belongs to the workout.
   if (response.status === 404 || response.status === 401) {
-    return null;
+    return { absent: true };
   }
   if (response.status === 429) {
     throw new RateLimitedError(
@@ -126,20 +133,24 @@ async function fetchSummary(
       `Wahoo workout summary failed for ${workoutId}: ${response.status} ${await response.text()}`,
     );
   }
-  return response.json();
+  return { absent: false, body: await response.json() };
 }
 
 // A webhook message carries its summary, so only a backfill message can reach
 // the skip with a workout to explain it.
-function skipOutcome(message: WahooIngestMessage): string {
+function skipOutcome(
+  message: WahooIngestMessage,
+  missing: MissingSummary,
+): string {
+  if (missing === "unreadable") {
+    return "skipped: summary returned but unreadable";
+  }
   const stub = message.kind === "workout" ? syncStub(message.workout) : null;
   return stub
     ? `skipped: third-party sync stub, ${stub.app} ${stub.foreignId}`
     : "skipped: unexplained missing summary";
 }
 
-// Queue invocations leave no reachable console output, so the outcome goes
-// back to the batch handler, which writes it to the consume log.
 export async function consumeWahooEvent(
   message: WahooIngestMessage,
   env: Env,
@@ -149,8 +160,8 @@ export async function consumeWahooEvent(
   const { workoutId } = message;
 
   const summary = await messageSummary(message, env, options);
-  if (!summary) {
-    const outcome = skipOutcome(message);
+  if (typeof summary === "string") {
+    const outcome = skipOutcome(message, summary);
     console.warn(`Wahoo workout ${workoutId} ${outcome}`);
     return outcome;
   }

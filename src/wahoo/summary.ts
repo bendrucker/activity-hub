@@ -63,7 +63,7 @@ export interface SyncStub {
 // 511E:65"). A workout a third-party app synced in instead carries its
 // fitness_app_id and the id it holds there. Wahoo stores those with a null
 // summary and answers 401 for one forever, so they are absences by design.
-const SYNC_WORKOUT_TOKEN = /^FID(\d+) (\d+):0$/;
+const SYNC_WORKOUT_TOKEN = /^FID(\d+) (\d+):\d+$/;
 
 const FITNESS_APPS: Record<string, string> = { "1085": "strava" };
 

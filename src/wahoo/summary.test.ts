@@ -45,6 +45,15 @@ describe("syncStub", () => {
     });
   });
 
+  // The FID prefix is what separates a sync stub from a device token. The
+  // trailing counter varies and carries none of that weight.
+  it("reads a stub whose counter is not zero", () => {
+    expect(syncStub({ workout_token: "FID1085 19536737704:3" })).toEqual({
+      app: "strava",
+      foreignId: "19536737704",
+    });
+  });
+
   it("is null for a workout the device recorded", () => {
     expect(syncStub({ workout_token: "ELEMNT BOLT 511E:65" })).toBeNull();
   });

@@ -445,7 +445,11 @@ describe("handleWahooIngest", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true, ingested: true });
+    expect(await response.json()).toEqual({
+      ok: true,
+      ingested: true,
+      outcome: "ok",
+    });
     const row = await env.REGISTRY.prepare(
       "SELECT source_id FROM activity_sources WHERE source = 'wahoo' AND source_id = '101'",
     ).first<{ source_id: string }>();

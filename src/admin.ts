@@ -149,7 +149,7 @@ export async function handleWahooIngest(
       id: number;
     };
     const { workout_summary: _listed, ...workout } = entry;
-    await consumeWahooEvent(
+    const outcome = await consumeWahooEvent(
       { source: "wahoo", kind: "workout", workoutId, workout },
       env,
       options,
@@ -159,7 +159,11 @@ export async function handleWahooIngest(
     )
       .bind(String(workoutId))
       .first<{ activity_id: string }>();
-    return Response.json({ ok: true, ingested: row !== null });
+    return Response.json({
+      ok: true,
+      ingested: row !== null,
+      outcome: outcome ?? "ok",
+    });
   } catch (error) {
     if (error instanceof RateLimitedError) {
       return new Response("Wahoo rate limited, retry after the 5m window", {
