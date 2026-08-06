@@ -20,8 +20,8 @@ function nowS(): number {
 function client(broker: TokenBroker, stub: FetchStub): StravaClient {
   return new StravaClient({
     apiBase: "https://api.example/api/v3",
-    tokens: brokerSource(broker, { fetchImpl: stub.fetchImpl }),
-    fetchImpl: stub.fetchImpl,
+    tokens: brokerSource(broker, { fetch: stub.fetch }),
+    fetch: stub.fetch,
   });
 }
 
@@ -140,7 +140,7 @@ describe("StravaClient", () => {
     const originalFetch = globalThis.fetch;
     // workerd's native fetch throws "Illegal invocation" when invoked with a
     // `this` other than undefined or globalThis. This stub mimics that check
-    // to catch a regression to the old `this.fetchImpl = fetch` assignment.
+    // to catch a regression to the old `this.fetch = fetch` assignment.
     globalThis.fetch = async function (this: unknown) {
       if (this !== undefined && this !== globalThis) {
         throw new TypeError(
@@ -148,7 +148,7 @@ describe("StravaClient", () => {
         );
       }
       return Response.json({ id: 42 });
-    } as typeof fetch;
+    } as typeof globalThis.fetch;
 
     try {
       const response = await withBroker("strava", (broker) =>

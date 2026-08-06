@@ -40,9 +40,9 @@ interface TokenResponse {
 async function requestToken(
   config: OAuthConfig,
   grant: Record<string, string>,
-  fetchImpl: typeof fetch,
+  fetch: typeof globalThis.fetch,
 ): Promise<TokenResponse> {
-  const response = await fetchImpl(`${config.oauthBase}/token`, {
+  const response = await fetch(`${config.oauthBase}/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -70,12 +70,12 @@ function toTokens(response: TokenResponse): StoredTokens {
 export async function exchangeCode(
   config: OAuthConfig,
   code: string,
-  fetchImpl: typeof fetch = fetch,
+  fetch: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<{ tokens: StoredTokens; athleteId: number | undefined }> {
   const response = await requestToken(
     config,
     { grant_type: "authorization_code", code },
-    fetchImpl,
+    fetch,
   );
   return { tokens: toTokens(response), athleteId: response.athlete?.id };
 }
@@ -83,12 +83,12 @@ export async function exchangeCode(
 export async function refreshTokens(
   config: OAuthConfig,
   refreshToken: string,
-  fetchImpl: typeof fetch = fetch,
+  fetch: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<StoredTokens> {
   const response = await requestToken(
     config,
     { grant_type: "refresh_token", refresh_token: refreshToken },
-    fetchImpl,
+    fetch,
   );
   return toTokens(response);
 }

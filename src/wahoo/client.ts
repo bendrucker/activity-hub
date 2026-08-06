@@ -4,7 +4,7 @@ import { REFRESH_MARGIN_S, type TokenSource } from "../tokens/source";
 export interface WahooClientConfig {
   apiBase: string;
   tokens: TokenSource;
-  fetchImpl?: typeof fetch;
+  fetch?: typeof globalThis.fetch;
 }
 
 export function wahooClient(env: Env): WahooClient {
@@ -15,12 +15,13 @@ export function wahooClient(env: Env): WahooClient {
 }
 
 export class WahooClient {
-  private readonly fetchImpl: typeof fetch;
+  private readonly transport: typeof globalThis.fetch;
 
   constructor(private readonly config: WahooClientConfig) {
     // workerd's native fetch throws "Illegal invocation" when called with a
     // foreign `this`. An arrow wrapper keeps late binding without that risk.
-    this.fetchImpl = config.fetchImpl ?? ((input, init) => fetch(input, init));
+    this.transport =
+      config.fetch ?? ((input, init) => globalThis.fetch(input, init));
   }
 
   async fetch(path: string, init: RequestInit = {}): Promise<Response> {
@@ -55,7 +56,7 @@ export class WahooClient {
   ): Promise<Response> {
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${token}`);
-    return this.fetchImpl(`${this.config.apiBase}${path}`, {
+    return this.transport(`${this.config.apiBase}${path}`, {
       ...init,
       headers,
     });

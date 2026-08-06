@@ -17,7 +17,7 @@ function apiClient(stub: FetchStub): WahooClient {
   return new WahooClient({
     apiBase: "https://api.example",
     tokens: tokenBroker(env, "wahoo"),
-    fetchImpl: stub.fetchImpl,
+    fetch: stub.fetch,
   });
 }
 

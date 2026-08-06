@@ -23,7 +23,7 @@ export function handleAuthorize(url: URL, env: Env): Response {
 export async function handleCallback(
   url: URL,
   env: Env,
-  fetchImpl: typeof fetch = fetch,
+  fetch: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<Response> {
   const denied = url.searchParams.get("error");
   if (denied) {
@@ -40,7 +40,7 @@ export async function handleCallback(
   const config = oauthConfig(env);
   let tokens;
   try {
-    tokens = await exchangeCode(config, code, redirectUri(url), fetchImpl);
+    tokens = await exchangeCode(config, code, redirectUri(url), fetch);
   } catch {
     // Codes are single-use and short-lived, so a reloaded callback URL
     // fails here. Restarting the flow is the fix, so keep it a 4xx.
@@ -54,7 +54,7 @@ export async function handleCallback(
   // grant for whoever authorizes. Without an identity check a stranger's
   // tokens land in the store, breaking ingest and pulling their workouts
   // into the registry.
-  const user = await fetchImpl(`${env.WAHOO_API_BASE}/v1/user`, {
+  const user = await fetch(`${env.WAHOO_API_BASE}/v1/user`, {
     headers: { Authorization: `Bearer ${tokens.accessToken}` },
   });
   if (!user.ok) {

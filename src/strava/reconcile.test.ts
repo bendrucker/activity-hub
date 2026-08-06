@@ -25,7 +25,7 @@ function apiClient(stub: FetchStub): StravaClient {
   return new StravaClient({
     apiBase: "https://api.example/api/v3",
     tokens: tokenBroker(env, "strava"),
-    fetchImpl: stub.fetchImpl,
+    fetch: stub.fetch,
   });
 }
 

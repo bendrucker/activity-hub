@@ -20,8 +20,8 @@ function nowS(): number {
 function client(broker: TokenBroker, stub: FetchStub): WahooClient {
   return new WahooClient({
     apiBase: "https://api.example",
-    tokens: brokerSource(broker, { fetchImpl: stub.fetchImpl }),
-    fetchImpl: stub.fetchImpl,
+    tokens: brokerSource(broker, { fetch: stub.fetch }),
+    fetch: stub.fetch,
   });
 }
 

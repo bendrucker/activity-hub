@@ -17,7 +17,7 @@ import {
 } from "./summary";
 
 export interface ConsumeOptions {
-  fetchImpl?: typeof fetch;
+  fetch?: typeof globalThis.fetch;
   client?: WahooClient;
 }
 
@@ -156,7 +156,7 @@ export async function consumeWahooEvent(
   env: Env,
   options: ConsumeOptions = {},
 ): Promise<string | undefined> {
-  const fetchImpl = options.fetchImpl ?? fetch;
+  const fetch = options.fetch ?? globalThis.fetch;
   const { workoutId } = message;
 
   const summary = await messageSummary(message, env, options);
@@ -173,7 +173,7 @@ export async function consumeWahooEvent(
   const fileUrl = summaryFileUrl(summary);
   let fitBytes: Uint8Array | null = null;
   if (fileUrl !== null) {
-    const download = await fetchImpl(fileUrl);
+    const download = await fetch(fileUrl);
     if (!download.ok) {
       throw new Error(
         `Wahoo FIT download failed for workout ${workoutId}: ${download.status}`,

@@ -17,7 +17,7 @@ export function handleAuthorize(url: URL, env: Env): Response {
 export async function handleCallback(
   url: URL,
   env: Env,
-  fetchImpl: typeof fetch = fetch,
+  fetch: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<Response> {
   const denied = url.searchParams.get("error");
   if (denied) {
@@ -44,7 +44,7 @@ export async function handleCallback(
   const config = oauthConfig(env);
   let exchange;
   try {
-    exchange = await exchangeCode(config, code, fetchImpl);
+    exchange = await exchangeCode(config, code, fetch);
   } catch {
     // Codes are single-use and short-lived, so a reloaded callback URL
     // fails here. Restarting the flow is the fix, so keep it a 4xx.

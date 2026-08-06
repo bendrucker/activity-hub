@@ -118,7 +118,7 @@ function apiClient(stub: FetchStub): WahooClient {
   return new WahooClient({
     apiBase: "https://api.example",
     tokens: tokenBroker(env, "wahoo"),
-    fetchImpl: stub.fetchImpl,
+    fetch: stub.fetch,
   });
 }
 
@@ -172,7 +172,7 @@ describe("consumeWahooEvent", () => {
     const fit = syntheticFit(5);
     const stub = stubFetch(() => new Response(fit));
 
-    await consumeWahooEvent(message(), testEnv, { fetchImpl: stub.fetchImpl });
+    await consumeWahooEvent(message(), testEnv, { fetch: stub.fetch });
 
     expect(stub.requests[0]!.url).toBe(SUMMARY.file!.url);
 
@@ -201,7 +201,7 @@ describe("consumeWahooEvent", () => {
 
   it("is a no-op on a duplicate delivery", async () => {
     const stub = stubFetch(() => new Response(syntheticFit(5)));
-    const options = { fetchImpl: stub.fetchImpl };
+    const options = { fetch: stub.fetch };
 
     await consumeWahooEvent(message(), testEnv, options);
     const firstRow = await sourceRow(String(WORKOUT_ID));
@@ -229,7 +229,7 @@ describe("consumeWahooEvent", () => {
     });
     const stub = stubFetch(() => new Response(syntheticFit(5)));
 
-    await consumeWahooEvent(message(), testEnv, { fetchImpl: stub.fetchImpl });
+    await consumeWahooEvent(message(), testEnv, { fetch: stub.fetch });
 
     const row = await sourceRow(String(WORKOUT_ID));
     expect(row!.activity_id).toBe(strava.activityId);
@@ -256,7 +256,7 @@ describe("consumeWahooEvent", () => {
     });
     const stub = stubFetch(() => new Response(indoorFit()));
 
-    await consumeWahooEvent(message(), testEnv, { fetchImpl: stub.fetchImpl });
+    await consumeWahooEvent(message(), testEnv, { fetch: stub.fetch });
 
     const row = await sourceRow(String(WORKOUT_ID));
     const activity = await activityRow(row!.activity_id as string);
@@ -269,7 +269,7 @@ describe("consumeWahooEvent", () => {
   it("falls back to UTC when the FIT has no GPS and the registry is empty", async () => {
     const stub = stubFetch(() => new Response(indoorFit()));
 
-    await consumeWahooEvent(message(), testEnv, { fetchImpl: stub.fetchImpl });
+    await consumeWahooEvent(message(), testEnv, { fetch: stub.fetch });
 
     const row = await sourceRow(String(WORKOUT_ID));
     const activity = await activityRow(row!.activity_id as string);
@@ -282,7 +282,7 @@ describe("consumeWahooEvent", () => {
       () => new Response(new TextEncoder().encode("not a fit file")),
     );
 
-    await consumeWahooEvent(message(), testEnv, { fetchImpl: stub.fetchImpl });
+    await consumeWahooEvent(message(), testEnv, { fetch: stub.fetch });
 
     expect(await env.RAW.get(fitKey(WORKOUT_ID))).not.toBeNull();
     expect(await sourceRow(String(WORKOUT_ID))).not.toBeNull();
@@ -294,7 +294,7 @@ describe("consumeWahooEvent", () => {
     const stub = stubFetch(() => new Response("gone", { status: 500 }));
 
     await expect(
-      consumeWahooEvent(message(), testEnv, { fetchImpl: stub.fetchImpl }),
+      consumeWahooEvent(message(), testEnv, { fetch: stub.fetch }),
     ).rejects.toThrow(/500/);
 
     expect(await env.RAW.get(fitKey(WORKOUT_ID))).toBeNull();
@@ -307,7 +307,7 @@ describe("consumeWahooEvent", () => {
     const download = stubFetch(() => new Response(syntheticFit(5)));
 
     await consumeWahooEvent(backfillMessage(), testEnv, {
-      fetchImpl: download.fetchImpl,
+      fetch: download.fetch,
       client: apiClient(api),
     });
 
@@ -442,7 +442,7 @@ describe("consumeWahooEvent", () => {
     const summary: WahooWorkoutSummary = { ...SUMMARY, file: null };
 
     await consumeWahooEvent(message(summary), testEnv, {
-      fetchImpl: stub.fetchImpl,
+      fetch: stub.fetch,
     });
 
     const row = await sourceRow(String(WORKOUT_ID));

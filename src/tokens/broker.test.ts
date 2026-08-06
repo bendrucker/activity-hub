@@ -69,7 +69,7 @@ describe("TokenBroker", () => {
 
     const token = await withBroker("wahoo", async (broker) => {
       await broker.store(live());
-      return broker.accessToken({ fetchImpl: stub.fetchImpl });
+      return broker.accessToken({ fetch: stub.fetch });
     });
 
     expect(token).toBe("live");
@@ -130,7 +130,7 @@ describe("TokenBroker", () => {
       const stub = wahooRefresh();
 
       await withBroker("wahoo", (broker) =>
-        broker.accessToken({ fetchImpl: stub.fetchImpl }),
+        broker.accessToken({ fetch: stub.fetch }),
       );
 
       expect(
@@ -157,7 +157,7 @@ describe("TokenBroker", () => {
 
       const token = await withBroker("wahoo", async (broker) => {
         await broker.store(expired());
-        return broker.accessToken({ fetchImpl: stub.fetchImpl });
+        return broker.accessToken({ fetch: stub.fetch });
       });
 
       expect(token).toBe("fresh");
@@ -181,9 +181,7 @@ describe("TokenBroker", () => {
       // context, so it has to be read there.
       const grants = await withBroker("wahoo", async (broker) => {
         await broker.store(expired());
-        expect(await broker.accessToken({ fetchImpl: stub.fetchImpl })).toBe(
-          "fresh",
-        );
+        expect(await broker.accessToken({ fetch: stub.fetch })).toBe("fresh");
         return Promise.all(
           stub.requests.map(async (request) =>
             Object.fromEntries(await request.formData()),
@@ -210,9 +208,9 @@ describe("TokenBroker", () => {
       const tokens = await withBroker("wahoo", async (broker) => {
         await broker.store(expired());
         return Promise.all([
-          broker.accessToken({ fetchImpl: stub.fetchImpl }),
-          broker.accessToken({ fetchImpl: stub.fetchImpl }),
-          broker.accessToken({ fetchImpl: stub.fetchImpl }),
+          broker.accessToken({ fetch: stub.fetch }),
+          broker.accessToken({ fetch: stub.fetch }),
+          broker.accessToken({ fetch: stub.fetch }),
         ]);
       });
 
@@ -227,7 +225,7 @@ describe("TokenBroker", () => {
 
       const token = await withBroker("wahoo", async (broker) => {
         await broker.store(live({ accessToken: "rotated" }));
-        return broker.refresh("stale", { fetchImpl: stub.fetchImpl });
+        return broker.refresh("stale", { fetch: stub.fetch });
       });
 
       expect(token).toBe("rotated");
@@ -239,7 +237,7 @@ describe("TokenBroker", () => {
 
       const token = await withBroker("wahoo", async (broker) => {
         await broker.store(live());
-        return broker.refresh("live", { fetchImpl: stub.fetchImpl });
+        return broker.refresh("live", { fetch: stub.fetch });
       });
 
       expect(token).toBe("fresh");
@@ -252,8 +250,8 @@ describe("TokenBroker", () => {
       const tokens = await withBroker("wahoo", async (broker) => {
         await broker.store(live());
         return Promise.all([
-          broker.refresh("live", { fetchImpl: stub.fetchImpl }),
-          broker.refresh("live", { fetchImpl: stub.fetchImpl }),
+          broker.refresh("live", { fetch: stub.fetch }),
+          broker.refresh("live", { fetch: stub.fetch }),
         ]);
       });
 
@@ -272,8 +270,8 @@ describe("TokenBroker", () => {
       await withBroker("wahoo", async (broker) => {
         await broker.store(expired());
         const results = await Promise.allSettled([
-          broker.accessToken({ fetchImpl: revoked.fetchImpl }),
-          broker.accessToken({ fetchImpl: revoked.fetchImpl }),
+          broker.accessToken({ fetch: revoked.fetch }),
+          broker.accessToken({ fetch: revoked.fetch }),
         ]);
         expect(results.map((result) => result.status)).toEqual([
           "rejected",
@@ -284,7 +282,7 @@ describe("TokenBroker", () => {
 
       const recovered = wahooRefresh();
       const token = await withBroker("wahoo", (broker) =>
-        broker.accessToken({ fetchImpl: recovered.fetchImpl }),
+        broker.accessToken({ fetch: recovered.fetch }),
       );
 
       expect(token).toBe("fresh");
@@ -302,7 +300,7 @@ describe("TokenBroker", () => {
 
       const token = await withBroker("strava", async (broker) => {
         await broker.store(expired());
-        return broker.accessToken({ fetchImpl: stub.fetchImpl });
+        return broker.accessToken({ fetch: stub.fetch });
       });
 
       expect(token).toBe("fresh");
