@@ -28,15 +28,57 @@ import {
 } from "./wahoo/routes";
 import { handleWebhookEvent as wahooWebhookEvent } from "./wahoo/webhook";
 
-// A 429 clears when the 15-minute budget window rolls over, so waiting out
-// one full window beats exponential guessing.
-const RATE_LIMIT_WINDOW_S = 15 * 60;
+// A 429 clears when the source's budget window rolls over, so waiting out one
+// full window beats exponential guessing. Strava budgets over 15 minutes,
+// Wahoo over 5.
+const RATE_LIMIT_WINDOW_S: Record<IngestMessage["source"], number> = {
+  strava: 15 * 60,
+  wahoo: 5 * 60,
+};
 const RETRY_DELAY_S = 60;
 
 function consumeEvent(message: IngestMessage, env: Env): Promise<void> {
   return message.source === "wahoo"
     ? consumeWahooEvent(message, env)
     : consumeStravaEvent(message, env);
+}
+
+export interface BatchOptions {
+  consume?: (message: IngestMessage, env: Env) => Promise<void>;
+}
+
+export async function consumeBatch(
+  batch: MessageBatch<IngestMessage>,
+  env: Env,
+  options: BatchOptions = {},
+): Promise<void> {
+  const consume = options.consume ?? consumeEvent;
+  const trail: ConsumeLogEntry[] = [];
+  for (const message of batch.messages) {
+    try {
+      await consume(message.body, env);
+      message.ack();
+      trail.push(consumeLogEntry(message.body, "ok"));
+    } catch (error) {
+      if (error instanceof RateLimitedError) {
+        message.retry({
+          delaySeconds: RATE_LIMIT_WINDOW_S[message.body.source],
+        });
+        trail.push(consumeLogEntry(message.body, "rate-limited"));
+        continue;
+      }
+      console.error(
+        `failed to consume ${message.body.source} event: ${String(error)}`,
+      );
+      message.retry({ delaySeconds: RETRY_DELAY_S });
+      trail.push(consumeLogEntry(message.body, `error: ${String(error)}`));
+    }
+  }
+  try {
+    await appendConsumeLog(env.TOKENS, trail);
+  } catch (error) {
+    console.warn(`consume log write failed: ${String(error)}`);
+  }
 }
 
 export default {
@@ -123,29 +165,6 @@ export default {
   },
 
   async queue(batch, env): Promise<void> {
-    const trail: ConsumeLogEntry[] = [];
-    for (const message of batch.messages) {
-      try {
-        await consumeEvent(message.body, env);
-        message.ack();
-        trail.push(consumeLogEntry(message.body, "ok"));
-      } catch (error) {
-        if (error instanceof RateLimitedError) {
-          message.retry({ delaySeconds: RATE_LIMIT_WINDOW_S });
-          trail.push(consumeLogEntry(message.body, "rate-limited"));
-          continue;
-        }
-        console.error(
-          `failed to consume ${message.body.source} event: ${String(error)}`,
-        );
-        message.retry({ delaySeconds: RETRY_DELAY_S });
-        trail.push(consumeLogEntry(message.body, `error: ${String(error)}`));
-      }
-    }
-    try {
-      await appendConsumeLog(env.TOKENS, trail);
-    } catch (error) {
-      console.warn(`consume log write failed: ${String(error)}`);
-    }
+    await consumeBatch(batch, env);
   },
 } satisfies ExportedHandler<Env, IngestMessage>;
