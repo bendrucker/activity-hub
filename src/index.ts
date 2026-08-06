@@ -28,14 +28,27 @@ import {
 } from "./wahoo/routes";
 import { handleWebhookEvent as wahooWebhookEvent } from "./wahoo/webhook";
 
-// A 429 clears when the source's budget window rolls over, so waiting out one
-// full window beats exponential guessing. Strava budgets over 15 minutes,
-// Wahoo over 5.
-const RATE_LIMIT_WINDOW_S: Record<IngestMessage["source"], number> = {
-  strava: 15 * 60,
-  wahoo: 5 * 60,
+// Both sources budget over nested windows: Wahoo 200 per 5 minutes, 1,000
+// per hour and 5,000 per day, Strava 100 per 15 minutes and 1,000 per day.
+// Clearing only the shortest window is not enough, because a backlog bigger
+// than that window's budget retries fast enough to keep the longer windows
+// exhausted and never drains. Each attempt therefore walks out to the next
+// window.
+const RATE_LIMIT_BACKOFF_S: Record<IngestMessage["source"], number[]> = {
+  strava: [15 * 60, 15 * 60, 60 * 60, 6 * 60 * 60],
+  wahoo: [5 * 60, 5 * 60, 60 * 60, 6 * 60 * 60],
 };
 const RETRY_DELAY_S = 60;
+
+// `attempts` counts the delivery in progress, so it starts at 1.
+function rateLimitDelayS(
+  source: IngestMessage["source"],
+  attempts: number,
+): number {
+  const ladder = RATE_LIMIT_BACKOFF_S[source];
+  const step = Math.min(Math.max(attempts, 1), ladder.length);
+  return ladder[step - 1]!;
+}
 
 function consumeEvent(message: IngestMessage, env: Env): Promise<void> {
   return message.source === "wahoo"
@@ -58,11 +71,12 @@ export async function consumeBatch(
   // message from that source would spend a request only to earn the same
   // 429. Parking them unattempted is what lets the window recover: without
   // it a large backlog keeps its own budget exhausted and never drains.
-  const exhausted = new Set<IngestMessage["source"]>();
+  const exhausted = new Map<IngestMessage["source"], number>();
   for (const message of batch.messages) {
     const source = message.body.source;
-    if (exhausted.has(source)) {
-      message.retry({ delaySeconds: RATE_LIMIT_WINDOW_S[source] });
+    const parked = exhausted.get(source);
+    if (parked !== undefined) {
+      message.retry({ delaySeconds: parked });
       trail.push(consumeLogEntry(message.body, "rate-limited"));
       continue;
     }
@@ -72,8 +86,10 @@ export async function consumeBatch(
       trail.push(consumeLogEntry(message.body, "ok"));
     } catch (error) {
       if (error instanceof RateLimitedError) {
-        exhausted.add(source);
-        message.retry({ delaySeconds: RATE_LIMIT_WINDOW_S[source] });
+        const delaySeconds =
+          error.retryAfterS ?? rateLimitDelayS(source, message.attempts);
+        exhausted.set(source, delaySeconds);
+        message.retry({ delaySeconds });
         trail.push(consumeLogEntry(message.body, "rate-limited"));
         continue;
       }

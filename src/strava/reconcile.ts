@@ -1,4 +1,9 @@
-import { RateLimitedError, sendBatched, type IngestMessage } from "../ingest";
+import {
+  RateLimitedError,
+  sendBatched,
+  type IngestMessage,
+  retryAfterS,
+} from "../ingest";
 import { stravaClient, type StravaClient } from "./client";
 
 // Activities can be uploaded long after they were recorded, so listing from
@@ -91,7 +96,10 @@ async function listPage(
   }
   const response = await client.fetch(`/athlete/activities?${params}`);
   if (response.status === 429) {
-    throw new RateLimitedError("rate limited on /athlete/activities");
+    throw new RateLimitedError(
+      "rate limited on /athlete/activities",
+      retryAfterS(response),
+    );
   }
   if (!response.ok) {
     throw new Error(

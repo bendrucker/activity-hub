@@ -1,4 +1,8 @@
-import { RateLimitedError, type StravaIngestMessage } from "../ingest";
+import {
+  RateLimitedError,
+  type StravaIngestMessage,
+  retryAfterS,
+} from "../ingest";
 import { markSourceDeleted, upsertSourceRecord } from "../registry";
 import { sportFromStrava } from "../sport";
 import { stravaClient, type StravaClient } from "./client";
@@ -40,7 +44,10 @@ async function fetchOrThrow(
 ): Promise<Response> {
   const response = await client.fetch(path);
   if (response.status === 429) {
-    throw new RateLimitedError(`rate limited on ${path}`);
+    throw new RateLimitedError(
+      `rate limited on ${path}`,
+      retryAfterS(response),
+    );
   }
   return response;
 }

@@ -1,4 +1,8 @@
-import { RateLimitedError, type WahooIngestMessage } from "../ingest";
+import {
+  RateLimitedError,
+  type WahooIngestMessage,
+  retryAfterS,
+} from "../ingest";
 import { trackTimezone } from "../import/timezone";
 import { extractTrack } from "../import/track";
 import { upsertSourceRecord } from "../registry";
@@ -111,7 +115,10 @@ async function fetchSummary(
     return null;
   }
   if (response.status === 429) {
-    throw new RateLimitedError("rate limited on /v1/workouts/:id/summary");
+    throw new RateLimitedError(
+      "rate limited on /v1/workouts/:id/summary",
+      retryAfterS(response),
+    );
   }
   if (!response.ok) {
     throw new Error(

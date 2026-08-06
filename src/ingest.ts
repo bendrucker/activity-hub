@@ -2,7 +2,32 @@ import type { WahooWorkoutSummary } from "./wahoo/summary";
 
 // Thrown by consumers when the upstream API rate-limits. The queue handler
 // backs off for a full budget window instead of the plain retry delay.
-export class RateLimitedError extends Error {}
+export class RateLimitedError extends Error {
+  constructor(
+    message: string,
+    // Seconds the source asked us to wait, when it said. Beats guessing at
+    // which of its nested budget windows the 429 came from.
+    readonly retryAfterS?: number,
+  ) {
+    super(message);
+  }
+}
+
+export function retryAfterS(response: Response): number | undefined {
+  const header = response.headers.get("Retry-After");
+  if (!header) {
+    return undefined;
+  }
+  // The header is either delta-seconds or an HTTP date.
+  const seconds = Number(header);
+  if (Number.isFinite(seconds)) {
+    return Math.max(0, Math.round(seconds));
+  }
+  const at = Date.parse(header);
+  return Number.isNaN(at)
+    ? undefined
+    : Math.max(0, Math.round((at - Date.now()) / 1000));
+}
 
 // Strava webhook payloads carry ids only, plus the field names that changed
 // on an update, so the consumer fetches the activity itself.

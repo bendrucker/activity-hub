@@ -1,4 +1,9 @@
-import { RateLimitedError, sendBatched, type IngestMessage } from "../ingest";
+import {
+  RateLimitedError,
+  sendBatched,
+  type IngestMessage,
+  retryAfterS,
+} from "../ingest";
 import { wahooClient, type WahooClient } from "./client";
 
 // /v1/workouts takes no date filters and sorts by start descending, so the
@@ -91,7 +96,10 @@ async function listPage(
   });
   const response = await client.fetch(`/v1/workouts?${params}`);
   if (response.status === 429) {
-    throw new RateLimitedError("rate limited on /v1/workouts");
+    throw new RateLimitedError(
+      "rate limited on /v1/workouts",
+      retryAfterS(response),
+    );
   }
   if (!response.ok) {
     throw new Error(
