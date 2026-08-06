@@ -21,8 +21,20 @@ function callbackUrl(params: Record<string, string>): URL {
   return url;
 }
 
-function stubExchange(): typeof fetch {
-  return async () => Response.json(EXCHANGE);
+const USER_ID = 587205;
+
+// The callback exchanges the code and then confirms whose account it is, so
+// the stub answers both.
+function stubExchange(userId: number | null = USER_ID): typeof fetch {
+  return async (input) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (url.endsWith("/v1/user")) {
+      return userId === null
+        ? new Response("nope", { status: 401 })
+        : Response.json({ id: userId });
+    }
+    return Response.json(EXCHANGE);
+  };
 }
 
 function stubFailedExchange(): typeof fetch {
@@ -88,6 +100,28 @@ describe("handleCallback", () => {
 
     expect(response.status).toBe(400);
     expect(await response.text()).toContain("/auth/wahoo");
+    expect(await readTokens(env.TOKENS)).toBeNull();
+  });
+
+  it("rejects an account that is not the configured user", async () => {
+    const response = await handleCallback(
+      callbackUrl({ code: "abc" }),
+      testEnv,
+      stubExchange(999999),
+    );
+
+    expect(response.status).toBe(403);
+    expect(await readTokens(env.TOKENS)).toBeNull();
+  });
+
+  it("refuses to store tokens it cannot attribute to an account", async () => {
+    const response = await handleCallback(
+      callbackUrl({ code: "abc" }),
+      testEnv,
+      stubExchange(null),
+    );
+
+    expect(response.status).toBe(502);
     expect(await readTokens(env.TOKENS)).toBeNull();
   });
 

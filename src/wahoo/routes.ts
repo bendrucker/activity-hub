@@ -49,6 +49,23 @@ export async function handleCallback(
     );
   }
 
+  // This route is reachable by anyone, and Wahoo will happily issue a valid
+  // grant for whoever authorizes. Without an identity check a stranger's
+  // tokens land in the store, breaking ingest and pulling their workouts
+  // into the registry.
+  const user = await fetchImpl(`${env.WAHOO_API_BASE}/v1/user`, {
+    headers: { Authorization: `Bearer ${tokens.accessToken}` },
+  });
+  if (!user.ok) {
+    return new Response(`could not verify the Wahoo account: ${user.status}`, {
+      status: 502,
+    });
+  }
+  const { id } = (await user.json()) as { id?: unknown };
+  if (id !== Number(env.WAHOO_USER_ID)) {
+    return new Response("unauthorized Wahoo user", { status: 403 });
+  }
+
   await writeTokens(env.TOKENS, tokens);
   return new Response("Wahoo connected", { status: 200 });
 }
