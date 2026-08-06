@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { brokerStub, clearTokens, withBroker } from "../../test/broker";
 import { stubFetch, type FetchStub } from "../../test/fetch-stub";
 import { SECRETS } from "../../test/secrets";
@@ -111,7 +111,21 @@ describe("TokenBroker", () => {
       );
     });
 
-    it("leaves the rotated pair out of KV", async () => {
+    it("does not write back the pair it just adopted", async () => {
+      await seedKv(WAHOO_TOKENS_KEY, live());
+      const put = vi.spyOn(env.TOKENS, "put");
+
+      await withBroker("wahoo", (broker) => broker.accessToken());
+
+      expect(put).not.toHaveBeenCalled();
+      put.mockRestore();
+    });
+  });
+
+  // A rollback would put the pre-broker code back in charge, and it refreshes
+  // straight from KV. A spent refresh token there costs the whole grant.
+  describe("the KV shadow copy", () => {
+    it("holds the fresh pair after a rotation", async () => {
       await seedKv(WAHOO_TOKENS_KEY, expired({ refreshToken: "kv-refresh" }));
       const stub = wahooRefresh();
 
@@ -121,7 +135,41 @@ describe("TokenBroker", () => {
 
       expect(
         await env.TOKENS.get<StoredTokens>(WAHOO_TOKENS_KEY, "json"),
-      ).toMatchObject({ refreshToken: "kv-refresh" });
+      ).toMatchObject({ accessToken: "fresh", refreshToken: "next-refresh" });
+    });
+
+    it("takes the pair an OAuth callback stores", async () => {
+      await withBroker("strava", (broker) =>
+        broker.store(live({ accessToken: "reauthorized" })),
+      );
+
+      expect(
+        await env.TOKENS.get<StoredTokens>(STRAVA_TOKENS_KEY, "json"),
+      ).toMatchObject({ accessToken: "reauthorized" });
+    });
+
+    it("cannot fail a rotation", async () => {
+      const stub = wahooRefresh();
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const put = vi
+        .spyOn(env.TOKENS, "put")
+        .mockRejectedValue(new Error("KV unavailable"));
+
+      const token = await withBroker("wahoo", async (broker) => {
+        await broker.store(expired());
+        return broker.accessToken({ fetchImpl: stub.fetchImpl });
+      });
+
+      expect(token).toBe("fresh");
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("KV unavailable"),
+      );
+      put.mockRestore();
+      warn.mockRestore();
+
+      expect(
+        await withBroker("wahoo", (broker) => broker.current()),
+      ).toMatchObject({ accessToken: "fresh" });
     });
   });
 

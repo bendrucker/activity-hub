@@ -3,11 +3,13 @@ import {
   oauthConfig as stravaOAuthConfig,
   readTokens as readStravaTokens,
   refreshTokens as refreshStravaTokens,
+  writeTokens as writeStravaTokens,
 } from "../strava/oauth";
 import {
   oauthConfig as wahooOAuthConfig,
   readTokens as readWahooTokens,
   refreshTokens as refreshWahooTokens,
+  writeTokens as writeWahooTokens,
 } from "../wahoo/oauth";
 import {
   REFRESH_MARGIN_S,
@@ -25,6 +27,7 @@ interface ProviderBinding {
   // Tokens predate the broker and still live in KV until the first call
   // adopts them. Without this the deploy would need a re-authorization.
   seed(kv: KVNamespace): Promise<StoredTokens | null>;
+  mirror(kv: KVNamespace, tokens: StoredTokens): Promise<void>;
   refresh(
     config: OAuthConfig,
     refreshToken: string,
@@ -38,6 +41,7 @@ const PROVIDERS: Record<Provider, ProviderBinding> = {
     authPath: "/auth/wahoo",
     config: wahooOAuthConfig,
     seed: readWahooTokens,
+    mirror: writeWahooTokens,
     refresh: refreshWahooTokens,
   },
   strava: {
@@ -45,6 +49,7 @@ const PROVIDERS: Record<Provider, ProviderBinding> = {
     authPath: "/auth/strava",
     config: stravaOAuthConfig,
     seed: readStravaTokens,
+    mirror: writeStravaTokens,
     refresh: refreshStravaTokens,
   },
 };
@@ -96,7 +101,8 @@ export class TokenBroker extends DurableObject<Env> {
   }
 
   async store(tokens: StoredTokens): Promise<void> {
-    await this.ctx.storage.put(STORAGE_KEY, tokens);
+    await this.persist(tokens);
+    await this.mirror(tokens);
   }
 
   private get provider(): ProviderBinding {
@@ -107,6 +113,25 @@ export class TokenBroker extends DurableObject<Env> {
     return PROVIDERS[name];
   }
 
+  private persist(tokens: StoredTokens): Promise<void> {
+    return this.ctx.storage.put(STORAGE_KEY, tokens);
+  }
+
+  // Rollback insurance. Nothing reads this copy while the broker is
+  // deployed, but the code it replaced refreshes straight from KV. Left
+  // holding a pair the broker already spent, that code would send a used
+  // refresh token, and Wahoo revokes the whole grant when it sees one, which
+  // only a manual re-authorization recovers.
+  private async mirror(tokens: StoredTokens): Promise<void> {
+    try {
+      await this.provider.mirror(this.env.TOKENS, tokens);
+    } catch (error) {
+      // A shadow that falls behind costs a re-authorization only if we also
+      // roll back. Failing the refresh costs one now.
+      console.warn(`token mirror to KV failed: ${String(error)}`);
+    }
+  }
+
   private async load(): Promise<StoredTokens | null> {
     const stored = await this.ctx.storage.get<StoredTokens>(STORAGE_KEY);
     if (stored) {
@@ -114,7 +139,7 @@ export class TokenBroker extends DurableObject<Env> {
     }
     const seeded = await this.provider.seed(this.env.TOKENS);
     if (seeded) {
-      await this.store(seeded);
+      await this.persist(seeded);
     }
     return seeded;
   }
