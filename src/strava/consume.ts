@@ -10,7 +10,7 @@ import { stravaClient, type StravaClient } from "./client";
 export interface ConsumeOptions {
   client?: StravaClient;
   // For downloading photo CDN URLs, which bypass the StravaClient.
-  fetchImpl?: typeof fetch;
+  fetch?: typeof globalThis.fetch;
 }
 
 interface StravaActivityDetail {
@@ -126,14 +126,14 @@ async function downloadPhoto(
   env: Env,
   activityId: number,
   photo: StravaPhoto,
-  fetchImpl: typeof fetch,
+  fetch: typeof globalThis.fetch,
 ): Promise<boolean> {
   const url = largestPhotoUrl(photo);
   if (!url) {
     return false;
   }
   try {
-    const download = await fetchImpl(url);
+    const download = await fetch(url);
     if (!download.ok) {
       console.warn(
         `Strava photo ${activityId}/${photo.unique_id} download failed: ${download.status}`,
@@ -161,7 +161,7 @@ async function syncPhotos(
   client: StravaClient,
   env: Env,
   activityId: number,
-  fetchImpl: typeof fetch,
+  fetch: typeof globalThis.fetch,
 ): Promise<PhotoSync> {
   const stored = await storedPhotoIds(env, activityId);
   const response = await fetchOrThrow(
@@ -188,7 +188,7 @@ async function syncPhotos(
   const wrote = await Promise.all(
     photos
       .filter((photo) => !stored.has(photo.unique_id))
-      .map((photo) => downloadPhoto(env, activityId, photo, fetchImpl)),
+      .map((photo) => downloadPhoto(env, activityId, photo, fetch)),
   );
   return { stored: stored.size, added: wrote.filter(Boolean).length };
 }
@@ -245,7 +245,7 @@ async function refreshActivity(
     client,
     env,
     activityId,
-    options.fetchImpl ?? fetch,
+    options.fetch ?? globalThis.fetch,
   );
   if (photos.stored + photos.added > 0) {
     rawKeys.photos = photosPrefix(activityId);
@@ -306,7 +306,7 @@ export async function consumeStravaEvent(
       client,
       env,
       activityId,
-      options.fetchImpl ?? fetch,
+      options.fetch ?? globalThis.fetch,
     );
     if (photos.stored + photos.added > 0) {
       rawKeys.photos = photosPrefix(activityId);

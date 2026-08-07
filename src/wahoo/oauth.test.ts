@@ -68,13 +68,13 @@ describe("readTokens", () => {
 
 describe("exchangeCode", () => {
   it("posts the code with client credentials and redirect_uri", async () => {
-    const { fetchImpl, requests } = stubFetch(respondJson(200, TOKEN_RESPONSE));
+    const { fetch, requests } = stubFetch(respondJson(200, TOKEN_RESPONSE));
 
     const tokens = await exchangeCode(
       CONFIG,
       "abc",
       "https://hub.example/auth/wahoo/callback",
-      fetchImpl,
+      fetch,
     );
 
     expect(tokens).toEqual(TOKENS);
@@ -91,28 +91,28 @@ describe("exchangeCode", () => {
   });
 
   it("computes expiry from now when created_at is absent", async () => {
-    const { fetchImpl } = stubFetch(
+    const { fetch } = stubFetch(
       respondJson(200, { ...TOKEN_RESPONSE, created_at: undefined }),
     );
 
     const before = Math.floor(Date.now() / 1000);
-    const tokens = await exchangeCode(CONFIG, "abc", "https://cb", fetchImpl);
+    const tokens = await exchangeCode(CONFIG, "abc", "https://cb", fetch);
 
     expect(tokens.expiresAt).toBeGreaterThanOrEqual(before + 7200);
     expect(tokens.expiresAt).toBeLessThanOrEqual(before + 7210);
   });
 
   it("throws on a failed exchange", async () => {
-    const { fetchImpl } = stubFetch(respondJson(400, { error: "bad" }));
+    const { fetch } = stubFetch(respondJson(400, { error: "bad" }));
     await expect(
-      exchangeCode(CONFIG, "abc", "https://cb", fetchImpl),
+      exchangeCode(CONFIG, "abc", "https://cb", fetch),
     ).rejects.toThrow(/400/);
   });
 });
 
 describe("refreshTokens", () => {
   it("posts the refresh token grant", async () => {
-    const { fetchImpl, requests } = stubFetch(
+    const { fetch, requests } = stubFetch(
       respondJson(200, {
         access_token: "next-access",
         refresh_token: "next-refresh",
@@ -121,7 +121,7 @@ describe("refreshTokens", () => {
       }),
     );
 
-    const tokens = await refreshTokens(CONFIG, "refresh", fetchImpl);
+    const tokens = await refreshTokens(CONFIG, "refresh", fetch);
 
     expect(tokens).toEqual({
       accessToken: "next-access",

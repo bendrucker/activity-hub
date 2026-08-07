@@ -74,7 +74,7 @@ function apiClient(stub: FetchStub): StravaClient {
   return new StravaClient({
     apiBase: "https://api.example/api/v3",
     tokens: tokenBroker(env, "strava"),
-    fetchImpl: stub.fetchImpl,
+    fetch: stub.fetch,
   });
 }
 
@@ -148,7 +148,7 @@ describe("consumeStravaEvent", () => {
 
     await consumeStravaEvent(message(), testEnv, {
       client: apiClient(stub),
-      fetchImpl: photoStub.fetchImpl,
+      fetch: photoStub.fetch,
     });
 
     const storedDetail = await env.RAW.get(detailKey(ACTIVITY_ID));
@@ -251,7 +251,7 @@ describe("consumeStravaEvent", () => {
       }),
     );
     const photoStub = stubFetch(() => new Response(new Uint8Array([1])));
-    const options = { client: apiClient(stub), fetchImpl: photoStub.fetchImpl };
+    const options = { client: apiClient(stub), fetch: photoStub.fetch };
 
     await consumeStravaEvent(message(), testEnv, options);
     const firstRow = await sourceRow(String(ACTIVITY_ID));
@@ -479,7 +479,7 @@ describe("consumeStravaEvent on a refresh", () => {
 
     await consumeStravaEvent(REFRESH_MESSAGE, testEnv, {
       client: apiClient(stub),
-      fetchImpl: photoStub.fetchImpl,
+      fetch: photoStub.fetch,
     });
 
     expect(photoStub.requests.map((request) => request.url)).toEqual([

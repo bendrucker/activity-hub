@@ -4,7 +4,7 @@ import type { TokenSource } from "../tokens/source";
 export interface StravaClientConfig {
   apiBase: string;
   tokens: TokenSource;
-  fetchImpl?: typeof fetch;
+  fetch?: typeof globalThis.fetch;
 }
 
 export function stravaClient(env: Env): StravaClient {
@@ -15,12 +15,13 @@ export function stravaClient(env: Env): StravaClient {
 }
 
 export class StravaClient {
-  private readonly fetchImpl: typeof fetch;
+  private readonly transport: typeof globalThis.fetch;
 
   constructor(private readonly config: StravaClientConfig) {
     // workerd's native fetch throws "Illegal invocation" when called with a
     // foreign `this`. An arrow wrapper keeps late binding without that risk.
-    this.fetchImpl = config.fetchImpl ?? ((input, init) => fetch(input, init));
+    this.transport =
+      config.fetch ?? ((input, init) => globalThis.fetch(input, init));
   }
 
   async fetch(path: string, init: RequestInit = {}): Promise<Response> {
@@ -40,7 +41,7 @@ export class StravaClient {
   ): Promise<Response> {
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${accessToken}`);
-    return this.fetchImpl(`${this.config.apiBase}${path}`, {
+    return this.transport(`${this.config.apiBase}${path}`, {
       ...init,
       headers,
     });

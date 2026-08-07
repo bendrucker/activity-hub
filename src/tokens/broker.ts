@@ -31,7 +31,7 @@ interface ProviderBinding {
   refresh(
     config: OAuthConfig,
     refreshToken: string,
-    fetchImpl?: typeof fetch,
+    fetch?: typeof globalThis.fetch,
   ): Promise<StoredTokens>;
 }
 
@@ -61,7 +61,7 @@ function isProvider(name: string | undefined): name is Provider {
 const STORAGE_KEY = "tokens";
 
 export interface BrokerOptions {
-  fetchImpl?: typeof fetch;
+  fetch?: typeof globalThis.fetch;
 }
 
 // One instance per provider serializes every refresh for that grant. Wahoo
@@ -175,7 +175,7 @@ export class TokenBroker extends DurableObject<Env> {
     const fresh = await provider.refresh(
       provider.config(this.env),
       stored.refreshToken,
-      options.fetchImpl,
+      options.fetch,
     );
     await this.store(fresh);
     return fresh;
