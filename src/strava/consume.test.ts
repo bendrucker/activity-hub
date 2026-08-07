@@ -229,8 +229,11 @@ describe("consumeStravaEvent", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const stub = stubFetch(() => new Response("not found", { status: 404 }));
 
-    await consumeStravaEvent(message(), testEnv, { client: apiClient(stub) });
+    const outcome = await consumeStravaEvent(message(), testEnv, {
+      client: apiClient(stub),
+    });
 
+    expect(outcome).toBe("skipped: activity not found");
     expect(await env.RAW.get(detailKey(ACTIVITY_ID))).toBeNull();
     expect(await sourceRow(String(ACTIVITY_ID))).toBeNull();
     expect(warn).toHaveBeenCalled();
@@ -356,10 +359,15 @@ describe("consumeStravaEvent", () => {
       throw new Error("athlete events should not fetch");
     });
 
-    await consumeStravaEvent(message({ objectType: "athlete" }), testEnv, {
-      client: apiClient(stub),
-    });
+    const outcome = await consumeStravaEvent(
+      message({ objectType: "athlete" }),
+      testEnv,
+      { client: apiClient(stub) },
+    );
 
+    // The log entry carries the athlete id, so an unnamed outcome would read
+    // as an activity that ingested cleanly.
+    expect(outcome).toBe("skipped: athlete event, handled manually");
     expect(stub.requests).toHaveLength(0);
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
@@ -413,10 +421,11 @@ describe("consumeStravaEvent on a refresh", () => {
       }),
     );
 
-    await consumeStravaEvent(REFRESH_MESSAGE, testEnv, {
+    const outcome = await consumeStravaEvent(REFRESH_MESSAGE, testEnv, {
       client: apiClient(stub),
     });
 
+    expect(outcome).toBe("ok: nothing changed");
     expect(await detailSeal()).toBe("intact");
     const row = await sourceRow(String(ACTIVITY_ID));
     expect(row!.updated_at).toBe(SEEDED_UPDATED_AT);
@@ -525,10 +534,11 @@ describe("consumeStravaEvent on a refresh", () => {
     await seedActivity();
     const stub = stubFetch(() => new Response("not found", { status: 404 }));
 
-    await consumeStravaEvent(REFRESH_MESSAGE, testEnv, {
+    const outcome = await consumeStravaEvent(REFRESH_MESSAGE, testEnv, {
       client: apiClient(stub),
     });
 
+    expect(outcome).toBe("skipped: activity not found");
     expect(stub.requests).toHaveLength(1);
     expect(await detailSeal()).toBe("intact");
     const row = await sourceRow(String(ACTIVITY_ID));

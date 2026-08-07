@@ -53,7 +53,7 @@ describe("consumeBatch", () => {
     const message = stubMessage(wahooMessage);
 
     await consumeBatch(batchOf([message]), testEnv, {
-      consume: () => Promise.resolve(),
+      consume: () => Promise.resolve(undefined),
     });
 
     expect(message.ack).toHaveBeenCalled();
@@ -140,7 +140,7 @@ describe("consumeBatch", () => {
       consume: (message) =>
         message.source === "wahoo"
           ? Promise.reject(new Error("boom"))
-          : Promise.resolve(),
+          : Promise.resolve(undefined),
     });
 
     expect(failed.retry).toHaveBeenCalled();
@@ -186,7 +186,7 @@ describe("consumeBatch", () => {
       consume: (message) =>
         message.source === "wahoo"
           ? Promise.reject(new RateLimitedError("slow down"))
-          : Promise.resolve(),
+          : Promise.resolve(undefined),
     });
 
     expect(limited.retry).toHaveBeenCalledWith({ delaySeconds: 5 * 60 });
@@ -202,7 +202,7 @@ describe("consumeBatch", () => {
       consume: (message) =>
         message.source === "wahoo"
           ? Promise.reject(new Error("boom"))
-          : Promise.resolve(),
+          : Promise.resolve(undefined),
     });
 
     const entries = await readConsumeLog(env.TOKENS);
@@ -211,5 +211,19 @@ describe("consumeBatch", () => {
       [202, "ok"],
     ]);
     error.mockRestore();
+  });
+
+  it("logs the outcome the consumer returned instead of ok", async () => {
+    const message = stubMessage(wahooMessage);
+
+    await consumeBatch(batchOf([message]), testEnv, {
+      consume: () => Promise.resolve("skipped: third-party sync stub"),
+    });
+
+    expect(message.ack).toHaveBeenCalled();
+    const entries = await readConsumeLog(env.TOKENS);
+    expect(entries.map((entry) => entry.outcome)).toEqual([
+      "skipped: third-party sync stub",
+    ]);
   });
 });

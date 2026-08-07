@@ -219,11 +219,11 @@ async function refreshActivity(
   activityId: number,
   env: Env,
   options: ConsumeOptions,
-): Promise<void> {
+): Promise<string | undefined> {
   const client = options.client ?? stravaClient(env);
   const text = await fetchDetailText(client, activityId);
   if (text === null) {
-    return;
+    return "skipped: activity not found";
   }
 
   const stored = await env.RAW.get(detailKey(activityId));
@@ -252,7 +252,7 @@ async function refreshActivity(
   }
 
   if (!detailChanged && !streamsAdded && photos.added === 0) {
-    return;
+    return "ok: nothing changed";
   }
 
   console.log(
@@ -270,14 +270,16 @@ export async function consumeStravaEvent(
   message: StravaIngestMessage,
   env: Env,
   options: ConsumeOptions = {},
-): Promise<void> {
+): Promise<string | undefined> {
   if (message.kind === "refresh") {
     return refreshActivity(message.objectId, env, options);
   }
 
+  // An athlete event's objectId is the athlete, so the log line would
+  // otherwise read as an activity that ingested cleanly.
   if (message.objectType === "athlete") {
     console.warn("ignoring Strava athlete event; handled manually");
-    return;
+    return "skipped: athlete event, handled manually";
   }
 
   const client = options.client ?? stravaClient(env);
@@ -290,7 +292,7 @@ export async function consumeStravaEvent(
 
   const text = await fetchDetailText(client, activityId);
   if (text === null) {
-    return;
+    return "skipped: activity not found";
   }
   await env.RAW.put(detailKey(activityId), text);
 

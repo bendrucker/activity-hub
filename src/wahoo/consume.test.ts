@@ -96,12 +96,14 @@ function message(summary: WahooWorkoutSummary = SUMMARY): WahooIngestMessage {
 }
 
 // What backfill enqueues: the list entry, no summary.
-function backfillMessage(): WahooIngestMessage {
+function backfillMessage(
+  workout: Record<string, unknown> = {},
+): WahooIngestMessage {
   return {
     source: "wahoo",
     kind: "workout",
     workoutId: WORKOUT_ID,
-    workout: { ...SUMMARY.workout, name: "morning ride" },
+    workout: { ...SUMMARY.workout, name: "morning ride", ...workout },
   };
 }
 
@@ -331,13 +333,32 @@ describe("consumeWahooEvent", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const api = stubFetch(() => new Response("not found", { status: 404 }));
 
-    await consumeWahooEvent(backfillMessage(), testEnv, {
+    const outcome = await consumeWahooEvent(backfillMessage(), testEnv, {
       client: apiClient(api),
     });
 
+    expect(outcome).toBe("skipped: unexplained missing summary");
     expect(await sourceRow(String(WORKOUT_ID))).toBeNull();
     expect(await env.RAW.get(summaryKey(WORKOUT_ID))).toBeNull();
     expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  // Third-party apps sync their own activities into Wahoo, which stores a
+  // stub with a null summary. The real recording is the foreign one, so the
+  // skip is correct and the outcome says where the copy lives.
+  it("names the app and id a sync stub's real copy lives under", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const api = stubFetch(() => new Response("unauthorized", { status: 401 }));
+
+    const outcome = await consumeWahooEvent(
+      backfillMessage({ workout_token: "FID1085 19536737704:0" }),
+      testEnv,
+      { client: apiClient(api) },
+    );
+
+    expect(outcome).toBe("skipped: third-party sync stub, strava 19536737704");
+    expect(await sourceRow(String(WORKOUT_ID))).toBeNull();
     warn.mockRestore();
   });
 
@@ -360,6 +381,23 @@ describe("consumeWahooEvent", () => {
     warn.mockRestore();
   });
 
+  // A summary this code cannot read is a defect on this side. Labelling it
+  // like a missing one writes the workout off as an absence at Wahoo.
+  it("skips a backfill workout whose summary does not parse", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const api = stubFetch(() => new Response(JSON.stringify({ id: 8297 })));
+
+    const outcome = await consumeWahooEvent(
+      backfillMessage({ minutes: undefined }),
+      testEnv,
+      { client: apiClient(api) },
+    );
+
+    expect(outcome).toBe("skipped: summary returned but unreadable");
+    expect(await sourceRow(String(WORKOUT_ID))).toBeNull();
+    warn.mockRestore();
+  });
+
   it("throws RateLimitedError when the summary fetch is rate limited", async () => {
     const api = stubFetch(() => new Response("slow down", { status: 429 }));
 
@@ -376,10 +414,11 @@ describe("consumeWahooEvent", () => {
         ),
     );
 
-    await consumeWahooEvent(backfillMessage(), testEnv, {
+    const outcome = await consumeWahooEvent(backfillMessage(), testEnv, {
       client: apiClient(api),
     });
 
+    expect(outcome).toBe("ok: summary only, no file");
     const storedSummary = await env.RAW.get(summaryKey(WORKOUT_ID));
     expect(storedSummary).not.toBeNull();
     expect(await env.RAW.get(fitKey(WORKOUT_ID))).toBeNull();

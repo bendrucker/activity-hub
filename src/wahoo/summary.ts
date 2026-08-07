@@ -52,6 +52,34 @@ export function summaryFileUrl(summary: WahooWorkoutSummary): string | null {
   return summary.file?.url ?? null;
 }
 
+export interface SyncStub {
+  // The app that pushed the workout in, named when we know its id.
+  app: string;
+  // The workout's id in that app, where the real recording lives.
+  foreignId: string;
+}
+
+// A device workout's token names the head unit and a counter ("ELEMNT BOLT
+// 511E:65"). A workout a third-party app synced in instead carries its
+// fitness_app_id and the id it holds there. Wahoo stores those with a null
+// summary and answers 401 for one forever, so they are absences by design.
+const SYNC_WORKOUT_TOKEN = /^FID(\d+) (\d+):\d+$/;
+
+const FITNESS_APPS: Record<string, string> = { "1085": "strava" };
+
+export function syncStub(workout: Record<string, unknown>): SyncStub | null {
+  const { workout_token: token } = workout;
+  if (typeof token !== "string") {
+    return null;
+  }
+  const match = SYNC_WORKOUT_TOKEN.exec(token);
+  if (match === null) {
+    return null;
+  }
+  const appId = match[1]!;
+  return { app: FITNESS_APPS[appId] ?? `app ${appId}`, foreignId: match[2]! };
+}
+
 // duration_total_accum is elapsed seconds as a decimal string. minutes is
 // rounded, so it is only the fallback.
 export function durationS(summary: WahooWorkoutSummary): number {

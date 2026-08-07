@@ -63,14 +63,17 @@ function rateLimitDelayS(
   return ladder[step - 1]!;
 }
 
-function consumeEvent(message: IngestMessage, env: Env): Promise<void> {
+function consumeEvent(
+  message: IngestMessage,
+  env: Env,
+): Promise<string | undefined> {
   return message.source === "wahoo"
     ? consumeWahooEvent(message, env)
     : consumeStravaEvent(message, env);
 }
 
 export interface BatchOptions {
-  consume?: (message: IngestMessage, env: Env) => Promise<void>;
+  consume?: (message: IngestMessage, env: Env) => Promise<string | undefined>;
 }
 
 export async function consumeBatch(
@@ -94,9 +97,9 @@ export async function consumeBatch(
       continue;
     }
     try {
-      await consume(message.body, env);
+      const outcome = await consume(message.body, env);
       message.ack();
-      trail.push(consumeLogEntry(message.body, "ok"));
+      trail.push(consumeLogEntry(message.body, outcome ?? "ok"));
     } catch (error) {
       if (error instanceof RateLimitedError) {
         const delaySeconds =
