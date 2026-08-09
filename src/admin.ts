@@ -1,6 +1,10 @@
 import { readConsumeLog } from "./consumelog";
 import { RateLimitedError } from "./ingest";
 import {
+  backfillStravaStreams,
+  type StravaBackfillOptions,
+} from "./strava/backfill";
+import {
   reconcileStravaActivities,
   type ReconcileOptions,
   type ReconcileReport,
@@ -188,6 +192,26 @@ export async function handleConsumeLog(
 // time. Each call returns the page to resume from, letting the caller drive
 // the walk to exhaustion and read the depth of Wahoo's cloud history off the
 // last response.
+export async function handleStravaBackfill(
+  request: Request,
+  env: Env,
+  options: StravaBackfillOptions = {},
+): Promise<Response> {
+  if (!authorized(request, env)) {
+    return new Response("Forbidden", { status: 403 });
+  }
+
+  const cursor = new URL(request.url).searchParams.get("cursor") ?? undefined;
+
+  try {
+    return Response.json(
+      await backfillStravaStreams(env, { cursor, ...options }),
+    );
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
 export async function handleWahooBackfill(
   request: Request,
   env: Env,

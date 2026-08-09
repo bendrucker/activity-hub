@@ -7,6 +7,7 @@ import { SECRETS } from "../test/secrets";
 import {
   handleConsumeLog,
   handleReconcile,
+  handleStravaBackfill,
   handleWahooBackfill,
   handleWahooIngest,
   handleWahooProbe,
@@ -48,6 +49,20 @@ function wahooApiClient(stub: FetchStub): WahooClient {
 
 function reconcileRequest(authorization?: string): Request {
   return new Request("https://hub.example/admin/reconcile", {
+    method: "POST",
+    headers: authorization ? { Authorization: authorization } : {},
+  });
+}
+
+function stravaBackfillRequest(
+  authorization?: string,
+  cursor?: string,
+): Request {
+  const url = new URL("https://hub.example/admin/strava-backfill");
+  if (cursor !== undefined) {
+    url.searchParams.set("cursor", cursor);
+  }
+  return new Request(url, {
     method: "POST",
     headers: authorization ? { Authorization: authorization } : {},
   });
@@ -105,6 +120,56 @@ beforeEach(async () => {
     env.REGISTRY.prepare("DELETE FROM activity_sources"),
     env.REGISTRY.prepare("DELETE FROM activities"),
   ]);
+});
+
+describe("handleStravaBackfill", () => {
+  it("rejects a request without an Authorization header", async () => {
+    const response = await handleStravaBackfill(
+      stravaBackfillRequest(),
+      testEnv(),
+    );
+    expect(response.status).toBe(403);
+  });
+
+  it("enqueues refreshes for rows with nothing archived", async () => {
+    const now = new Date().toISOString();
+    await env.REGISTRY.batch([
+      env.REGISTRY.prepare(
+        "INSERT INTO activities (activity_id, started_at, timezone, sport, duration_s, created_at, updated_at) VALUES ('activity-101', '2018-07-01T14:00:00.000Z', 'America/Los_Angeles', 'ride', 3600, ?1, ?1)",
+      ).bind(now),
+      env.REGISTRY.prepare(
+        "INSERT INTO activity_sources (source, source_id, activity_id, raw_keys, created_at, updated_at) VALUES ('strava', '101', 'activity-101', '{}', ?1, ?1)",
+      ).bind(now),
+    ]);
+    const queue = stubQueue<StravaIngestMessage>();
+
+    const response = await handleStravaBackfill(
+      stravaBackfillRequest("Bearer admin-secret"),
+      testEnv({ INGEST_QUEUE: queue }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      enqueued: 1,
+      remaining: 1,
+      done: true,
+    });
+    expect(queue.messages).toEqual([
+      { source: "strava", kind: "refresh", objectId: 101 },
+    ]);
+  });
+
+  it("passes the cursor through", async () => {
+    const queue = stubQueue<StravaIngestMessage>();
+
+    const response = await handleStravaBackfill(
+      stravaBackfillRequest("Bearer admin-secret", "500"),
+      testEnv({ INGEST_QUEUE: queue }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(queue.messages).toEqual([]);
+  });
 });
 
 describe("handleReconcile", () => {
