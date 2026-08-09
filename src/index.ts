@@ -1,6 +1,7 @@
 import {
   handleConsumeLog,
   handleReconcile,
+  handleStravaBackfill,
   handleWahooBackfill,
   handleWahooIngest,
   handleWahooProbe,
@@ -159,6 +160,12 @@ export default {
     if (url.pathname === "/admin/reconcile") {
       if (request.method === "POST") {
         return handleReconcile(request, env);
+      }
+      return new Response("Method Not Allowed", { status: 405 });
+    }
+    if (url.pathname === "/admin/strava-backfill") {
+      if (request.method === "POST") {
+        return handleStravaBackfill(request, env);
       }
       return new Response("Method Not Allowed", { status: 405 });
     }
