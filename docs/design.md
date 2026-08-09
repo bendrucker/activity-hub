@@ -79,6 +79,28 @@ A DuckDB batch job reads the raw bucket over `httpfs` (native R2 secret support)
 
 Replay is the point of this layer. Rebuilding the lake is rerunning the job against `raw/`, so schema changes and new feature engineering never require touching a source API.
 
+#### Archive Tiers
+
+Not every activity has a file to parse, and the ones that don't are mostly not defects. The job reads `activity_sources.raw_keys` to learn what exists for an activity, and handles four tiers.
+
+An `original` key means a FIT or GPX, from the Strava bulk export or from Wahoo. This is the richest input and covers most of the history. A `streams` key means Strava's per-second arrays, written by the webhook consumer. Fidelity is close to a FIT for everything the lake models, missing only developer fields.
+
+A `detail` key with no `original` and no `streams` means a **manually entered Strava activity**. These carry `manual: true` with `upload_id`, `external_id`, and `device_name` all null, and Strava's streams endpoint answers 404 for them. No file was ever created, so `detail.json` is the complete record: distance, elapsed time, and title, with no per-second data. Treat these as summary rows rather than as parse failures.
+
+A Wahoo `summary` key with no `original` means the device registered a workout it never produced a file for. Some carry usable metrics. Many carry null distance, duration, and power.
+
+#### Quality Filters
+
+Two populations distort aggregates and belong outside anything published.
+
+Zero-duration activities are device artifacts. They cluster at duplicate start timestamps, the signature of an ELEMNT emitting several empty workouts at once.
+
+Activities running past a day were never stopped. The extreme case starts 2016-01-01 and claims 10,452,264 seconds. That is 121 days. Set the cut well above twelve hours, because an eight-to-twelve-hour day is a real ride and has to survive it.
+
+#### Where Metadata Lives
+
+Titles, descriptions, gear, and full-resolution photos come from the export tree at `raw/strava/export/{date}/`, chiefly `activities.csv`. Per-activity `detail.json` exists only for activities the webhook path or a backfill has touched, so the job reads the export for history and `detail.json` for anything newer than the last export.
+
 #### Publishing
 
 bendrucker.me exposes a named `WorkerEntrypoint` (`Publish`) that owns writes to its own D1. The hub binds it as a service and calls `publishActivity(row)` after ingest. The website owns its schema and migrations. The hub cannot corrupt them. A daily reconciliation cron re-publishes recent activities to heal missed webhooks.
