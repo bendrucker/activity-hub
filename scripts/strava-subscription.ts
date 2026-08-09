@@ -24,7 +24,7 @@ async function create(clientId: string, clientSecret: string): Promise<void> {
   const verifyToken = requireEnv("STRAVA_VERIFY_TOKEN");
   const callbackUrl =
     process.env.STRAVA_CALLBACK_URL ??
-    "https://activity-hub-ingest.bvdrucker.workers.dev/webhooks/strava";
+    "https://hub.bendrucker.me/webhooks/strava";
 
   const response = await fetch(API_BASE, {
     method: "POST",

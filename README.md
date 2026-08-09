@@ -47,6 +47,33 @@ R2 API tokens apply a single permission level across the buckets they cover, so
 raw reads and lake writes are two separate tokens. Both get created in the
 Cloudflare dashboard when the batch job lands.
 
+## Access
+
+The worker serves only `hub.bendrucker.me`. Behind `/admin/*` and `/auth/*` sits
+a Cloudflare Access application, which resolves identity before a request ever
+reaches the worker. `ADMIN_TOKEN` still guards the admin routes underneath it.
+
+`/webhooks/*` is deliberately outside both applications. Strava and Wahoo post
+server to server, with no browser and no identity to challenge, so an Access
+policy there would silently drop every event. Those routes authenticate on the
+provider's own terms instead: Strava against `STRAVA_SUBSCRIPTION_ID`, Wahoo
+against `WAHOO_WEBHOOK_TOKEN`.
+
+Reaching `/admin/*` from a script means a service token rather than a browser
+login. Its two header values come from Terraform outputs in
+[bendrucker/infrastructure](https://github.com/bendrucker/infrastructure):
+
+```sh
+curl -H "CF-Access-Client-Id: $(terraform output -raw activity_hub_access_client_id)" \
+     -H "CF-Access-Client-Secret: $(terraform output -raw activity_hub_access_client_secret)" \
+     -H "Authorization: Bearer $ADMIN_TOKEN" \
+     https://hub.bendrucker.me/admin/consume-log
+```
+
+The DNS record, the worker route, the Access applications, and the service token
+are all Terraform-managed in that repository. That workspace is VCS-connected, so
+applies run from a merge rather than from a local `terraform apply`.
+
 ## Status
 
 The Strava pipeline is live. The historical export is imported, OAuth and webhooks run, and a daily reconciliation cron catches anything webhooks miss. Wahoo is in progress ([#11](https://github.com/bendrucker/activity-hub/issues/11)). The lake and DuckDB transform job haven't started ([#13](https://github.com/bendrucker/activity-hub/issues/13), [#14](https://github.com/bendrucker/activity-hub/issues/14)).
