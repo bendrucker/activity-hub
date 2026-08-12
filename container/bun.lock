@@ -6,7 +6,7 @@
       "name": "activity-hub-container",
       "dependencies": {
         "@duckdb/node-api": "1.5.5-r.4",
-        "@garmin/fitsdk": "^21.208.0",
+        "@garmin/fitsdk": "21.208.0",
       },
       "devDependencies": {
         "@types/bun": "^1.3.14",
@@ -35,7 +35,7 @@
 
     "@duckdb/node-bindings-win32-x64": ["@duckdb/node-bindings-win32-x64@1.5.5-r.4", "", { "os": "win32", "cpu": "x64" }, "sha512-X9XGcWQ10P3mvUIaMXXk2bi94Cow7b/ziTPMKxJ0U8U3wQPxsLzEUP7D7C/KrBWINl5am2k+5SkDVyA/THUgPg=="],
 
-    "@garmin/fitsdk": ["@garmin/fitsdk@21.213.0", "", {}, "sha512-MrJEm7naMxs+VTkWI0+HMC6K1xJtr8Lb2X8CQdUo0GEFhM9hQNfGyaTShdFphqP2pH/u8/fqw0w9JpjZDNE6Mw=="],
+    "@garmin/fitsdk": ["@garmin/fitsdk@21.208.0", "", {}, "sha512-mEmPHyzqaS3bb8n+yaOmgmBo/0CUrsLsN5J4viAUN5Kh6+YiwdvPh5OAzb2Jgy2IaI23q7mGtNr/8WRJC1+HoA=="],
 
     "@types/bun": ["@types/bun@1.3.14", "", { "dependencies": { "bun-types": "1.3.14" } }, "sha512-h1hFqFVcvAvD9j9K7ZW7vd82aSA+rTdznZa+5bwvCwqSB1jmmfLcbIWhOLx1/+boy/xmjgCs/OMUL8hRJSmnPw=="],
 
