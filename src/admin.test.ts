@@ -6,12 +6,14 @@ import { stubQueue } from "../test/queue-stub";
 import { SECRETS } from "../test/secrets";
 import {
   handleConsumeLog,
+  handlePipeline,
   handleReconcile,
   handleStravaBackfill,
   handleWahooBackfill,
   handleWahooIngest,
   handleWahooProbe,
 } from "./admin";
+import { MAX_ATTEMPTS, type DerivedStatus, type Stage } from "./derived";
 import type { StravaIngestMessage, WahooIngestMessage } from "./ingest";
 import { StravaClient } from "./strava/client";
 import { tokenBroker } from "./tokens/broker";
@@ -117,6 +119,7 @@ beforeEach(async () => {
     expiresAt: Math.floor(Date.now() / 1000) + 7200,
   });
   await env.REGISTRY.batch([
+    env.REGISTRY.prepare("DELETE FROM derived"),
     env.REGISTRY.prepare("DELETE FROM activity_sources"),
     env.REGISTRY.prepare("DELETE FROM activities"),
   ]);
@@ -531,6 +534,204 @@ describe("handleWahooIngest", () => {
     );
 
     expect(response.status).toBe(404);
+  });
+});
+
+describe("handlePipeline", () => {
+  const OLDEST = "2026-01-01T00:00:00.000Z";
+  const NEWER = "2026-02-01T00:00:00.000Z";
+  const RECORDED = "2099-01-01T00:00:00.000Z";
+
+  interface StageSummaryBody {
+    stage: Stage;
+    total: number;
+    statuses: Record<DerivedStatus, number>;
+    oldestStale: {
+      activityId: string;
+      sourceUpdatedAt: string;
+      behindS: number | null;
+    } | null;
+  }
+
+  interface PipelineBody {
+    ok: boolean;
+    generatedAt: string;
+    stages: StageSummaryBody[];
+    failures: {
+      activityId: string;
+      stage: Stage;
+      error: string | null;
+      updatedAt: string;
+    }[];
+  }
+
+  function pipelineRequest(authorization?: string): Request {
+    return new Request("https://hub.example/admin/pipeline", {
+      headers: authorization ? { Authorization: authorization } : {},
+    });
+  }
+
+  async function seedActivity(
+    activityId: string,
+    sourceUpdatedAt: string,
+  ): Promise<void> {
+    await env.REGISTRY.batch([
+      env.REGISTRY.prepare(
+        `INSERT INTO activities (activity_id, started_at, timezone, sport, duration_s, created_at, updated_at)
+         VALUES (?1, '2026-01-01T14:00:00.000Z', 'America/Los_Angeles', 'ride', 3600, ?2, ?2)`,
+      ).bind(activityId, sourceUpdatedAt),
+      env.REGISTRY.prepare(
+        `INSERT INTO activity_sources (source, source_id, activity_id, raw_keys, created_at, updated_at)
+         VALUES ('wahoo', ?1, ?1, '{}', ?2, ?2)`,
+      ).bind(activityId, sourceUpdatedAt),
+    ]);
+  }
+
+  interface SeedDerived {
+    activityId: string;
+    stage: Stage;
+    status: DerivedStatus;
+    attempts?: number;
+    error?: string;
+  }
+
+  async function seedDerived(seed: SeedDerived): Promise<void> {
+    await env.REGISTRY.prepare(
+      `INSERT INTO derived (activity_id, stage, input_fingerprint, output_key, status, attempts, error, updated_at)
+       VALUES (?1, ?2, 'fingerprint', NULL, ?3, ?4, ?5, ?6)`,
+    )
+      .bind(
+        seed.activityId,
+        seed.stage,
+        seed.status,
+        seed.attempts ?? 0,
+        seed.error ?? null,
+        RECORDED,
+      )
+      .run();
+  }
+
+  function stageOf(body: PipelineBody, stage: Stage): StageSummaryBody {
+    const summary = body.stages.find((entry) => entry.stage === stage);
+    expect(summary).toBeDefined();
+    return summary!;
+  }
+
+  it("rejects a request without an Authorization header", async () => {
+    const response = await handlePipeline(pipelineRequest(), testEnv());
+    expect(response.status).toBe(403);
+  });
+
+  it("rejects a wrong token", async () => {
+    const response = await handlePipeline(
+      pipelineRequest("Bearer wrong"),
+      testEnv(),
+    );
+    expect(response.status).toBe(403);
+  });
+
+  it("reports every stage as zero when nothing has been derived", async () => {
+    const response = await handlePipeline(
+      pipelineRequest("Bearer admin-secret"),
+      testEnv(),
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as PipelineBody;
+    expect(body.ok).toBe(true);
+    expect(Date.parse(body.generatedAt)).not.toBeNaN();
+    expect(body.stages).toEqual([
+      {
+        stage: "decode",
+        total: 0,
+        statuses: { ok: 0, failed: 0, skipped: 0 },
+        oldestStale: null,
+      },
+      {
+        stage: "lake",
+        total: 0,
+        statuses: { ok: 0, failed: 0, skipped: 0 },
+        oldestStale: null,
+      },
+      {
+        stage: "publish",
+        total: 0,
+        statuses: { ok: 0, failed: 0, skipped: 0 },
+        oldestStale: null,
+      },
+    ]);
+    expect(body.failures).toEqual([]);
+  });
+
+  it("counts each stage and names the oldest stale activity", async () => {
+    await seedActivity("a1", OLDEST);
+    await seedActivity("a2", NEWER);
+    await seedDerived({ activityId: "a1", stage: "decode", status: "ok" });
+    await seedDerived({
+      activityId: "a2",
+      stage: "decode",
+      status: "failed",
+      attempts: MAX_ATTEMPTS,
+      error: "no decodable raw key",
+    });
+    await seedDerived({ activityId: "a1", stage: "lake", status: "skipped" });
+
+    const response = await handlePipeline(
+      pipelineRequest("Bearer admin-secret"),
+      testEnv(),
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as PipelineBody;
+
+    // Both decode rows are current, and the failed one has spent its attempts,
+    // so nothing at that stage is waiting to be picked up.
+    expect(stageOf(body, "decode")).toEqual({
+      stage: "decode",
+      total: 2,
+      statuses: { ok: 1, failed: 1, skipped: 0 },
+      oldestStale: null,
+    });
+
+    const lake = stageOf(body, "lake");
+    expect(lake.total).toBe(1);
+    expect(lake.statuses).toEqual({ ok: 0, failed: 0, skipped: 1 });
+    expect(lake.oldestStale).toMatchObject({
+      activityId: "a2",
+      sourceUpdatedAt: NEWER,
+    });
+
+    const publish = stageOf(body, "publish");
+    expect(publish.total).toBe(0);
+    expect(publish.oldestStale).toMatchObject({
+      activityId: "a1",
+      sourceUpdatedAt: OLDEST,
+    });
+
+    expect(body.failures).toEqual([
+      {
+        activityId: "a2",
+        stage: "decode",
+        error: "no decodable raw key",
+        updatedAt: RECORDED,
+      },
+    ]);
+  });
+
+  it("ages the oldest stale activity in seconds", async () => {
+    await seedActivity("a1", OLDEST);
+    const expected = Math.round((Date.now() - Date.parse(OLDEST)) / 1000);
+
+    const response = await handlePipeline(
+      pipelineRequest("Bearer admin-secret"),
+      testEnv(),
+    );
+
+    const body = (await response.json()) as PipelineBody;
+    expect(stageOf(body, "decode").oldestStale?.behindS).toBeCloseTo(
+      expected,
+      -1,
+    );
   });
 });
 
