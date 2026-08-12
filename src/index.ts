@@ -3,6 +3,7 @@ import {
   handlePipeline,
   handleReconcile,
   handleStravaBackfill,
+  handleTransform,
   handleWahooBackfill,
   handleWahooIngest,
   handleWahooProbe,
@@ -23,6 +24,12 @@ import {
   handleWebhookEvent as stravaWebhookEvent,
   handleWebhookVerify as stravaWebhookVerify,
 } from "./strava/webhook";
+import {
+  consumeTransformBatch,
+  TRANSFORM_QUEUE,
+  type TransformMessage,
+} from "./transform/consume";
+import { reconcileTransform } from "./transform/enqueue";
 import { consumeWahooEvent } from "./wahoo/consume";
 import {
   handleAuthorize as wahooAuthorize,
@@ -33,6 +40,7 @@ import { handleWebhookEvent as wahooWebhookEvent } from "./wahoo/webhook";
 // The runtime resolves the durable_objects binding against the entry point's
 // exports.
 export { TokenBroker } from "./tokens/broker";
+export { DecodeContainer } from "./transform/container";
 
 // Both sources budget over nested windows: Wahoo 200 per 5 minutes, 1,000
 // per hour and 5,000 per day, Strava 100 per 15 minutes and 1,000 per day.
@@ -194,6 +202,12 @@ export default {
       }
       return new Response("Method Not Allowed", { status: 405 });
     }
+    if (url.pathname === "/admin/transform") {
+      if (request.method === "POST") {
+        return handleTransform(request, env);
+      }
+      return new Response("Method Not Allowed", { status: 405 });
+    }
     if (url.pathname === "/admin/consume-log") {
       if (request.method === "GET") {
         return handleConsumeLog(request, env);
@@ -203,7 +217,13 @@ export default {
     return new Response("Not Found", { status: 404 });
   },
 
+  // Two independent sweeps share one cron. The transform sweep reads what the
+  // registry already holds, so a Strava outage has no bearing on whether there
+  // is decoding to do, and neither failure may cancel the other. Both run, then
+  // the run fails if either did.
   async scheduled(_controller, env): Promise<void> {
+    const failures: unknown[] = [];
+
     try {
       const { enqueued, refreshed } = await reconcileStravaActivities(env);
       console.log(
@@ -214,13 +234,32 @@ export default {
         // The next daily run resumes from the same high-water mark, so
         // there's nothing to retry now.
         console.warn("Strava reconciliation rate limited, ending run");
-        return;
+      } else {
+        failures.push(error);
       }
-      throw error;
+    }
+
+    try {
+      const enqueued = await reconcileTransform(env);
+      console.log(`transform reconciliation enqueued ${enqueued} messages`);
+    } catch (error) {
+      failures.push(error);
+    }
+
+    if (failures.length > 0) {
+      throw new AggregateError(failures, "scheduled reconciliation failed");
     }
   },
 
   async queue(batch, env): Promise<void> {
-    await consumeBatch(batch, env);
+    if (batch.queue === TRANSFORM_QUEUE) {
+      const summary = await consumeTransformBatch(
+        batch as MessageBatch<TransformMessage>,
+        env,
+      );
+      console.log(`transform batch: ${JSON.stringify(summary)}`);
+      return;
+    }
+    await consumeBatch(batch as MessageBatch<IngestMessage>, env);
   },
-} satisfies ExportedHandler<Env, IngestMessage>;
+} satisfies ExportedHandler<Env, IngestMessage | TransformMessage>;

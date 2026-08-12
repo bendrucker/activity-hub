@@ -16,6 +16,11 @@ import {
   type ReconcileOptions,
   type ReconcileReport,
 } from "./strava/reconcile";
+import {
+  enqueueActivity,
+  reconcileTransform,
+  RECONCILE_LIMIT,
+} from "./transform/enqueue";
 import { backfillWahooWorkouts, type BackfillOptions } from "./wahoo/backfill";
 import { wahooClient, type WahooClient } from "./wahoo/client";
 import { consumeWahooEvent, type ConsumeOptions } from "./wahoo/consume";
@@ -302,6 +307,55 @@ export async function handlePipeline(
       generatedAt: new Date(now).toISOString(),
       stages: STAGES.map((stage) => stageSummary(report, stage, now)),
       failures: report.failures,
+    });
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+// Reprocessing one activity has to stay possible without waiting for a sweep
+// to reach it: an upstream edit, a decoder fix, a row that parked as failed.
+// Naming the activity does exactly that, and `force` covers the case where the
+// raw bytes did not change but what they should produce did.
+export async function handleTransform(
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  if (!authorized(request, env)) {
+    return new Response("Forbidden", { status: 403 });
+  }
+
+  try {
+    const url = new URL(request.url);
+    const activityId = url.searchParams.get("activityId");
+    const stage = (url.searchParams.get("stage") ?? "decode") as Stage;
+    if (!STAGES.includes(stage)) {
+      return Response.json(
+        { ok: false, error: `unknown stage ${stage}` },
+        { status: 400 },
+      );
+    }
+
+    if (activityId !== null) {
+      await enqueueActivity(
+        env,
+        activityId,
+        stage,
+        url.searchParams.get("force") === "true",
+      );
+      return Response.json({ ok: true, enqueued: 1, activityId, stage });
+    }
+
+    const limit = Number(url.searchParams.get("limit") ?? RECONCILE_LIMIT);
+    if (!Number.isInteger(limit) || limit < 1) {
+      return Response.json(
+        { ok: false, error: `limit must be a positive integer` },
+        { status: 400 },
+      );
+    }
+    return Response.json({
+      ok: true,
+      enqueued: await reconcileTransform(env, limit),
     });
   } catch (error) {
     return errorResponse(error);

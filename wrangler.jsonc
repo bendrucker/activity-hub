@@ -37,9 +37,31 @@
     { "binding": "TOKENS", "id": "bc72d180846d490395293eb92370f99b" },
   ],
   "durable_objects": {
-    "bindings": [{ "name": "TOKEN_BROKER", "class_name": "TokenBroker" }],
+    "bindings": [
+      { "name": "TOKEN_BROKER", "class_name": "TokenBroker" },
+      { "name": "DECODE_CONTAINER", "class_name": "DecodeContainer" },
+    ],
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TokenBroker"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["TokenBroker"] },
+    { "tag": "v2", "new_sqlite_classes": ["DecodeContainer"] },
+  ],
+  "containers": [
+    {
+      "class_name": "DecodeContainer",
+      "image": "./container/Dockerfile",
+      // The build context is the repository root: the container imports the
+      // telemetry decoders from src/, which sits above container/.
+      "image_build_context": ".",
+      // Decoding is CPU-bound and single-threaded per activity, and the
+      // container overlaps four at a time. 6 GiB holds those four row sets
+      // with room for DuckDB's Parquet write.
+      "instance_type": "standard-2",
+      // Every batch lands on one instance, so a second would only ever sit
+      // cold. Raising this is the lever if a backlog drains too slowly.
+      "max_instances": 1,
+    },
+  ],
   "r2_buckets": [
     { "binding": "RAW", "bucket_name": "activity-hub-raw" },
     { "binding": "LAKE", "bucket_name": "activity-hub-lake" },
@@ -55,6 +77,7 @@
   "queues": {
     "producers": [
       { "binding": "INGEST_QUEUE", "queue": "activity-hub-ingest" },
+      { "binding": "TRANSFORM_QUEUE", "queue": "activity-hub-transform" },
     ],
     "consumers": [
       {
@@ -69,6 +92,23 @@
         // transaction. A single consumer keeps concurrent events for the
         // same ride from double-minting.
         "max_concurrency": 1,
+      },
+      {
+        "queue": "activity-hub-transform",
+        // Transform work is per-activity and idempotent on
+        // (activity_id, stage), so it carries none of the ingest queue's
+        // shared-write hazard and takes the default concurrency.
+        //
+        // Retries are few on purpose. A decode that fails five times fails on
+        // the bytes, and the derived row is where that gets seen and fixed.
+        // Burning fifty deliveries first only delays the signal.
+        "max_retries": 5,
+        "dead_letter_queue": "activity-hub-transform-dlq",
+        // A batch is one container round trip, so a large one amortizes the
+        // call. Thirty activities is a few seconds of decoding, well inside
+        // the consumer's wall clock.
+        "max_batch_size": 30,
+        "max_batch_timeout": 30,
       },
     ],
   },

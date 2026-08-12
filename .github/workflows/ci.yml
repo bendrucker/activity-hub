@@ -15,3 +15,17 @@ jobs:
       - run: bun run typecheck
       - run: bun run test
       - run: bun run format:check
+
+  container:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: container
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      # The container has its own dependency set and tsconfig: it runs under
+      # Bun with DuckDB and an S3 client, none of which the Workers build sees.
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test

@@ -1,0 +1,14 @@
+# The build context is the repository root so the image can reach src/import.
+# A denylist rather than an allowlist: Docker cannot re-include a path whose
+# parent directory was excluded, so `*` plus `!src/import` would not work.
+# tmp/ is the one that matters, holding the multi-gigabyte local export.
+.git
+.github
+.wrangler
+node_modules
+container/node_modules
+tmp
+docs
+migrations
+scripts
+test

@@ -1,0 +1,43 @@
+// The container's wire contract, imported by both the Worker consumer and the
+// container itself so the shape exists once. Nothing here imports anything: the
+// container builds without the Workers runtime types, so a binding type
+// reaching this file would break its typecheck.
+
+export interface DecodeWork {
+  activityId: string;
+  // Raw R2 object keys for this activity, in the order they should be tried.
+  // The consumer reads them from activity_sources.raw_keys.
+  rawKeys: string[];
+}
+
+export interface DecodeRequest {
+  work: DecodeWork[];
+}
+
+export type DecodeOutcome =
+  | {
+      activityId: string;
+      status: "ok";
+      // R2 key prefix of the Parquet artifacts the container wrote.
+      outputKey: string;
+      records: number;
+      laps: number;
+      sessions: number;
+      // Non-fatal decode errors, carried through from TelemetryActivity.
+      errors: string[];
+    }
+  | {
+      activityId: string;
+      status: "failed";
+      error: string;
+    }
+  | {
+      activityId: string;
+      status: "skipped";
+      // Why there was nothing to do: no decodable raw key, for instance.
+      reason: string;
+    };
+
+export interface DecodeResponse {
+  outcomes: DecodeOutcome[];
+}

@@ -9,4 +9,12 @@ interface Env {
   WAHOO_CLIENT_ID: string;
   WAHOO_CLIENT_SECRET: string;
   WAHOO_WEBHOOK_TOKEN: string;
+  // R2 bindings do not cross into a container, so the decode container reaches
+  // both buckets over the S3 API. The worker forwards these as its env vars,
+  // which keeps the credentials out of the image and out of CI.
+  R2_ACCOUNT_ID: string;
+  R2_RAW_ACCESS_KEY_ID: string;
+  R2_RAW_SECRET_ACCESS_KEY: string;
+  R2_LAKE_ACCESS_KEY_ID: string;
+  R2_LAKE_SECRET_ACCESS_KEY: string;
 }

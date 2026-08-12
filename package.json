@@ -13,6 +13,7 @@
     "wrangler": "wrangler"
   },
   "dependencies": {
+    "@cloudflare/containers": "^0.3.7",
     "@garmin/fitsdk": "^21.208.0",
     "@mapbox/polyline": "^1.2.1",
     "csv-parse": "^7.0.1",
