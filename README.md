@@ -66,7 +66,9 @@ The unit of work is **one activity at one stage**, and the DAG is data-driven ra
 | `attempts`             | Deliveries spent. Past the ceiling a row parks as visibly failed. |
 | `error`, `updated_at`  | What went wrong, and when the row last moved.                     |
 
-That one table carries every requirement. Reprocessing a single activity is a `POST /admin/transform?activityId=...`, because the stage is idempotent on `(activity_id, stage)`. An upstream edit changes the raw object's etag, so the recomputed fingerprint stops matching and every downstream stage is stale by definition — nothing has to notice the edit explicitly. Monitoring is `GET /admin/pipeline`, which reports counts by stage and status alongside recent failures. A permanently failed activity is one parked row, and the pipeline keeps running around it.
+That one table carries every requirement. Reprocessing a single activity is a `POST /admin/transform?activityId=...`, because the stage is idempotent on `(activity_id, stage)`. An upstream edit changes the raw object's etag, so the recomputed fingerprint stops matching and every downstream stage is stale by definition. Nothing has to notice the edit explicitly.
+
+Monitoring is `GET /admin/pipeline`. It reports counts by stage and status, the lag on the oldest activity still waiting, and recent failures with their attempt counts. It also reports `parked` per stage, the failures that have spent every attempt. Those are invisible to the staleness query for the same reason they will never retry, so without that count a stage holding nothing but parked rows would read as caught up. A parked row is the record of an activity given up on, and the pipeline keeps running around it.
 
 ### Stages
 
