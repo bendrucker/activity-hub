@@ -1,9 +1,14 @@
 import { Decoder, Stream } from "@garmin/fitsdk";
 import polyline from "@mapbox/polyline";
+import { decodeGpx } from "./gpx";
+import {
+  gunzip,
+  nullIsland,
+  position,
+  type TelemetryRecord,
+} from "./telemetry";
 
 export type TrackPoint = [latitude: number, longitude: number];
-
-const SEMICIRCLE_DEGREES = 180 / 2 ** 31;
 
 export async function extractTrack(
   bytes: Uint8Array,
@@ -24,13 +29,10 @@ export async function extractTrack(
   throw new Error(`unsupported track file ${filename}`);
 }
 
-export async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
-  const stream = new Blob([bytes])
-    .stream()
-    .pipeThrough(new DecompressionStream("gzip"));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
-}
-
+// Deliberately a bare record scan rather than decodeFit. Callers want
+// position alone, for timezone inference, while decodeFit materializes every
+// telemetry column: the largest corpus file expands to roughly 100,000 record
+// objects, which is not a cost a 128 MB Worker should pay for coordinates.
 function fitTrack(bytes: Uint8Array): TrackPoint[] {
   const decoder = new Decoder(Stream.fromByteArray(bytes));
   if (!decoder.isFIT()) {
@@ -45,34 +47,31 @@ function fitTrack(bytes: Uint8Array): TrackPoint[] {
   }
   const points: TrackPoint[] = [];
   for (const record of records) {
-    if (record.positionLat == null || record.positionLong == null) {
-      continue;
+    const { latitude, longitude } = position(
+      record.positionLat,
+      record.positionLong,
+    );
+    if (latitude !== null && longitude !== null) {
+      points.push([latitude, longitude]);
     }
-    if (nullIsland(record.positionLat, record.positionLong)) {
-      continue;
-    }
-    points.push([
-      record.positionLat * SEMICIRCLE_DEGREES,
-      record.positionLong * SEMICIRCLE_DEGREES,
-    ]);
   }
   return points;
 }
 
-// Some devices log (0, 0) before satellite lock. A real track point at
-// null island is not a case this athlete's history contains.
-function nullIsland(lat: number, lon: number): boolean {
-  return lat === 0 && lon === 0;
-}
-
+// decodeGpx drops null island itself and throws when a document holds no
+// trackpoints. A trackless file is not a parse failure to these callers, and
+// the FIT and TCX paths already return [] for one, so the throw becomes [].
 function gpxTrack(bytes: Uint8Array): TrackPoint[] {
-  const text = new TextDecoder().decode(bytes);
+  let records: TelemetryRecord[];
+  try {
+    records = decodeGpx(bytes).records;
+  } catch {
+    return [];
+  }
   const points: TrackPoint[] = [];
-  for (const [, attributes] of text.matchAll(/<trkpt\b([^>]*)>/g)) {
-    const lat = /\blat="([-\d.]+)"/.exec(attributes ?? "");
-    const lon = /\blon="([-\d.]+)"/.exec(attributes ?? "");
-    if (lat?.[1] && lon?.[1] && !nullIsland(Number(lat[1]), Number(lon[1]))) {
-      points.push([Number(lat[1]), Number(lon[1])]);
+  for (const { position_lat: lat, position_lon: lon } of records) {
+    if (lat !== null && lon !== null) {
+      points.push([lat, lon]);
     }
   }
   return points;

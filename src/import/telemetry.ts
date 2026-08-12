@@ -4,8 +4,11 @@ import { decodeGpx } from "./gpx";
 export type TelemetrySource = "fit" | "gpx";
 
 // FIT developer fields carry whatever base type the descriptor declared, and
-// array base types decode to arrays.
-export type DeveloperFieldValue = number | string | number[] | string[] | null;
+// array base types decode to arrays. An element is nullable because the SDK's
+// invalid-value check misses non-finite floats, which have to be nulled here
+// rather than carried into a numeric column.
+export type DeveloperFieldValue =
+  number | string | (number | null)[] | (string | null)[] | null;
 
 export interface TelemetryRecord {
   timestamp: Date | null;
@@ -146,17 +149,22 @@ export interface TelemetryActivity {
   errors: string[];
 }
 
+// Extensions are matched case-insensitively. Bulk-export archives carry
+// whatever casing the source wrote, and the container picks the key to decode
+// by the same lowered comparison, so matching exactly here would hand this
+// function a file it had already accepted.
 export async function decodeTelemetry(
   bytes: Uint8Array,
   filename: string,
 ): Promise<TelemetryActivity> {
-  if (filename.endsWith(".gz")) {
+  const name = filename.toLowerCase();
+  if (name.endsWith(".gz")) {
     return decodeTelemetry(await gunzip(bytes), filename.slice(0, -3));
   }
-  if (filename.endsWith(".fit")) {
+  if (name.endsWith(".fit")) {
     return decodeFit(bytes);
   }
-  if (filename.endsWith(".gpx")) {
+  if (name.endsWith(".gpx")) {
     return decodeGpx(bytes);
   }
   throw new Error(`unsupported telemetry file ${filename}`);
@@ -179,6 +187,32 @@ export function semicircleDegrees(semicircles: number): number {
 // null island is not a case this athlete's history contains.
 export function nullIsland(lat: number, lon: number): boolean {
   return lat === 0 && lon === 0;
+}
+
+export interface Position {
+  latitude: number | null;
+  longitude: number | null;
+}
+
+const NO_POSITION: Position = { latitude: null, longitude: null };
+
+// Shared so that a change to what counts as an unusable fix reaches the full
+// decoder and the position-only track scan together.
+export function position(
+  latitude: number | undefined,
+  longitude: number | undefined,
+): Position {
+  if (
+    latitude == null ||
+    longitude == null ||
+    nullIsland(latitude, longitude)
+  ) {
+    return NO_POSITION;
+  }
+  return {
+    latitude: semicircleDegrees(latitude),
+    longitude: semicircleDegrees(longitude),
+  };
 }
 
 export function emptyActivity(source: TelemetrySource): TelemetryActivity {
