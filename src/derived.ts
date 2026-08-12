@@ -196,12 +196,23 @@ export interface DerivedFailure {
   activityId: string;
   stage: Stage;
   error: string | null;
+  attempts: number;
   updatedAt: string;
+}
+
+// A row at the attempt ceiling is invisible to STALE, so it never appears as
+// stale and nothing will pick it up again. Counting those separately is what
+// distinguishes a failure the next sweep retries from one that needs
+// /admin/transform to move.
+export interface StageParked {
+  stage: Stage;
+  count: number;
 }
 
 export interface PipelineReport {
   counts: StageStatusCount[];
   oldestStale: OldestStale[];
+  parked: StageParked[];
   failures: DerivedFailure[];
 }
 
@@ -220,9 +231,20 @@ export async function pipelineReport(db: D1Database): Promise<PipelineReport> {
     source_updated_at: string;
   }>(STAGES.map((stage) => db.prepare(STALE).bind(stage, MAX_ATTEMPTS, 1)));
 
+  const parked = await db
+    .prepare(
+      `SELECT stage, COUNT(*) AS count
+       FROM derived
+       WHERE status = 'failed' AND attempts >= ?1
+       GROUP BY stage
+       ORDER BY stage`,
+    )
+    .bind(MAX_ATTEMPTS)
+    .all<{ stage: Stage; count: number }>();
+
   const failures = await db
     .prepare(
-      `SELECT activity_id, stage, error, updated_at
+      `SELECT activity_id, stage, error, attempts, updated_at
        FROM derived
        WHERE status = 'failed'
        ORDER BY updated_at DESC
@@ -233,6 +255,7 @@ export async function pipelineReport(db: D1Database): Promise<PipelineReport> {
       activity_id: string;
       stage: Stage;
       error: string | null;
+      attempts: number;
       updated_at: string;
     }>();
 
@@ -250,10 +273,12 @@ export async function pipelineReport(db: D1Database): Promise<PipelineReport> {
             },
           ];
     }),
+    parked: parked.results,
     failures: failures.results.map((row) => ({
       activityId: row.activity_id,
       stage: row.stage,
       error: row.error,
+      attempts: row.attempts,
       updatedAt: row.updated_at,
     })),
   };

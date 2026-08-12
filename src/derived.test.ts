@@ -509,14 +509,60 @@ describe("pipelineReport", () => {
         activityId: "a2",
         stage: "decode",
         error: "boom",
+        attempts: MAX_ATTEMPTS,
         updatedAt: "2026-03-01T00:00:00.000Z",
       },
     ]);
   });
 
+  // A row out of attempts is absent from oldestStale for the same reason it
+  // will never retry, so a stage holding one and nothing else looks caught up.
+  // The parked count is the only thing separating the two.
+  it("counts a failure at the attempt ceiling apart from one that still retries", async () => {
+    await seedActivity("a1");
+    await seedActivity("a2");
+    await seedSource({ source: "wahoo", sourceId: "1", activityId: "a1" });
+    await seedSource({ source: "wahoo", sourceId: "2", activityId: "a2" });
+    await seedDerived({
+      activityId: "a1",
+      stage: "decode",
+      status: "failed",
+      attempts: 1,
+      error: "transient",
+    });
+    await seedDerived({
+      activityId: "a2",
+      stage: "decode",
+      status: "failed",
+      attempts: MAX_ATTEMPTS,
+      error: "no decodable raw key",
+    });
+
+    const report = await pipelineReport(env.REGISTRY);
+
+    expect(report.parked).toEqual([{ stage: "decode", count: 1 }]);
+    expect(
+      report.failures.map((failure) => [failure.activityId, failure.attempts]),
+    ).toEqual(
+      expect.arrayContaining([
+        ["a1", 1],
+        ["a2", MAX_ATTEMPTS],
+      ]),
+    );
+    // The one still under the ceiling is what the next sweep picks up.
+    expect(
+      report.oldestStale.find((entry) => entry.stage === "decode")?.activityId,
+    ).toBe("a1");
+  });
+
   it("reports empty over an empty pipeline", async () => {
     const report = await pipelineReport(env.REGISTRY);
 
-    expect(report).toEqual({ counts: [], oldestStale: [], failures: [] });
+    expect(report).toEqual({
+      counts: [],
+      oldestStale: [],
+      parked: [],
+      failures: [],
+    });
   });
 });

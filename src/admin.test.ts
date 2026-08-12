@@ -546,6 +546,7 @@ describe("handlePipeline", () => {
     stage: Stage;
     total: number;
     statuses: Record<DerivedStatus, number>;
+    parked: number;
     oldestStale: {
       activityId: string;
       sourceUpdatedAt: string;
@@ -561,6 +562,7 @@ describe("handlePipeline", () => {
       activityId: string;
       stage: Stage;
       error: string | null;
+      attempts: number;
       updatedAt: string;
     }[];
   }
@@ -645,18 +647,21 @@ describe("handlePipeline", () => {
         stage: "decode",
         total: 0,
         statuses: { ok: 0, failed: 0, skipped: 0 },
+        parked: 0,
         oldestStale: null,
       },
       {
         stage: "lake",
         total: 0,
         statuses: { ok: 0, failed: 0, skipped: 0 },
+        parked: 0,
         oldestStale: null,
       },
       {
         stage: "publish",
         total: 0,
         statuses: { ok: 0, failed: 0, skipped: 0 },
+        parked: 0,
         oldestStale: null,
       },
     ]);
@@ -684,12 +689,14 @@ describe("handlePipeline", () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as PipelineBody;
 
-    // Both decode rows are current, and the failed one has spent its attempts,
-    // so nothing at that stage is waiting to be picked up.
+    // Both decode rows are current and the failed one has spent its attempts,
+    // so nothing there is waiting to be picked up. `parked` is what keeps that
+    // from reading as caught up: one activity is stuck until someone moves it.
     expect(stageOf(body, "decode")).toEqual({
       stage: "decode",
       total: 2,
       statuses: { ok: 1, failed: 1, skipped: 0 },
+      parked: 1,
       oldestStale: null,
     });
 
@@ -713,9 +720,35 @@ describe("handlePipeline", () => {
         activityId: "a2",
         stage: "decode",
         error: "no decodable raw key",
+        attempts: MAX_ATTEMPTS,
         updatedAt: RECORDED,
       },
     ]);
+  });
+
+  // Same stage, same failed count, one attempt short of the ceiling. The only
+  // thing separating "retries on the next sweep" from "stuck" is this number.
+  it("leaves a failure under the ceiling unparked", async () => {
+    await seedActivity("a1", OLDEST);
+    await seedDerived({
+      activityId: "a1",
+      stage: "decode",
+      status: "failed",
+      attempts: MAX_ATTEMPTS - 1,
+      error: "no decodable raw key",
+    });
+
+    const response = await handlePipeline(
+      pipelineRequest("Bearer admin-secret"),
+      testEnv(),
+    );
+
+    const body = (await response.json()) as PipelineBody;
+    const decode = stageOf(body, "decode");
+    expect(decode.statuses.failed).toBe(1);
+    expect(decode.parked).toBe(0);
+    expect(decode.oldestStale).toMatchObject({ activityId: "a1" });
+    expect(body.failures[0]?.attempts).toBe(MAX_ATTEMPTS - 1);
   });
 
   it("ages the oldest stale activity in seconds", async () => {

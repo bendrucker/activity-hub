@@ -229,6 +229,7 @@ interface StageSummary {
   stage: Stage;
   total: number;
   statuses: Record<DerivedStatus, number>;
+  parked: number;
   oldestStale: StaleSummary | null;
 }
 
@@ -267,6 +268,10 @@ function stageSummary(
     stage,
     total,
     statuses,
+    // A parked row is failed and out of attempts, so it is absent from
+    // oldestStale for the same reason it will never retry. Without this count
+    // a stage holding nothing but parked rows reads as caught up.
+    parked: report.parked.find((entry) => entry.stage === stage)?.count ?? 0,
     oldestStale:
       stale === undefined
         ? null
