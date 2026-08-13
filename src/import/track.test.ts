@@ -136,6 +136,37 @@ describe("extractTrack", () => {
     expect(points).toEqual([[40.72596, -74.001394]]);
   });
 
+  // decodeGpx throws on a trackless document. extractTrack's callers record a
+  // throw as an import failure, so a GPX that simply carries no GPS must stay
+  // an empty track rather than becoming one.
+  it("reads a GPX with no trackpoints as an empty track", async () => {
+    const points = await extractTrack(
+      new TextEncoder().encode(`<gpx creator="StravaGPX"><trk></trk></gpx>`),
+      "activities/9.gpx",
+    );
+    expect(points).toEqual([]);
+  });
+
+  // `trkseg` is optional in GPX 1.1. The pre-refactor regex matched
+  // trackpoints anywhere in the document, so points written straight under
+  // `trk` came through. Reading them only inside `trkseg` made decodeGpx throw
+  // "no trackpoints", and gpxTrack turns a throw into []. A real track became
+  // an empty one, leaving timezone inference nothing to work from.
+  it("extracts GPX trackpoints written with no enclosing trkseg", async () => {
+    const gpx = `<gpx creator="StravaGPX" version="1.1"><trk>
+     <trkpt lat="40.7259600" lon="-74.0013940"><ele>5.2</ele></trkpt>
+     <trkpt lat="40.7258970" lon="-74.0012310"><ele>5.4</ele></trkpt>
+    </trk></gpx>`;
+    const points = await extractTrack(
+      new TextEncoder().encode(gpx),
+      "activities/10.gpx",
+    );
+    expect(points).toEqual([
+      [40.72596, -74.001394],
+      [40.725897, -74.001231],
+    ]);
+  });
+
   it("drops pre-lock (0, 0) points from TCX", async () => {
     const tcx = `<TrainingCenterDatabase><Activities><Activity><Lap><Track>
      <Trackpoint><Position>
