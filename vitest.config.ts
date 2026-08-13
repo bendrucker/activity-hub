@@ -3,7 +3,7 @@ import {
   cloudflareTest,
   readD1Migrations,
 } from "@cloudflare/vitest-pool-workers";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 import { SECRETS } from "./test/secrets";
 
 export default defineConfig(async () => {
@@ -22,6 +22,10 @@ export default defineConfig(async () => {
     ],
     test: {
       setupFiles: ["./test/apply-migrations.ts"],
+      // The container's suite runs under Bun with real DuckDB and S3 clients,
+      // neither of which the Workers pool can load. `bun test` in container/
+      // owns those files.
+      exclude: [...configDefaults.exclude, "container/**"],
     },
   };
 });

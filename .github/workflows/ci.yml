@@ -15,3 +15,22 @@ jobs:
       - run: bun run typecheck
       - run: bun run test
       - run: bun run format:check
+
+  container:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: container
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      # The container has its own dependency set and tsconfig: it runs under
+      # Bun with DuckDB and an S3 client, none of which the Workers build sees.
+      - run: bun install --frozen-lockfile
+      # The typecheck reaches up into src/import, and module resolution walks
+      # up from there to the repository root rather than into container/. The
+      # image gets the same effect by putting both under one /app root.
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      - run: bun run typecheck
+      - run: bun test
