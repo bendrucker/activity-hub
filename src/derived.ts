@@ -141,11 +141,17 @@ export async function recordOutcome(
          input_fingerprint = excluded.input_fingerprint,
          output_key = excluded.output_key,
          status = excluded.status,
-         -- A run that got somewhere hands the budget back, so an activity that
-         -- fails once every few months never exhausts it.
-         attempts = CASE WHEN excluded.status = 'failed'
-                         THEN derived.attempts + 1
-                         ELSE 0 END,
+         -- The budget bounds retries against one input, so it belongs to the
+         -- fingerprint it accrued against. A run that got somewhere hands it
+         -- back, and new bytes start it over: a row that parked on the old
+         -- input would otherwise get one try at the new one, since its own
+         -- failure stamps the newest updated_at and STALE stops selecting it.
+         attempts = CASE
+           WHEN excluded.status <> 'failed' THEN 0
+           WHEN derived.input_fingerprint = excluded.input_fingerprint
+             THEN derived.attempts + 1
+           ELSE 1
+         END,
          error = excluded.error,
          updated_at = excluded.updated_at`,
     )

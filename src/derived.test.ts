@@ -345,6 +345,43 @@ describe("staleActivities", () => {
     expect(await staleActivities(env.REGISTRY, "decode", 10)).toEqual([]);
   });
 
+  // The whole trap: an edit makes the parked row stale again, that run fails
+  // on the new bytes for any reason, and its own failure stamps the newest
+  // updated_at. Every disjunct is then false forever unless the budget
+  // restarts with the input.
+  it("keeps retrying an activity that parked before its input changed", async () => {
+    await seedActivity("a1");
+    // A real edit timestamp, not the NEWER sentinel: the trap only springs
+    // once the failure's own updated_at overtakes the source's, which a date
+    // in 2099 never allows.
+    await seedSource({
+      source: "wahoo",
+      sourceId: "1",
+      activityId: "a1",
+      updatedAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+    await seedDerived({
+      activityId: "a1",
+      stage: "decode",
+      status: "failed",
+      attempts: MAX_ATTEMPTS,
+      fingerprint: "fp-1",
+      updatedAt: OLD,
+    });
+
+    expect(await staleActivities(env.REGISTRY, "decode", 10)).toEqual(["a1"]);
+
+    await recordOutcome(env.REGISTRY, {
+      activityId: "a1",
+      stage: "decode",
+      inputFingerprint: "fp-2",
+      status: "failed",
+      error: "container unreachable",
+    });
+
+    expect(await staleActivities(env.REGISTRY, "decode", 10)).toEqual(["a1"]);
+  });
+
   it("ignores another stage's derived row", async () => {
     await seedActivity("a1");
     await seedSource({ source: "wahoo", sourceId: "1", activityId: "a1" });
@@ -392,6 +429,31 @@ describe("recordOutcome", () => {
     }
 
     expect(await attemptsFor("a1", "decode")).toBe(3);
+  });
+
+  // The ceiling is meant to stop retrying bytes that cannot be decoded. New
+  // bytes are a different claim, and an activity that parked under the old
+  // input would otherwise get a single try at the new one: the failure stamps
+  // the newest updated_at, which is the only reason STALE re-selected it.
+  it("restarts the budget when the input changes", async () => {
+    for (const _ of [1, 2, 3]) {
+      await recordOutcome(env.REGISTRY, {
+        activityId: "a1",
+        stage: "decode",
+        inputFingerprint: "fp-1",
+        status: "failed",
+        error: "boom",
+      });
+    }
+    await recordOutcome(env.REGISTRY, {
+      activityId: "a1",
+      stage: "decode",
+      inputFingerprint: "fp-2",
+      status: "failed",
+      error: "container unreachable",
+    });
+
+    expect(await attemptsFor("a1", "decode")).toBe(1);
   });
 
   it("resets attempts once the stage succeeds", async () => {
