@@ -1,4 +1,11 @@
 import { readConsumeLog } from "./consumelog";
+import {
+  pipelineReport,
+  STAGES,
+  type DerivedStatus,
+  type PipelineReport,
+  type Stage,
+} from "./derived";
 import { RateLimitedError } from "./ingest";
 import {
   backfillStravaStreams,
@@ -207,6 +214,95 @@ export async function handleStravaBackfill(
     return Response.json(
       await backfillStravaStreams(env, { cursor, ...options }),
     );
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+interface StaleSummary {
+  activityId: string;
+  sourceUpdatedAt: string;
+  behindS: number | null;
+}
+
+interface StageSummary {
+  stage: Stage;
+  total: number;
+  statuses: Record<DerivedStatus, number>;
+  parked: number;
+  oldestStale: StaleSummary | null;
+}
+
+// The lag on the oldest stale activity is what separates a pipeline that is
+// keeping up from one that stopped. An unparseable timestamp reports null
+// rather than the NaN that would serialize as one anyway.
+function behindS(sourceUpdatedAt: string, now: number): number | null {
+  const at = Date.parse(sourceUpdatedAt);
+  return Number.isFinite(at)
+    ? Math.max(0, Math.round((now - at) / 1000))
+    : null;
+}
+
+// A status absent from the counts has zero rows. Every stage reports all three
+// so a reader can take a missing status at face value.
+function stageSummary(
+  report: PipelineReport,
+  stage: Stage,
+  now: number,
+): StageSummary {
+  const statuses: Record<DerivedStatus, number> = {
+    ok: 0,
+    failed: 0,
+    skipped: 0,
+  };
+  let total = 0;
+  for (const entry of report.counts) {
+    if (entry.stage === stage) {
+      statuses[entry.status] = entry.count;
+      total += entry.count;
+    }
+  }
+
+  const stale = report.oldestStale.find((entry) => entry.stage === stage);
+  return {
+    stage,
+    total,
+    statuses,
+    // A parked row is failed and out of attempts, so it is absent from
+    // oldestStale for the same reason it will never retry. Without this count
+    // a stage holding nothing but parked rows reads as caught up.
+    parked: report.parked.find((entry) => entry.stage === stage)?.count ?? 0,
+    oldestStale:
+      stale === undefined
+        ? null
+        : {
+            activityId: stale.activityId,
+            sourceUpdatedAt: stale.sourceUpdatedAt,
+            behindS: behindS(stale.sourceUpdatedAt, now),
+          },
+  };
+}
+
+// Reading this route is the first step of a recovery, so it carries the failure
+// text alongside the counts. A count on its own only sends the reader to
+// another query to find out what broke.
+export async function handlePipeline(
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  if (!authorized(request, env)) {
+    return new Response("Forbidden", { status: 403 });
+  }
+
+  try {
+    const report = await pipelineReport(env.REGISTRY);
+    const now = Date.now();
+    return Response.json({
+      ok: true,
+      generatedAt: new Date(now).toISOString(),
+      stages: STAGES.map((stage) => stageSummary(report, stage, now)),
+      failures: report.failures,
+    });
   } catch (error) {
     return errorResponse(error);
   }

@@ -1,5 +1,6 @@
 import {
   handleConsumeLog,
+  handlePipeline,
   handleReconcile,
   handleStravaBackfill,
   handleWahooBackfill,
@@ -184,6 +185,12 @@ export default {
     if (url.pathname === "/admin/wahoo-ingest") {
       if (request.method === "POST") {
         return handleWahooIngest(request, env);
+      }
+      return new Response("Method Not Allowed", { status: 405 });
+    }
+    if (url.pathname === "/admin/pipeline") {
+      if (request.method === "GET") {
+        return handlePipeline(request, env);
       }
       return new Response("Method Not Allowed", { status: 405 });
     }
