@@ -34,7 +34,7 @@ flowchart TB
         d1[(bendrucker.me D1)]
     end
     subgraph batch [Batch]
-        duck[DuckDB job: GH Actions cron / local]
+        decode[Decode container: Bun + DuckDB]
         importer[Export importer: local]
     end
     sw --> ingest
@@ -43,7 +43,9 @@ flowchart TB
     ingest --> raw
     ingest -- Publish RPC --> d1
     se --> importer --> raw
-    raw --> duck --> lake
+    ingest -- transform queue --> decode
+    raw --> decode --> lake
+    decode -- outcomes --> ingest
 ```
 
 #### Ingest Worker
@@ -75,9 +77,15 @@ The 2026 bulk export measured 4,118 activities and ~876 MB unpacked ([export.md]
 
 #### Transform Job
 
-A DuckDB batch job reads the raw bucket over `httpfs` (native R2 secret support), parses FIT files, and maintains Iceberg tables through R2 Data Catalog. DuckDB 1.5.3+ writes Iceberg REST catalogs natively, so the job runs anywhere DuckDB runs: GitHub Actions on a nightly cron, or my laptop for development and full-history rebuilds. FIT parsing uses `fitdecode` (or the DuckDB `fit` community extension if vetting shows it handles developer fields and gzipped files).
+The unit of work is one activity at one stage, and the DAG is data-driven rather than scheduled. Nothing runs because a clock said so. Work happens because a stage's recorded output is missing or older than its input.
 
-Replay is the point of this layer. Rebuilding the lake is rerunning the job against `raw/`, so schema changes and new feature engineering never require touching a source API.
+A `derived` table in D1 carries one row per `(activity_id, stage)` with an `input_fingerprint` hashed over the raw R2 keys and etags that fed it. An upstream edit changes an etag, the fingerprint stops matching, and every downstream stage is stale by definition. Reprocessing one activity is deleting its rows or enqueueing it directly, because the stage is idempotent on that key.
+
+Decoding runs in a container rather than in Workers, on a `activity-hub-transform` queue with its own dead letter queue. The container takes a batch of work descriptors over HTTP, writes Parquet to R2, and returns outcomes. It never writes D1 and never reads the queue, so every state transition stays in the Worker and a container crash costs time rather than data. Cloudflare bindings do not cross into a container, so it reaches both buckets over the S3 API using two scoped tokens: read on `activity-hub-raw`, write on `activity-hub-lake`.
+
+Bun decodes rather than DuckDB's `fit` community extension, which rejects `.fit.gz` (3,245 of 3,246 corpus files) and exposes no developer fields. The deciding factor is duplication: the sport mapping, timezone inference, and track extraction in `src/import/` would otherwise exist twice, in TypeScript and in SQL, and drift. Decoding the entire history takes 113 seconds single-threaded, so this is not a performance call.
+
+Replay is the point of this layer. Rebuilding the lake is rerunning the stages against `raw/`, so schema changes and new feature engineering never require touching a source API.
 
 #### Archive Tiers
 
@@ -96,6 +104,8 @@ Two populations distort aggregates and belong outside anything published.
 Zero-duration activities are device artifacts. They cluster at duplicate start timestamps, the signature of an ELEMNT emitting several empty workouts at once.
 
 Activities running past a day were never stopped. The extreme case starts 2016-01-01 and claims 10,452,264 seconds. That is 121 days. Set the cut well above twelve hours, because an eight-to-twelve-hour day is a real ride and has to survive it.
+
+Both populations are flagged in the lake rather than dropped from a table. Filtering happens at the publish and aggregate boundary, so a row the current thresholds reject stays inspectable.
 
 #### Where Metadata Lives
 
@@ -122,15 +132,58 @@ The registry lives in the hub's own D1 database, which is operational state, not
 
 Iceberg tables in R2 Data Catalog, maintained by the transform job:
 
-- `activities`: one row per activity with summary metrics (distance, moving time, elevation, average/max power, heart rate, weather, training load from the export CSV)
-- `records`: per-sample telemetry from FIT files (timestamp, position, altitude, power, heart rate, cadence, speed, temperature). This table answers stream-level questions like "hottest hour on a ride this year," so temperature and time live here from day one.
+- `activities`: one row per activity with summary metrics (distance, moving time, elevation, average/max power, heart rate, weather, training load from the export CSV), carrying both Strava's numbers and the device's under separate names, plus `power_source`, `telemetry_source`, `deleted_at`, and the quality flags
+- `records`: per-sample telemetry from FIT files (timestamp, position, altitude, power, heart rate, cadence, speed, temperature), plus a map column holding developer fields verbatim. This table answers stream-level questions like "hottest hour on a ride this year," so temperature and time live here from day one.
 - `laps`: per-lap aggregates, cheap to carry from FIT
+- `power_curve`: best power for 5 s through 60 min, one row per activity per duration. Expensive to compute on demand and useful to almost every question worth asking, so it materializes with the first transform.
+
+Every column is marked with the provenance of its input, file-derived or API-derived. Strava's agreement bars AI/ML training on API-derived data, so a future LLM feature bounds itself with a `WHERE` clause instead of a schema migration.
 
 Plain date-partitioned Parquet under a `lake/` prefix is the fallback if the Data Catalog beta bites. The raw bucket makes that a rebuild, not a migration.
 
 #### Feed Contract
 
 The `Publish` RPC accepts a feed row: hub ID, Strava ID (for permalinks), name, sport, start time, distance, moving time, elevation gain, average power if present, encoded polyline, and photo URLs. The website renders from D1 alone.
+
+## Transform Decisions
+
+Measurements against the local export settled these. They are recorded because the reasoning is not recoverable from the schema.
+
+#### Freshness
+
+A ride reaches the website within minutes. Ingest writes a provisional feed row and the nightly job overwrites it, distinguished by a `revision` column. The cost is one extra code path. The benefit is that the website keeps working when the lake does not.
+
+#### Whose Numbers
+
+Strava and the device disagree, and not slightly: normalized power matches Strava's weighted average on 0.3% of rides, a median 17 W apart, and average power matches on 2.6%. Distance and elevation are effectively passthrough. The lake carries both with explicit provenance. The website shows Strava's numbers so a card matches its permalink when you click through. Analytics uses device numbers so results stay internally consistent and reproducible from files I own. Anything published as a headline stat names which one it used.
+
+#### Estimated Power
+
+573 GPX rides carry Strava-estimated power, and only 2,826 of 4,118 activities have real samples. A `power_source` column records measured, estimated, or none. Power aggregates exclude estimated unless a query opts in.
+
+#### Telemetry Precedence
+
+An activity can hold a Wahoo FIT, an export FIT, a GPX, and Strava streams at once, and exactly one of them produces the `records` rows. Precedence is Wahoo FIT, export FIT, Strava streams, then GPX, recorded per activity in `telemetry_source`. GPX ranks below streams because it carries no power.
+
+#### Records Schema
+
+The FIT record message has 79 possible columns and ours reliably fill about 15. Those get typed columns. Developer fields ride on most records since 2020, including Wahoo wind and air speed, so a fixed column list would drop real data: they land in a map column verbatim. Promoting any of them to a real column waits for a question that needs it.
+
+#### Iceberg
+
+R2 Data Catalog is beta, and with a single writer, a nightly cadence, and a two-minute full rebuild, Iceberg's incremental merges and time travel are not yet load-bearing. It wins anyway because R2 SQL and any future engine read it for free, and because the raw bucket makes abandoning it a rebuild rather than a migration.
+
+#### Website Scope
+
+Every ride since 2013. All 4,118 rows with polylines decimated to every tenth point land around 20 MB in D1, well inside limits. Store SI units and format in the component.
+
+#### Photos
+
+Photo bytes serve from R2 through a site route. Strava CDN URLs are undocumented and may expire, and the hub already archives the bytes at full resolution.
+
+#### Deletes and Edits
+
+A Strava delete soft-deletes the source row. The lake keeps the row with `deleted_at` set, because the files still exist and history should not shift under a query that ran yesterday. The website deletes it.
 
 ## Backfill
 
