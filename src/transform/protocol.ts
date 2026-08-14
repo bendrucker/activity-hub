@@ -20,6 +20,9 @@ export type DecodeOutcome =
       status: "ok";
       // R2 key prefix of the Parquet artifacts the container wrote.
       outputKey: string;
+      // Which raw key actually produced the rows. The lake stage reads
+      // telemetry provenance off this, and nothing else records the choice.
+      rawKey: string;
       records: number;
       laps: number;
       sessions: number;
@@ -40,4 +43,28 @@ export type DecodeOutcome =
 
 export interface DecodeResponse {
   outcomes: DecodeOutcome[];
+}
+
+// The lake build is corpus-wide, so its request names locations rather than
+// activities. Every field is a URI the container hands to DuckDB directly.
+export interface LakeRequest {
+  // Prefix under which the decode stage wrote one directory per activity.
+  decode: string;
+  // The registry snapshot the Worker exported from D1 for this run.
+  registry: string;
+  // The archived Strava bulk export's activities.csv, or null when none is
+  // archived, in which case every Strava column comes out null.
+  stravaExport: string | null;
+  // Prefix the rebuilt tables are written under.
+  output: string;
+}
+
+export interface LakeTableResult {
+  name: string;
+  rows: number;
+}
+
+export interface LakeResponse {
+  outputKey: string;
+  tables: LakeTableResult[];
 }

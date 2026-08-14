@@ -130,16 +130,19 @@ The registry lives in the hub's own D1 database, which is operational state, not
 
 #### Lake Tables
 
-Iceberg tables in R2 Data Catalog, maintained by the transform job:
+The lake stage rebuilds every table from the decode artifacts on its own nightly cron, two hours after the sweep that enqueues decoding. A full rebuild takes about two minutes over the whole corpus, which is cheaper than the bookkeeping an incremental merge would need to stay correct when an upstream edit rewrites an activity.
 
-- `activities`: one row per activity with summary metrics (distance, moving time, elevation, average/max power, heart rate, weather, training load from the export CSV), carrying both Strava's numbers and the device's under separate names, plus `power_source`, `telemetry_source`, `deleted_at`, and the quality flags
-- `records`: per-sample telemetry from FIT files (timestamp, position, altitude, power, heart rate, cadence, speed, temperature), plus a map column holding developer fields verbatim. This table answers stream-level questions like "hottest hour on a ride this year," so temperature and time live here from day one.
-- `laps`: per-lap aggregates, cheap to carry from FIT
-- `power_curve`: best power for 5 s through 60 min, one row per activity per duration. Expensive to compute on demand and useful to almost every question worth asking, so it materializes with the first transform.
+The build reads only R2. The registry reaches it as a newline-delimited JSON snapshot the Worker exports from D1 for each run, which keeps the container free of bindings and pins what a given build saw. Tables land under `lake/v1/` as ZSTD Parquet, with `records` partitioned by year:
+
+- `activities`: one row per activity, carrying Strava's numbers and the device's under separate names, plus `power_source`, `telemetry_origin`, `telemetry_format`, `telemetry_raw_key`, and `deleted_at`. Strava's numbers come from the archived export CSV, joined on the registry's Strava id. Device numbers come from the session rows, summed across a file's sessions with the averages weighted by timer time. An activity the registry holds but nothing decoded still gets a row.
+- `records`: per-sample telemetry (timestamp, position, altitude, power, heart rate, cadence, speed, temperature), plus a map column holding developer fields verbatim. This table answers stream-level questions like "hottest hour on a ride this year," so temperature and time live here from day one.
+- `laps`, `sessions`: per-lap and per-session aggregates, cheap to carry from FIT.
+- `meta`: one row per device and per developer field descriptor, which is what makes `telemetry_raw_key` and the developer field inventory queryable without opening record files.
+- `power_curve`: best power for 5 s through 60 min, one row per activity per duration. Expensive to compute on demand and useful to almost every question worth asking. Not yet built.
 
 Every column is marked with the provenance of its input, file-derived or API-derived. Strava's agreement bars AI/ML training on API-derived data, so a future LLM feature bounds itself with a `WHERE` clause instead of a schema migration.
 
-Plain date-partitioned Parquet under a `lake/` prefix is the fallback if the Data Catalog beta bites. The raw bucket makes that a rebuild, not a migration.
+Publishing these tables to R2 Data Catalog as Iceberg is the next step and the design's stated preference. DuckDB's `iceberg` extension loads under the container's build and registers the secret type the catalog needs, so what remains is a write against a live catalog. Plain Parquet under `lake/v1/` is what ships until that is proven, and the raw bucket makes the switch a rebuild rather than a migration.
 
 #### Feed Contract
 

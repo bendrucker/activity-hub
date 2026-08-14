@@ -22,6 +22,7 @@ export async function writeActivityParquet(
   instance: DuckDBInstance,
   directory: string,
   activityId: string,
+  rawKey: string,
   activity: TelemetryActivity,
 ): Promise<ParquetFile[]> {
   const connection = await instance.connect();
@@ -47,7 +48,7 @@ export async function writeActivityParquet(
         directory,
         activityId,
         META,
-        metaRows(activity),
+        metaRows(activity, rawKey),
       ),
     ];
   } finally {

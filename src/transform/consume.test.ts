@@ -156,6 +156,7 @@ function decoded(activityId: string, errors: string[] = []): DecodeOutcome {
     activityId,
     status: "ok",
     outputKey: `decode/v1/${activityId}/`,
+    rawKey: `raw/strava/activities/${activityId}/original.fit.gz`,
     records: 3600,
     laps: 1,
     sessions: 1,

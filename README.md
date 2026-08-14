@@ -114,17 +114,17 @@ The consumer re-reads raw keys from the registry rather than trusting the messag
 
 Inventory of every credential the system needs and where it lives.
 
-| Secret                                            | Location                               | Consumer                                                                                               |
-| ------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `ADMIN_TOKEN`                                     | Worker secret (`wrangler secret put`)  | Manual triggers (`POST /admin/reconcile`, `POST /admin/wahoo-backfill`, `POST /admin/strava-backfill`) |
-| `CLOUDFLARE_API_TOKEN`                            | GitHub Actions repo secret             | `deploy.yml` (migrations + `wrangler deploy`)                                                          |
-| `STRAVA_CLIENT_SECRET`                            | Worker secret (`wrangler secret put`)  | Strava OAuth token refresh and webhook subscription management                                         |
-| `STRAVA_VERIFY_TOKEN`                             | Worker secret (`wrangler secret put`)  | Webhook subscription validation ([#8](https://github.com/bendrucker/activity-hub/issues/8))            |
-| `WAHOO_CLIENT_ID` / `WAHOO_CLIENT_SECRET`         | Worker secrets (`wrangler secret put`) | Wahoo OAuth + webhooks ([#11](https://github.com/bendrucker/activity-hub/issues/11))                   |
-| `WAHOO_WEBHOOK_TOKEN`                             | Worker secret (`wrangler secret put`)  | Wahoo webhook receiver ([#11](https://github.com/bendrucker/activity-hub/issues/11))                   |
-| `R2_ACCOUNT_ID`                                   | Worker secret (`wrangler secret put`)  | Decode container's S3 endpoint                                                                         |
-| `R2_RAW_ACCESS_KEY_ID` / `..._SECRET_ACCESS_KEY`  | Worker secrets (`wrangler secret put`) | Decode container reading `activity-hub-raw`                                                            |
-| `R2_LAKE_ACCESS_KEY_ID` / `..._SECRET_ACCESS_KEY` | Worker secrets (`wrangler secret put`) | Decode container writing `activity-hub-lake`                                                           |
+| Secret                                            | Location                               | Consumer                                                                                                                                            |
+| ------------------------------------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ADMIN_TOKEN`                                     | Worker secret (`wrangler secret put`)  | Manual triggers (`POST /admin/reconcile`, `POST /admin/wahoo-backfill`, `POST /admin/strava-backfill`, `POST /admin/transform`, `POST /admin/lake`) |
+| `CLOUDFLARE_API_TOKEN`                            | GitHub Actions repo secret             | `deploy.yml` (migrations + `wrangler deploy`)                                                                                                       |
+| `STRAVA_CLIENT_SECRET`                            | Worker secret (`wrangler secret put`)  | Strava OAuth token refresh and webhook subscription management                                                                                      |
+| `STRAVA_VERIFY_TOKEN`                             | Worker secret (`wrangler secret put`)  | Webhook subscription validation ([#8](https://github.com/bendrucker/activity-hub/issues/8))                                                         |
+| `WAHOO_CLIENT_ID` / `WAHOO_CLIENT_SECRET`         | Worker secrets (`wrangler secret put`) | Wahoo OAuth + webhooks ([#11](https://github.com/bendrucker/activity-hub/issues/11))                                                                |
+| `WAHOO_WEBHOOK_TOKEN`                             | Worker secret (`wrangler secret put`)  | Wahoo webhook receiver ([#11](https://github.com/bendrucker/activity-hub/issues/11))                                                                |
+| `R2_ACCOUNT_ID`                                   | Worker secret (`wrangler secret put`)  | Decode container's S3 endpoint                                                                                                                      |
+| `R2_RAW_ACCESS_KEY_ID` / `..._SECRET_ACCESS_KEY`  | Worker secrets (`wrangler secret put`) | Decode container reading `activity-hub-raw`                                                                                                         |
+| `R2_LAKE_ACCESS_KEY_ID` / `..._SECRET_ACCESS_KEY` | Worker secrets (`wrangler secret put`) | Decode container writing `activity-hub-lake`                                                                                                        |
 
 `STRAVA_CLIENT_ID` and `STRAVA_ATHLETE_ID` are public identifiers, committed as
 vars in `wrangler.jsonc`. `STRAVA_SUBSCRIPTION_ID` is also a committed var,
@@ -203,12 +203,20 @@ curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
 # fingerprint still matches and the stage would otherwise be a no-op.
 curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
   "https://hub.bendrucker.me/admin/transform?activityId=$ID&force=true"
+
+# Rebuild every lake table from the decode artifacts. Takes minutes and
+# answers with a row count per table, which is the cheap check that a rebuild
+# did not lose a table's inputs.
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  https://hub.bendrucker.me/admin/lake
 ```
+
+The lake rebuilds nightly on its own cron at 08:00, two hours after the 06:00 sweep that enqueues decoding. They are separate triggers because the sweep only enqueues: decoding drains through the queue afterwards, so a rebuild in the same invocation would read the artifacts that sweep was about to replace.
 
 ## Status
 
 The Strava pipeline is live. The historical export is imported, OAuth and webhooks run, and a daily reconciliation cron catches anything webhooks miss. Wahoo is in progress ([#11](https://github.com/bendrucker/activity-hub/issues/11)).
 
-The transform pipeline's `decode` stage is built: the FIT and GPX decoders, the `derived` table, the queue, and the container. The `lake` and `publish` stages are not ([#13](https://github.com/bendrucker/activity-hub/issues/13), [#14](https://github.com/bendrucker/activity-hub/issues/14)).
+The transform pipeline's `decode` stage is built: the FIT and GPX decoders, the `derived` table, the queue, and the container. The `lake` stage builds `activities`, `records`, `laps`, `sessions`, and `meta` as Parquet under `lake/v1/`; publishing them to R2 Data Catalog as Iceberg and materializing `power_curve` remain ([#13](https://github.com/bendrucker/activity-hub/issues/13)). The `publish` stage is not built ([#14](https://github.com/bendrucker/activity-hub/issues/14)).
 
 Supersedes the Strava pipeline previously planned inside bendrucker.me ([#100](https://github.com/bendrucker/bendrucker.me/issues/100)).

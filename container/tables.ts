@@ -1,0 +1,295 @@
+// The lake tables, each a query over the decode artifacts plus the registry
+// snapshot. Sources are URIs rather than fixed keys so the same SQL runs
+// against S3 in the container and against a directory of Parquet files in a
+// test, which is the only way this transformation is checkable without R2.
+
+import {
+  emptySelectSql,
+  LAPS as LAPS_SCHEMA,
+  META as META_SCHEMA,
+  RECORDS as RECORDS_SCHEMA,
+  SESSIONS as SESSIONS_SCHEMA,
+  type Table,
+} from "./schema";
+
+export interface LakeSources {
+  // Prefix holding one directory per activity, each with the four decode
+  // Parquet files. Globbed, never listed.
+  decode: string;
+  // Newline-delimited JSON the Worker exports from D1, one object per activity.
+  registry: string;
+  // The Strava bulk export's activities.csv, or null when no export is
+  // archived. Strava's own numbers come from here and nowhere else.
+  stravaExport: string | null;
+  // Whether any activity has been decoded. A glob matching no files is an
+  // error in DuckDB rather than an empty scan, and the first build runs before
+  // any decode has landed.
+  decoded: boolean;
+}
+
+export interface LakeTable {
+  name: string;
+  sql(sources: LakeSources): string;
+  // A DuckDB PARTITION_BY expression list. Only the tables large enough that a
+  // reader would otherwise scan the whole corpus to answer one year's question
+  // carry one, because each partition costs a file.
+  partitionBy?: string;
+}
+
+function decodeGlob(sources: LakeSources, table: string): string {
+  return literal(`${sources.decode}/*/${table}.parquet`);
+}
+
+// Passthrough tables. The decode stage already wrote them at the right grain
+// with activity_id prefixed, so the lake build only unions them.
+function passthrough(name: string, table: Table<object>): LakeTable {
+  return {
+    name,
+    sql: (sources) => scan(sources, name, table),
+  };
+}
+
+// union_by_name because developer_fields makes the JSON column's contents vary
+// per activity, and a future column added to the decode schema should widen
+// the lake rather than break the scan of everything written before it.
+function scan(
+  sources: LakeSources,
+  name: string,
+  table: Table<object>,
+): string {
+  return sources.decoded
+    ? `SELECT * FROM read_parquet(${decodeGlob(sources, name)}, union_by_name = true)`
+    : emptySelectSql(table);
+}
+
+// 24 million rows across thirteen years. Year is the only partition key worth
+// its file count: nearly every question about records is scoped to a season,
+// and a finer key would shard a single ride across partitions. It is projected
+// as a column because PARTITION_BY names columns, and a record whose timestamp
+// failed to decode lands in DuckDB's default partition rather than dropping.
+export const RECORDS: LakeTable = {
+  name: "records",
+  partitionBy: "year",
+  sql: (sources) =>
+    `SELECT *, year(timestamp) AS year FROM (${scan(sources, "records", RECORDS_SCHEMA)})`,
+};
+
+export const LAPS = passthrough("laps", LAPS_SCHEMA);
+export const SESSIONS = passthrough("sessions", SESSIONS_SCHEMA);
+
+// One row per activity per developer field or device, kept as its own table so
+// a query can ask which activities carried Wahoo wind speed without opening
+// 4,000 record files.
+export const TELEMETRY_META = passthrough("meta", META_SCHEMA);
+
+// An activity's session rows are per-sport segments of one ride. Summing the
+// totals and re-averaging the averages weighted by timer time is what makes a
+// multi-sport file comparable to a single-session one.
+// A session's average weighted by its own timer time. Ignoring the weight
+// would let a 30-second transition session pull an hour-long ride's average
+// as hard as the ride itself. NULLIF keeps a file whose sessions all report
+// zero timer time from dividing by zero.
+function weighted(column: string): string {
+  return `SUM(${column} * total_timer_time) / NULLIF(SUM(CASE WHEN ${column} IS NULL THEN 0 ELSE total_timer_time END), 0)`;
+}
+
+const DEVICE_TOTALS = `
+  device AS (
+    SELECT
+      activity_id,
+      SUM(total_distance)                    AS device_distance_m,
+      SUM(total_ascent)                      AS device_elevation_gain_m,
+      SUM(total_descent)                     AS device_elevation_loss_m,
+      SUM(total_elapsed_time)                AS device_elapsed_time_s,
+      SUM(total_timer_time)                  AS device_timer_time_s,
+      SUM(total_moving_time)                 AS device_moving_time_s,
+      SUM(total_calories)                    AS device_calories,
+      SUM(total_work)                        AS device_total_work_j,
+      MAX(max_speed)                         AS device_max_speed_mps,
+      MAX(max_power)                         AS device_max_power_w,
+      MAX(max_heart_rate)                    AS device_max_heart_rate_bpm,
+      MAX(max_cadence)                       AS device_max_cadence_rpm,
+      MAX(max_altitude)                      AS device_max_altitude_m,
+      MIN(min_altitude)                      AS device_min_altitude_m,
+      ${weighted("avg_speed")}               AS device_avg_speed_mps,
+      ${weighted("avg_power")}               AS device_avg_power_w,
+      ${weighted("normalized_power")}        AS device_normalized_power_w,
+      ${weighted("avg_heart_rate")}          AS device_avg_heart_rate_bpm,
+      ${weighted("avg_cadence")}             AS device_avg_cadence_rpm,
+      ${weighted("avg_temperature")}         AS device_avg_temperature_c,
+      COUNT(*)                               AS device_session_count,
+      ANY_VALUE(sport)                       AS device_sport,
+      ANY_VALUE(sub_sport)                   AS device_sub_sport
+    FROM sessions
+    GROUP BY activity_id
+  )`;
+
+// Provenance for the telemetry: which file won, and whether its power is real.
+// `meta` carries exactly one device row per activity, so the filter makes this
+// one row per activity without a GROUP BY.
+const PROVENANCE = `
+  provenance AS (
+    SELECT
+      activity_id,
+      source   AS telemetry_format,
+      raw_key  AS telemetry_raw_key,
+      CASE
+        WHEN raw_key LIKE 'raw/wahoo/%'         THEN 'wahoo'
+        WHEN raw_key LIKE 'raw/strava/export/%' THEN 'strava_export'
+        WHEN raw_key LIKE 'raw/strava/%'        THEN 'strava'
+        ELSE 'unknown'
+      END      AS telemetry_origin
+    FROM meta
+    WHERE kind = 'device'
+  ),
+  power AS (
+    SELECT activity_id, COUNT(power) AS power_samples
+    FROM records
+    GROUP BY activity_id
+  )`;
+
+// Strava's export CSV repeats several header names, and DuckDB disambiguates
+// the repeats with a numeric suffix. The duplicated pairs are not redundant:
+// the first "Distance" is the display value in kilometres and the second is
+// metres, so every reference here is to the suffixed second column.
+const STRAVA = `
+  strava AS (
+    SELECT
+      CAST("Activity ID" AS VARCHAR)  AS activity_id,
+      "Activity Name"                 AS name,
+      "Activity Description"          AS description,
+      "Activity Type"                 AS strava_type,
+      "Activity Gear"                 AS gear,
+      -- Every numeric column is cast rather than left to inference. DuckDB
+      -- types a CSV column from the values it samples, so a column that
+      -- happens to hold whole numbers in one export and fractions in the next
+      -- would change the lake's schema between two runs.
+      ${csvDouble("Distance_1")}              AS strava_distance_m,
+      ${csvDouble("Elevation Gain")}          AS strava_elevation_gain_m,
+      ${csvDouble("Elevation Loss")}          AS strava_elevation_loss_m,
+      ${csvDouble("Moving Time")}             AS strava_moving_time_s,
+      ${csvDouble("Elapsed Time_1")}          AS strava_elapsed_time_s,
+      ${csvDouble("Average Speed")}           AS strava_avg_speed_mps,
+      ${csvDouble("Max Speed")}               AS strava_max_speed_mps,
+      ${csvDouble("Average Watts")}           AS strava_avg_power_w,
+      ${csvDouble("Max Watts")}               AS strava_max_power_w,
+      ${csvDouble("Weighted Average Power")}  AS strava_weighted_avg_power_w,
+      ${csvDouble("Power Count")}             AS strava_power_count,
+      ${csvDouble("Average Heart Rate")}      AS strava_avg_heart_rate_bpm,
+      ${csvDouble("Max Heart Rate_1")}        AS strava_max_heart_rate_bpm,
+      ${csvDouble("Average Cadence")}         AS strava_avg_cadence_rpm,
+      ${csvDouble("Calories")}                AS strava_calories,
+      ${csvDouble("Total Work")}              AS strava_total_work_j,
+      ${csvDouble("Relative Effort_1")}       AS strava_relative_effort,
+      ${csvDouble("Grade Adjusted Distance")} AS strava_grade_adjusted_distance_m,
+      CAST("Commute_1" AS VARCHAR)            AS commute
+    -- Activity descriptions carry newlines inside quotes and trailing columns
+    -- go missing on older rows, so the reader needs null_padding, and DuckDB
+    -- refuses to combine that with its parallel scanner.
+    FROM read_csv(%SOURCE%, header = true, null_padding = true, parallel = false)
+  )`;
+
+// With no export archived the join still has to resolve, so an empty relation
+// stands in with the same column names and types.
+const STRAVA_ABSENT = `
+  strava AS (
+    SELECT * FROM (
+      SELECT
+        NULL::VARCHAR AS activity_id, NULL::VARCHAR AS name,
+        NULL::VARCHAR AS description, NULL::VARCHAR AS strava_type,
+        NULL::VARCHAR AS gear, NULL::DOUBLE AS strava_distance_m,
+        NULL::DOUBLE AS strava_elevation_gain_m,
+        NULL::DOUBLE AS strava_elevation_loss_m,
+        NULL::DOUBLE AS strava_moving_time_s,
+        NULL::DOUBLE AS strava_elapsed_time_s,
+        NULL::DOUBLE AS strava_avg_speed_mps, NULL::DOUBLE AS strava_max_speed_mps,
+        NULL::DOUBLE AS strava_avg_power_w, NULL::DOUBLE AS strava_max_power_w,
+        NULL::DOUBLE AS strava_weighted_avg_power_w,
+        NULL::DOUBLE AS strava_power_count,
+        NULL::DOUBLE AS strava_avg_heart_rate_bpm,
+        NULL::DOUBLE AS strava_max_heart_rate_bpm,
+        NULL::DOUBLE AS strava_avg_cadence_rpm, NULL::DOUBLE AS strava_calories,
+        NULL::DOUBLE AS strava_total_work_j,
+        NULL::DOUBLE AS strava_relative_effort,
+        NULL::DOUBLE AS strava_grade_adjusted_distance_m,
+        NULL::VARCHAR AS commute
+    ) WHERE false
+  )`;
+
+// The registry is the spine: an activity with no telemetry still gets a row,
+// because the feed shows it and a missing row would read as a lost ride.
+export const ACTIVITIES: LakeTable = {
+  name: "activities",
+  sql: (sources) => `
+    WITH registry AS (
+      SELECT
+        CAST(activity_id AS VARCHAR) AS activity_id,
+        CAST(started_at AS TIMESTAMP) AS started_at,
+        CAST(timezone AS VARCHAR) AS timezone,
+        CAST(sport AS VARCHAR) AS sport,
+        CAST(duration_s AS DOUBLE) AS registry_duration_s,
+        CAST(strava_id AS VARCHAR) AS strava_id,
+        CAST(wahoo_id AS VARCHAR) AS wahoo_id,
+        CAST(deleted_at AS TIMESTAMP) AS deleted_at
+      FROM read_json(${literal(sources.registry)}, format = 'newline_delimited')
+    ),
+    sessions AS (${SESSIONS.sql(sources)}),
+    records AS (${RECORDS.sql(sources)}),
+    meta AS (${TELEMETRY_META.sql(sources)}),
+    ${strava(sources)},
+    ${DEVICE_TOTALS},
+    ${PROVENANCE}
+    SELECT
+      registry.activity_id,
+      registry.started_at,
+      registry.timezone,
+      registry.sport,
+      registry.deleted_at,
+      strava.name,
+      strava.description,
+      strava.gear,
+      strava.commute,
+      provenance.telemetry_origin,
+      provenance.telemetry_format,
+      provenance.telemetry_raw_key,
+      -- GPX power exists only because Strava estimated it, and no FIT power is
+      -- ever an estimate, so the format decides this on its own.
+      CASE
+        WHEN COALESCE(power.power_samples, 0) = 0 THEN 'none'
+        WHEN provenance.telemetry_format = 'gpx'  THEN 'estimated'
+        ELSE 'measured'
+      END AS power_source,
+      device.* EXCLUDE (activity_id),
+      strava.* EXCLUDE (activity_id, name, description, gear, commute)
+    FROM registry
+    LEFT JOIN device     ON device.activity_id     = registry.activity_id
+    LEFT JOIN provenance ON provenance.activity_id = registry.activity_id
+    LEFT JOIN power      ON power.activity_id      = registry.activity_id
+    LEFT JOIN strava     ON strava.activity_id     = registry.strava_id
+    ORDER BY registry.started_at, registry.activity_id`,
+};
+
+export const TABLES: readonly LakeTable[] = [
+  ACTIVITIES,
+  RECORDS,
+  LAPS,
+  SESSIONS,
+  TELEMETRY_META,
+];
+
+function strava(sources: LakeSources): string {
+  return sources.stravaExport === null
+    ? STRAVA_ABSENT
+    : STRAVA.replace("%SOURCE%", literal(sources.stravaExport));
+}
+
+// TRY_CAST rather than CAST: Strava writes a handful of non-numeric markers
+// into otherwise numeric columns, and one of them would otherwise fail the
+// whole build instead of leaving one cell null.
+function csvDouble(column: string): string {
+  return `TRY_CAST("${column.replaceAll('"', '""')}" AS DOUBLE)`;
+}
+
+function literal(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}

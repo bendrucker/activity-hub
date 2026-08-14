@@ -7,6 +7,7 @@ import {
   type Stage,
 } from "./derived";
 import { RateLimitedError } from "./ingest";
+import { buildLake, type LakeBuildOptions } from "./lake/build";
 import {
   backfillStravaStreams,
   type StravaBackfillOptions,
@@ -356,6 +357,33 @@ export async function handleTransform(
     return Response.json({
       ok: true,
       enqueued: await reconcileTransform(env, limit),
+    });
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+// The lake build takes minutes and rewrites every table, so it stays an
+// explicit request rather than something a stale row triggers. The response
+// carries the row count per table, which is the only cheap check that a
+// rebuild did not quietly drop a table's inputs.
+export async function handleLake(
+  request: Request,
+  env: Env,
+  options: LakeBuildOptions = {},
+): Promise<Response> {
+  if (!authorized(request, env)) {
+    return new Response("Forbidden", { status: 403 });
+  }
+
+  try {
+    const result = await buildLake(env, options);
+    return Response.json({
+      ok: true,
+      registry: result.registry,
+      stravaExport: result.stravaExport,
+      output: result.response.outputKey,
+      tables: result.response.tables,
     });
   } catch (error) {
     return errorResponse(error);

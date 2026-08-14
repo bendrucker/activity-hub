@@ -129,6 +129,7 @@ test("reports row counts and carries non-fatal decode errors through", async () 
     activityId: "a",
     status: "ok",
     outputKey: "decode/v1/a/",
+    rawKey: "raw/a.fit",
     records: 2,
     laps: 1,
     sessions: 1,
