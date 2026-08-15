@@ -25,7 +25,10 @@ const response = await buildLake(
   {
     decode,
     registry,
-    stravaExport: stravaExport === "-" ? null : stravaExport,
+    // `-` stands in for an omitted export because the argument is positional
+    // and the output URI follows it.
+    stravaExport:
+      stravaExport === undefined || stravaExport === "-" ? null : stravaExport,
     output,
   },
   { instance, configure },
