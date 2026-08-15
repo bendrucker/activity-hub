@@ -26,10 +26,12 @@ flowchart TB
         tqueue[Transform queue]
         consumer[Transform consumer]
         derived[(D1 derived)]
+        lakecron[Nightly lake build]
     end
 
     subgraph compute[Compute plane: container]
         decode[POST /decode]
+        lake[POST /lake]
     end
 
     strava --> ingest
@@ -40,11 +42,16 @@ flowchart TB
 
     registry --> cron --> tqueue --> consumer
     consumer -->|batch of work| decode
-    decode --> raw
+    raw --> decode
     decode --> parquet[(R2 per-activity Parquet)]
     decode -->|outcomes| consumer
     consumer --> derived
     derived --> cron
+
+    registry --> lakecron -->|registry snapshot| lake
+    parquet --> lake
+    raw -->|Strava export CSV| lake
+    lake --> tables[(R2 lake tables)]
 ```
 
 The raw bucket is the system of record. Everything downstream can be rebuilt from it.
@@ -57,18 +64,19 @@ See [docs/design.md](docs/design.md) for the full design and [docs/sources.md](d
 
 The unit of work is **one activity at one stage**, and the DAG is data-driven rather than schedule-driven. Nothing runs because a clock said so. Work happens because a stage's recorded output is missing or older than its input.
 
-| Column                 | Meaning                                                                |
-| ---------------------- | ---------------------------------------------------------------------- |
-| `activity_id`, `stage` | Primary key. One row per activity per stage.                           |
-| `input_fingerprint`    | Hash over the raw R2 keys and etags, plus the artifact schema version. |
-| `output_key`           | The artifact the stage produced.                                       |
-| `status`               | `ok`, `failed`, or `skipped`.                                          |
-| `attempts`             | Deliveries spent. Past the ceiling a row parks as visibly failed.      |
-| `error`, `updated_at`  | What went wrong, and when the row last moved.                          |
+| Column                 | Meaning                                                           |
+| ---------------------- | ----------------------------------------------------------------- |
+| `activity_id`, `stage` | Primary key. One row per activity per stage.                      |
+| `input_fingerprint`    | Hash over the raw R2 keys and etags that fed the stage.           |
+| `artifact_version`     | The version of the stage's output shape that wrote the row.       |
+| `output_key`           | The artifact the stage produced.                                  |
+| `status`               | `ok`, `failed`, or `skipped`.                                     |
+| `attempts`             | Deliveries spent. Past the ceiling a row parks as visibly failed. |
+| `error`, `updated_at`  | What went wrong, and when the row last moved.                     |
 
 That one table carries every requirement. Reprocessing a single activity is a `POST /admin/transform?activityId=...`, because the stage is idempotent on `(activity_id, stage)`. An upstream edit changes the raw object's etag, so the recomputed fingerprint stops matching and every downstream stage is stale by definition. Nothing has to notice the edit explicitly.
 
-Raw bytes say nothing about the code that read them, so the fingerprint also covers `DECODE_SCHEMA_VERSION` in `src/transform/protocol.ts`. A decoder that adds a column leaves every existing artifact short of it, and the lake build then fails on a table it cannot bind. Bumping that constant makes the whole archive stale and re-decodes it.
+The fingerprint describes the input alone, and a stage's own output shape can change while every input sits still. That is what `artifact_version` records, from `ARTIFACT_VERSION` in `src/derived.ts`, which reads the decode stage's version off `DECODE_SCHEMA_VERSION` in `src/transform/protocol.ts`. Bumping that constant makes the whole archive stale and the nightly sweep re-decodes it. [docs/design.md](docs/design.md) covers why it is a column the sweep compares rather than another input to the hash.
 
 Monitoring is `GET /admin/pipeline`. It reports counts by stage and status, the lag on the oldest activity still waiting, and recent failures with their attempt counts. It also reports `parked` per stage, the failures that have spent every attempt. Those are invisible to the staleness query for the same reason they will never retry, so without that count a stage holding nothing but parked rows would read as caught up. A parked row is the record of an activity given up on, and the pipeline keeps running around it.
 
@@ -208,19 +216,19 @@ curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
 curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
   "https://hub.bendrucker.me/admin/transform?activityId=$ID&force=true"
 
-# Rebuild every lake table from the decode artifacts. Takes minutes and
-# answers with a row count per table, which is the cheap check that a rebuild
-# did not lose a table's inputs.
+# Rebuild every lake table from the decode artifacts. Takes about two minutes
+# over the whole corpus and answers with a row count per table, which is the
+# cheap check that a rebuild did not lose a table's inputs.
 curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
   https://hub.bendrucker.me/admin/lake
 ```
 
-The lake rebuilds nightly on its own cron at 08:00, two hours after the 06:00 sweep that enqueues decoding. They are separate triggers because the sweep only enqueues: decoding drains through the queue afterwards, so a rebuild in the same invocation would read the artifacts that sweep was about to replace.
+The lake rebuilds nightly on its own cron at 08:00, two hours after the 06:00 sweep that enqueues decoding. The two crons stay separate because the sweep only enqueues. Decoding drains through the queue afterwards, so a rebuild in the same invocation would read the artifacts that sweep was about to replace.
 
 ## Status
 
 The Strava pipeline is live. The historical export is imported, OAuth and webhooks run, and a daily reconciliation cron catches anything webhooks miss. Wahoo is in progress ([#11](https://github.com/bendrucker/activity-hub/issues/11)).
 
-The transform pipeline's `decode` stage is built: the FIT and GPX decoders, the `derived` table, the queue, and the container. The `lake` stage builds `activities`, `records`, `laps`, `sessions`, and `meta` as Parquet under `lake/v1/`; publishing them to R2 Data Catalog as Iceberg and materializing `power_curve` remain ([#13](https://github.com/bendrucker/activity-hub/issues/13)). The `publish` stage is not built ([#14](https://github.com/bendrucker/activity-hub/issues/14)).
+The transform pipeline's `decode` stage is built: the FIT and GPX decoders, the `derived` table, the queue, and the container. The `lake` stage builds `activities`, `records`, `laps`, `sessions`, and `meta` as Parquet under `lake/v1/`. Publishing them to R2 Data Catalog as Iceberg and materializing `power_curve` remain ([#13](https://github.com/bendrucker/activity-hub/issues/13)). The `publish` stage is not built ([#14](https://github.com/bendrucker/activity-hub/issues/14)).
 
 Supersedes the Strava pipeline previously planned inside bendrucker.me ([#100](https://github.com/bendrucker/bendrucker.me/issues/100)).

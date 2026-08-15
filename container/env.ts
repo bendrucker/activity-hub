@@ -1,3 +1,8 @@
+// The buckets each set of credentials reaches. Bun's client addresses them by
+// name and DuckDB scopes a secret to one, so both paths read them from here.
+export const RAW_BUCKET = "activity-hub-raw";
+export const LAKE_BUCKET = "activity-hub-lake";
+
 export interface Credentials {
   accessKeyId: string;
   secretAccessKey: string;

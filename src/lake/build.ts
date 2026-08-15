@@ -31,8 +31,10 @@ export async function buildLake(
   env: Env,
   options: LakeBuildOptions = {},
 ): Promise<LakeBuildResult> {
-  const registry = await exportRegistry(env.REGISTRY, env.LAKE);
-  const stravaExport = await latestExportCsv(env.RAW);
+  const [registry, stravaExport] = await Promise.all([
+    exportRegistry(env.REGISTRY, env.LAKE),
+    latestExportCsv(env.RAW),
+  ]);
 
   const client = options.client ?? lakeClient(env);
   const response = await client.build({

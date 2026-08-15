@@ -8,8 +8,9 @@
 // whatever subset of activities happens to be decoded right now.
 import { DuckDBInstance } from "@duckdb/node-api";
 import { buildLake } from "./lake";
-import { readConfig } from "./env";
-import { configureS3, LAKE_BUCKET, RAW_BUCKET } from "./s3";
+import { LAKE_BUCKET, RAW_BUCKET, readConfig } from "./env";
+import { configureS3 } from "./s3";
+import { literal } from "./sql";
 
 const [decode, registry, stravaExport, output] = process.argv.slice(2);
 if (!decode || !registry || !output) {
@@ -18,6 +19,7 @@ if (!decode || !registry || !output) {
   );
 }
 
+const configure = configureS3(readConfig(process.env));
 const instance = await DuckDBInstance.create(":memory:");
 const response = await buildLake(
   {
@@ -26,15 +28,18 @@ const response = await buildLake(
     stravaExport: stravaExport === "-" ? null : stravaExport,
     output,
   },
-  { instance, configure: configureS3(readConfig(process.env)) },
+  { instance, configure },
 );
 console.log(JSON.stringify(response, null, 2));
 
 const connection = await instance.connect();
-await configureS3(readConfig(process.env))(connection);
+await configure(connection);
+const activities = literal(
+  `${output.replace(/\/$/, "")}/activities/**/*.parquet`,
+);
 const reader = await connection.runAndReadAll(
   `SELECT telemetry_origin, telemetry_format, power_source, COUNT(*) AS activities
-   FROM read_parquet('${output.replace(/\/$/, "")}/activities/**/*.parquet')
+   FROM read_parquet(${activities})
    GROUP BY ALL ORDER BY activities DESC`,
 );
 console.log(

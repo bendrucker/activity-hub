@@ -118,6 +118,16 @@ async function activities(): Promise<Record<string, unknown>[]> {
   return reader.getRowObjects();
 }
 
+// Read off the files rather than the COPY's own count, which reports what this
+// run wrote and says nothing about what an earlier one left behind.
+async function recordYears(): Promise<number[]> {
+  const connection = await instance.connect();
+  const reader = await connection.runAndReadAll(
+    `SELECT DISTINCT year FROM read_parquet('${join(work, "out")}/records/**/*.parquet', hive_partitioning = true) ORDER BY year`,
+  );
+  return reader.getRowObjects().map((row) => Number(row.year));
+}
+
 test("unions every activity's rows into one table per grain", async () => {
   await seed(
     [
@@ -254,6 +264,52 @@ test("builds with no export archived", async () => {
   const [row] = await activities();
   expect(row?.activity_id).toBe("a");
   expect(row?.strava_distance_m).toBeNull();
+});
+
+test("carries the registry's own duration", async () => {
+  await seed(
+    [{ activityId: "a", rawKey: "raw/strava/a.fit", activity: activity() }],
+    [registryRow("a"), registryRow("orphan")],
+  );
+
+  await build();
+
+  expect(
+    Object.fromEntries(
+      (await activities()).map((r) => [r.activity_id, r.duration_s]),
+    ),
+  ).toEqual({ a: 3600, orphan: 3600 });
+});
+
+// A year that loses its last record has to stop being served. COPY only
+// rewrites the partitions the current run produces, so the previous run's
+// directory survives unless the write is told to clear the destination.
+test("stops serving a partition that lost its last row", async () => {
+  const record2024 = record({
+    timestamp: new Date("2024-06-01T14:00:00.000Z"),
+  });
+  await seed(
+    [
+      { activityId: "a", rawKey: "raw/strava/a.fit", activity: activity() },
+      {
+        activityId: "old",
+        rawKey: "raw/strava/old.fit",
+        activity: activity({ records: [record2024] }),
+      },
+    ],
+    [registryRow("a"), registryRow("old")],
+  );
+  await build();
+  expect(await recordYears()).toEqual([2024, 2026]);
+
+  await rm(join(work, "decode", "old"), { recursive: true });
+  await writeFile(
+    join(work, "registry.ndjson"),
+    `${JSON.stringify(registryRow("a"))}\n`,
+  );
+  await build();
+
+  expect(await recordYears()).toEqual([2026]);
 });
 
 // The build rewrites every table, so a table that shrinks must not keep

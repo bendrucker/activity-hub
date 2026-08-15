@@ -8,6 +8,7 @@ import type {
   TelemetrySession,
   TelemetrySource,
 } from "../src/import/telemetry";
+import { quote } from "./sql";
 
 // Every numeric telemetry column is DOUBLE rather than a width matched to the
 // field's FIT profile type. A double is exact for every integer the decoders
@@ -352,8 +353,4 @@ function storageType(type: ColumnType): string {
 // belongs in a column definition is dropped here.
 function castType(type: ColumnType): string {
   return storageType(type).replace(" NOT NULL", "");
-}
-
-function quote(identifier: string): string {
-  return `"${identifier.replaceAll('"', '""')}"`;
 }

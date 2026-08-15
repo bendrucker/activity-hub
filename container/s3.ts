@@ -1,8 +1,11 @@
 import type { DuckDBConnection } from "@duckdb/node-api";
-import type { ContainerConfig, Credentials } from "./env";
-
-export const RAW_BUCKET = "activity-hub-raw";
-export const LAKE_BUCKET = "activity-hub-lake";
+import {
+  LAKE_BUCKET,
+  RAW_BUCKET,
+  type ContainerConfig,
+  type Credentials,
+} from "./env";
+import { literal } from "./sql";
 
 // The lake build reads thousands of Parquet files and writes a partitioned
 // table, so DuckDB talks to R2 itself rather than having bytes streamed
@@ -42,8 +45,4 @@ function secret(
     REGION 'auto',
     SCOPE ${literal(`s3://${bucket}`)}
   )`;
-}
-
-function literal(value: string): string {
-  return `'${value.replaceAll("'", "''")}'`;
 }

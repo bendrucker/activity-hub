@@ -4,6 +4,7 @@ import type {
   LakeResponse,
   LakeTableResult,
 } from "../src/transform/protocol";
+import { literal } from "./sql";
 import { TABLES, type LakeSources, type LakeTable } from "./tables";
 
 export interface LakeDeps {
@@ -67,7 +68,9 @@ async function buildTable(
     "COMPRESSION ZSTD",
     // The whole table is rewritten each run, so last run's files have to go or
     // a shrinking table would keep serving rows it no longer contains.
-    "OVERWRITE_OR_IGNORE true",
+    // OVERWRITE_OR_IGNORE only permits replacing a file this run writes again,
+    // which leaves a partition that lost its last row serving it forever.
+    "OVERWRITE true",
     "FILENAME_PATTERN 'part_{i}'",
   ];
   // COPY writes a single file unless something forces multi-file output, and
@@ -92,8 +95,4 @@ async function buildTable(
 
 function trimSlash(value: string): string {
   return value.endsWith("/") ? value.slice(0, -1) : value;
-}
-
-function literal(value: string): string {
-  return `'${value.replaceAll("'", "''")}'`;
 }

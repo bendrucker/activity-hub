@@ -11,6 +11,7 @@ import {
   SESSIONS as SESSIONS_SCHEMA,
   type Table,
 } from "./schema";
+import { literal, quote } from "./sql";
 
 export interface LakeSources {
   // Prefix holding one directory per activity, each with the four decode
@@ -81,9 +82,6 @@ export const SESSIONS = passthrough("sessions", SESSIONS_SCHEMA);
 // 4,000 record files.
 export const TELEMETRY_META = passthrough("meta", META_SCHEMA);
 
-// An activity's session rows are per-sport segments of one ride. Summing the
-// totals and re-averaging the averages weighted by timer time is what makes a
-// multi-sport file comparable to a single-session one.
 // A session's average weighted by its own timer time. Ignoring the weight
 // would let a 30-second transition session pull an hour-long ride's average
 // as hard as the ride itself. NULLIF keeps a file whose sessions all report
@@ -92,6 +90,9 @@ function weighted(column: string): string {
   return `SUM(${column} * total_timer_time) / NULLIF(SUM(CASE WHEN ${column} IS NULL THEN 0 ELSE total_timer_time END), 0)`;
 }
 
+// An activity's session rows are per-sport segments of one ride. Summing the
+// totals and re-averaging the averages weighted by timer time is what makes a
+// multi-sport file comparable to a single-session one.
 const DEVICE_TOTALS = `
   device AS (
     SELECT
@@ -147,71 +148,154 @@ const PROVENANCE = `
     GROUP BY activity_id
   )`;
 
+interface StravaColumn {
+  name: string;
+  type: "VARCHAR" | "DOUBLE";
+  // Reads the column out of the read_csv relation, under the export's own
+  // header name.
+  expression: string;
+}
+
 // Strava's export CSV repeats several header names, and DuckDB disambiguates
 // the repeats with a numeric suffix. The duplicated pairs are not redundant:
 // the first "Distance" is the display value in kilometres and the second is
 // metres, so every reference here is to the suffixed second column.
-const STRAVA = `
+//
+// Every numeric column is cast rather than left to inference. DuckDB types a
+// CSV column from the values it samples, so a column that happens to hold
+// whole numbers in one export and fractions in the next would change the
+// lake's schema between two runs.
+//
+// One list drives both the read and the empty relation that stands in for it,
+// because a column added to one and not the other changes the activities
+// table's shape depending on whether an export happens to be archived.
+const STRAVA_COLUMNS: readonly StravaColumn[] = [
+  {
+    name: "activity_id",
+    type: "VARCHAR",
+    expression: csvVarchar("Activity ID"),
+  },
+  { name: "name", type: "VARCHAR", expression: quote("Activity Name") },
+  {
+    name: "description",
+    type: "VARCHAR",
+    expression: quote("Activity Description"),
+  },
+  { name: "strava_type", type: "VARCHAR", expression: quote("Activity Type") },
+  { name: "gear", type: "VARCHAR", expression: quote("Activity Gear") },
+  {
+    name: "strava_distance_m",
+    type: "DOUBLE",
+    expression: csvDouble("Distance_1"),
+  },
+  {
+    name: "strava_elevation_gain_m",
+    type: "DOUBLE",
+    expression: csvDouble("Elevation Gain"),
+  },
+  {
+    name: "strava_elevation_loss_m",
+    type: "DOUBLE",
+    expression: csvDouble("Elevation Loss"),
+  },
+  {
+    name: "strava_moving_time_s",
+    type: "DOUBLE",
+    expression: csvDouble("Moving Time"),
+  },
+  {
+    name: "strava_elapsed_time_s",
+    type: "DOUBLE",
+    expression: csvDouble("Elapsed Time_1"),
+  },
+  {
+    name: "strava_avg_speed_mps",
+    type: "DOUBLE",
+    expression: csvDouble("Average Speed"),
+  },
+  {
+    name: "strava_max_speed_mps",
+    type: "DOUBLE",
+    expression: csvDouble("Max Speed"),
+  },
+  {
+    name: "strava_avg_power_w",
+    type: "DOUBLE",
+    expression: csvDouble("Average Watts"),
+  },
+  {
+    name: "strava_max_power_w",
+    type: "DOUBLE",
+    expression: csvDouble("Max Watts"),
+  },
+  {
+    name: "strava_weighted_avg_power_w",
+    type: "DOUBLE",
+    expression: csvDouble("Weighted Average Power"),
+  },
+  {
+    name: "strava_power_count",
+    type: "DOUBLE",
+    expression: csvDouble("Power Count"),
+  },
+  {
+    name: "strava_avg_heart_rate_bpm",
+    type: "DOUBLE",
+    expression: csvDouble("Average Heart Rate"),
+  },
+  {
+    name: "strava_max_heart_rate_bpm",
+    type: "DOUBLE",
+    expression: csvDouble("Max Heart Rate_1"),
+  },
+  {
+    name: "strava_avg_cadence_rpm",
+    type: "DOUBLE",
+    expression: csvDouble("Average Cadence"),
+  },
+  {
+    name: "strava_calories",
+    type: "DOUBLE",
+    expression: csvDouble("Calories"),
+  },
+  {
+    name: "strava_total_work_j",
+    type: "DOUBLE",
+    expression: csvDouble("Total Work"),
+  },
+  {
+    name: "strava_relative_effort",
+    type: "DOUBLE",
+    expression: csvDouble("Relative Effort_1"),
+  },
+  {
+    name: "strava_grade_adjusted_distance_m",
+    type: "DOUBLE",
+    expression: csvDouble("Grade Adjusted Distance"),
+  },
+  { name: "commute", type: "VARCHAR", expression: csvVarchar("Commute_1") },
+];
+
+function stravaPresent(source: string): string {
+  const columns = STRAVA_COLUMNS.map(
+    (column) => `${column.expression} AS ${column.name}`,
+  );
+  return `
   strava AS (
-    SELECT
-      CAST("Activity ID" AS VARCHAR)  AS activity_id,
-      "Activity Name"                 AS name,
-      "Activity Description"          AS description,
-      "Activity Type"                 AS strava_type,
-      "Activity Gear"                 AS gear,
-      -- Every numeric column is cast rather than left to inference. DuckDB
-      -- types a CSV column from the values it samples, so a column that
-      -- happens to hold whole numbers in one export and fractions in the next
-      -- would change the lake's schema between two runs.
-      ${csvDouble("Distance_1")}              AS strava_distance_m,
-      ${csvDouble("Elevation Gain")}          AS strava_elevation_gain_m,
-      ${csvDouble("Elevation Loss")}          AS strava_elevation_loss_m,
-      ${csvDouble("Moving Time")}             AS strava_moving_time_s,
-      ${csvDouble("Elapsed Time_1")}          AS strava_elapsed_time_s,
-      ${csvDouble("Average Speed")}           AS strava_avg_speed_mps,
-      ${csvDouble("Max Speed")}               AS strava_max_speed_mps,
-      ${csvDouble("Average Watts")}           AS strava_avg_power_w,
-      ${csvDouble("Max Watts")}               AS strava_max_power_w,
-      ${csvDouble("Weighted Average Power")}  AS strava_weighted_avg_power_w,
-      ${csvDouble("Power Count")}             AS strava_power_count,
-      ${csvDouble("Average Heart Rate")}      AS strava_avg_heart_rate_bpm,
-      ${csvDouble("Max Heart Rate_1")}        AS strava_max_heart_rate_bpm,
-      ${csvDouble("Average Cadence")}         AS strava_avg_cadence_rpm,
-      ${csvDouble("Calories")}                AS strava_calories,
-      ${csvDouble("Total Work")}              AS strava_total_work_j,
-      ${csvDouble("Relative Effort_1")}       AS strava_relative_effort,
-      ${csvDouble("Grade Adjusted Distance")} AS strava_grade_adjusted_distance_m,
-      CAST("Commute_1" AS VARCHAR)            AS commute
+    SELECT ${columns.join(", ")}
     -- Activity descriptions carry newlines inside quotes and trailing columns
     -- go missing on older rows, so the reader needs null_padding, and DuckDB
     -- refuses to combine that with its parallel scanner.
-    FROM read_csv(%SOURCE%, header = true, null_padding = true, parallel = false)
+    FROM read_csv(${literal(source)}, header = true, null_padding = true, parallel = false)
   )`;
+}
 
 // With no export archived the join still has to resolve, so an empty relation
 // stands in with the same column names and types.
 const STRAVA_ABSENT = `
   strava AS (
     SELECT * FROM (
-      SELECT
-        NULL::VARCHAR AS activity_id, NULL::VARCHAR AS name,
-        NULL::VARCHAR AS description, NULL::VARCHAR AS strava_type,
-        NULL::VARCHAR AS gear, NULL::DOUBLE AS strava_distance_m,
-        NULL::DOUBLE AS strava_elevation_gain_m,
-        NULL::DOUBLE AS strava_elevation_loss_m,
-        NULL::DOUBLE AS strava_moving_time_s,
-        NULL::DOUBLE AS strava_elapsed_time_s,
-        NULL::DOUBLE AS strava_avg_speed_mps, NULL::DOUBLE AS strava_max_speed_mps,
-        NULL::DOUBLE AS strava_avg_power_w, NULL::DOUBLE AS strava_max_power_w,
-        NULL::DOUBLE AS strava_weighted_avg_power_w,
-        NULL::DOUBLE AS strava_power_count,
-        NULL::DOUBLE AS strava_avg_heart_rate_bpm,
-        NULL::DOUBLE AS strava_max_heart_rate_bpm,
-        NULL::DOUBLE AS strava_avg_cadence_rpm, NULL::DOUBLE AS strava_calories,
-        NULL::DOUBLE AS strava_total_work_j,
-        NULL::DOUBLE AS strava_relative_effort,
-        NULL::DOUBLE AS strava_grade_adjusted_distance_m,
-        NULL::VARCHAR AS commute
+      SELECT ${STRAVA_COLUMNS.map((column) => `NULL::${column.type} AS ${column.name}`).join(", ")}
     ) WHERE false
   )`;
 
@@ -243,6 +327,7 @@ export const ACTIVITIES: LakeTable = {
       registry.started_at,
       registry.timezone,
       registry.sport,
+      registry.registry_duration_s AS duration_s,
       registry.deleted_at,
       strava.name,
       strava.description,
@@ -279,15 +364,15 @@ export const TABLES: readonly LakeTable[] = [
 function strava(sources: LakeSources): string {
   return sources.stravaExport === null
     ? STRAVA_ABSENT
-    : STRAVA.replace("%SOURCE%", literal(sources.stravaExport));
+    : stravaPresent(sources.stravaExport);
 }
 
 // Strava writes a handful of non-numeric markers into otherwise numeric
 // columns. TRY_CAST leaves those cells null instead of failing the whole build.
 function csvDouble(column: string): string {
-  return `TRY_CAST("${column.replaceAll('"', '""')}" AS DOUBLE)`;
+  return `TRY_CAST(${quote(column)} AS DOUBLE)`;
 }
 
-function literal(value: string): string {
-  return `'${value.replaceAll("'", "''")}'`;
+function csvVarchar(column: string): string {
+  return `CAST(${quote(column)} AS VARCHAR)`;
 }

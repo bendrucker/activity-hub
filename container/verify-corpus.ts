@@ -9,6 +9,7 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import { writeActivityParquet } from "./parquet";
 import { decodeTelemetry } from "../src/import/telemetry";
 import { buildLake } from "./lake";
+import { literal } from "./sql";
 
 const EXPORT = process.argv[2];
 const WORK = process.argv[3];
@@ -51,7 +52,7 @@ const catalogRows = await catalog.runAndReadAll(
           strftime(strptime("Activity Date", '%b %d, %Y, %-I:%M:%S %p'), '%Y-%m-%dT%H:%M:%S') AS started_at,
           "Activity Type" AS sport,
           "Elapsed Time_1" AS duration_s
-   FROM read_csv('${csv}', header = true, null_padding = true, parallel = false)
+   FROM read_csv(${literal(csv)}, header = true, null_padding = true, parallel = false)
    WHERE "Filename" IS NOT NULL`,
 );
 const byFile = new Map(
@@ -135,7 +136,7 @@ const show = async (label: string, sql: string) => {
 await show(
   "provenance",
   `SELECT telemetry_origin, telemetry_format, power_source, COUNT(*) AS activities
-   FROM read_parquet('${OUTPUT}/activities/**/*.parquet')
+   FROM read_parquet(${literal(`${OUTPUT}/activities/**/*.parquet`)})
    GROUP BY ALL ORDER BY activities DESC`,
 );
 await show(
@@ -143,17 +144,17 @@ await show(
   `SELECT COUNT(*) AS activities,
           COUNT(name) AS with_strava_row,
           COUNT(device_distance_m) AS with_device_totals
-   FROM read_parquet('${OUTPUT}/activities/**/*.parquet')`,
+   FROM read_parquet(${literal(`${OUTPUT}/activities/**/*.parquet`)})`,
 );
 await show(
   "strava vs device",
   `SELECT COUNT(*) AS compared,
           ROUND(MEDIAN(ABS(strava_distance_m - device_distance_m)), 1) AS median_abs_distance_diff_m,
           ROUND(MEDIAN(ABS(strava_weighted_avg_power_w - device_normalized_power_w)), 1) AS median_abs_np_diff_w
-   FROM read_parquet('${OUTPUT}/activities/**/*.parquet')
+   FROM read_parquet(${literal(`${OUTPUT}/activities/**/*.parquet`)})
    WHERE strava_distance_m IS NOT NULL AND device_distance_m IS NOT NULL`,
 );
 await show(
   "record column types",
-  `SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM read_parquet('${OUTPUT}/records/**/*.parquet')) LIMIT 4`,
+  `SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM read_parquet(${literal(`${OUTPUT}/records/**/*.parquet`)})) LIMIT 4`,
 );
