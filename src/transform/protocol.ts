@@ -52,8 +52,8 @@ export interface DecodeResponse {
   outcomes: DecodeOutcome[];
 }
 
-// The lake build is corpus-wide, so its request names locations rather than
-// activities. Every field is a URI the container hands to DuckDB directly.
+// The lake build is corpus-wide, so its request names locations. Every field is
+// a URI the container hands to DuckDB directly.
 export interface LakeRequest {
   // Prefix under which the decode stage wrote one directory per activity.
   decode: string;

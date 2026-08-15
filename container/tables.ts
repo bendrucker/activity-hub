@@ -21,9 +21,8 @@ export interface LakeSources {
   // The Strava bulk export's activities.csv, or null when no export is
   // archived. Strava's own numbers come from here and nowhere else.
   stravaExport: string | null;
-  // Whether any activity has been decoded. A glob matching no files is an
-  // error in DuckDB rather than an empty scan, and the first build runs before
-  // any decode has landed.
+  // A glob matching no files is an error in DuckDB rather than an empty scan,
+  // and the first build runs before any decode has landed.
   decoded: boolean;
 }
 
@@ -283,9 +282,8 @@ function strava(sources: LakeSources): string {
     : STRAVA.replace("%SOURCE%", literal(sources.stravaExport));
 }
 
-// TRY_CAST rather than CAST: Strava writes a handful of non-numeric markers
-// into otherwise numeric columns, and one of them would otherwise fail the
-// whole build instead of leaving one cell null.
+// Strava writes a handful of non-numeric markers into otherwise numeric
+// columns. TRY_CAST leaves those cells null instead of failing the whole build.
 function csvDouble(column: string): string {
   return `TRY_CAST("${column.replaceAll('"', '""')}" AS DOUBLE)`;
 }

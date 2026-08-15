@@ -206,7 +206,7 @@ test("calls GPX power estimated and FIT power measured", async () => {
 });
 
 // An activity the registry holds but nothing decoded still belongs in the
-// table. Dropping it would read as a lost ride rather than a missing file.
+// table. Dropping it would read as a lost ride.
 test("keeps a registry activity that has no telemetry", async () => {
   await seed([], [registryRow("orphan")]);
 
@@ -241,8 +241,8 @@ test("joins Strava's own numbers on the registry's Strava id", async () => {
   expect(row?.strava_weighted_avg_power_w).toBe(225);
 });
 
-// Every Strava column has to resolve to null rather than the query failing,
-// because the lake has to build before any export is ever archived.
+// The lake has to build before any export is ever archived, so every Strava
+// column resolves to null.
 test("builds with no export archived", async () => {
   await seed(
     [{ activityId: "a", rawKey: "raw/strava/a.fit", activity: activity() }],

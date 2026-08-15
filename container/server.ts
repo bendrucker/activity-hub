@@ -18,8 +18,8 @@ export function routes(deps: DecodeDeps & LakeDeps) {
   };
 }
 
-// The lake build is one indivisible unit, so unlike /decode there is no
-// per-item outcome to report and any failure is the whole request's.
+// The lake build is one indivisible unit: there is no per-item outcome to
+// report, and any failure is the whole request's.
 export async function lake(
   request: Request,
   deps: LakeDeps,

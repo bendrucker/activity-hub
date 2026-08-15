@@ -25,9 +25,8 @@ export interface LakeBuildResult {
   response: LakeResponse;
 }
 
-// Rebuilds every lake table from the decode artifacts. This is the whole
-// stage: there is no per-activity unit, because a table is only consistent
-// once every activity in it came from the same pass.
+// This is the whole stage: there is no per-activity unit, because a table is
+// only consistent once every activity in it came from the same rebuild.
 export async function buildLake(
   env: Env,
   options: LakeBuildOptions = {},

@@ -13,8 +13,8 @@ export function configureS3(
 ): (connection: DuckDBConnection) => Promise<void> {
   return async (connection) => {
     await connection.run("LOAD httpfs");
-    // Scoped secrets rather than one set of settings, because the two buckets
-    // carry different credentials and the raw one is deliberately read-only.
+    // The two buckets carry different credentials, and the raw one is
+    // deliberately read-only.
     await connection.run(
       secret("raw", RAW_BUCKET, config.accountId, config.raw),
     );
