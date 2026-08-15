@@ -57,16 +57,18 @@ See [docs/design.md](docs/design.md) for the full design and [docs/sources.md](d
 
 The unit of work is **one activity at one stage**, and the DAG is data-driven rather than schedule-driven. Nothing runs because a clock said so. Work happens because a stage's recorded output is missing or older than its input.
 
-| Column                 | Meaning                                                           |
-| ---------------------- | ----------------------------------------------------------------- |
-| `activity_id`, `stage` | Primary key. One row per activity per stage.                      |
-| `input_fingerprint`    | Hash over the raw R2 keys and etags that fed the stage.           |
-| `output_key`           | The artifact the stage produced.                                  |
-| `status`               | `ok`, `failed`, or `skipped`.                                     |
-| `attempts`             | Deliveries spent. Past the ceiling a row parks as visibly failed. |
-| `error`, `updated_at`  | What went wrong, and when the row last moved.                     |
+| Column                 | Meaning                                                                |
+| ---------------------- | ---------------------------------------------------------------------- |
+| `activity_id`, `stage` | Primary key. One row per activity per stage.                           |
+| `input_fingerprint`    | Hash over the raw R2 keys and etags, plus the artifact schema version. |
+| `output_key`           | The artifact the stage produced.                                       |
+| `status`               | `ok`, `failed`, or `skipped`.                                          |
+| `attempts`             | Deliveries spent. Past the ceiling a row parks as visibly failed.      |
+| `error`, `updated_at`  | What went wrong, and when the row last moved.                          |
 
 That one table carries every requirement. Reprocessing a single activity is a `POST /admin/transform?activityId=...`, because the stage is idempotent on `(activity_id, stage)`. An upstream edit changes the raw object's etag, so the recomputed fingerprint stops matching and every downstream stage is stale by definition. Nothing has to notice the edit explicitly.
+
+Raw bytes say nothing about the code that read them, so the fingerprint also covers `DECODE_SCHEMA_VERSION` in `src/transform/protocol.ts`. A decoder that adds a column leaves every existing artifact short of it, and the lake build then fails on a table it cannot bind. Bumping that constant makes the whole archive stale and re-decodes it.
 
 Monitoring is `GET /admin/pipeline`. It reports counts by stage and status, the lag on the oldest activity still waiting, and recent failures with their attempt counts. It also reports `parked` per stage, the failures that have spent every attempt. Those are invisible to the staleness query for the same reason they will never retry, so without that count a stage holding nothing but parked rows would read as caught up. A parked row is the record of an activity given up on, and the pipeline keeps running around it.
 
@@ -75,10 +77,12 @@ Monitoring is `GET /admin/pipeline`. It reports counts by stage and status, the 
 | Stage     | Input                | Output                     |
 | --------- | -------------------- | -------------------------- |
 | `decode`  | raw FIT/GPX          | per-activity Parquet in R2 |
-| `lake`    | all decode artifacts | Iceberg or Parquet tables  |
+| `lake`    | all decode artifacts | corpus-wide Parquet tables |
 | `publish` | lake                 | site D1 feed rows          |
 
-Only `decode` is built. `lake` and `publish` are named in the table and the queue message shape so both generalize, and remain gated on open design questions.
+`decode` and `lake` are built. `publish` is named in the table and the queue message shape so it generalizes, and remains gated on open design questions.
+
+`lake` carries no `derived` row, because it has no per-activity unit: a table is consistent only once every row in it came from the same rebuild. It rebuilds nightly on its own cron and on `POST /admin/lake`.
 
 ### Transforming One Activity
 
@@ -114,17 +118,17 @@ The consumer re-reads raw keys from the registry rather than trusting the messag
 
 Inventory of every credential the system needs and where it lives.
 
-| Secret                                            | Location                               | Consumer                                                                                                                                            |
-| ------------------------------------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ADMIN_TOKEN`                                     | Worker secret (`wrangler secret put`)  | Manual triggers (`POST /admin/reconcile`, `POST /admin/wahoo-backfill`, `POST /admin/strava-backfill`, `POST /admin/transform`, `POST /admin/lake`) |
-| `CLOUDFLARE_API_TOKEN`                            | GitHub Actions repo secret             | `deploy.yml` (migrations + `wrangler deploy`)                                                                                                       |
-| `STRAVA_CLIENT_SECRET`                            | Worker secret (`wrangler secret put`)  | Strava OAuth token refresh and webhook subscription management                                                                                      |
-| `STRAVA_VERIFY_TOKEN`                             | Worker secret (`wrangler secret put`)  | Webhook subscription validation ([#8](https://github.com/bendrucker/activity-hub/issues/8))                                                         |
-| `WAHOO_CLIENT_ID` / `WAHOO_CLIENT_SECRET`         | Worker secrets (`wrangler secret put`) | Wahoo OAuth + webhooks ([#11](https://github.com/bendrucker/activity-hub/issues/11))                                                                |
-| `WAHOO_WEBHOOK_TOKEN`                             | Worker secret (`wrangler secret put`)  | Wahoo webhook receiver ([#11](https://github.com/bendrucker/activity-hub/issues/11))                                                                |
-| `R2_ACCOUNT_ID`                                   | Worker secret (`wrangler secret put`)  | Decode container's S3 endpoint                                                                                                                      |
-| `R2_RAW_ACCESS_KEY_ID` / `..._SECRET_ACCESS_KEY`  | Worker secrets (`wrangler secret put`) | Decode container reading `activity-hub-raw`                                                                                                         |
-| `R2_LAKE_ACCESS_KEY_ID` / `..._SECRET_ACCESS_KEY` | Worker secrets (`wrangler secret put`) | Decode container writing `activity-hub-lake`                                                                                                        |
+| Secret                                            | Location                                                         | Consumer                                                                                                                                            |
+| ------------------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ADMIN_TOKEN`                                     | Worker secret (`wrangler secret put`)                            | Manual triggers (`POST /admin/reconcile`, `POST /admin/wahoo-backfill`, `POST /admin/strava-backfill`, `POST /admin/transform`, `POST /admin/lake`) |
+| `CLOUDFLARE_API_TOKEN`                            | GitHub Actions repo secret, and a Terraform output for local use | `deploy.yml` (migrations + `wrangler deploy`), and `wrangler` from a laptop                                                                         |
+| `STRAVA_CLIENT_SECRET`                            | Worker secret (`wrangler secret put`)                            | Strava OAuth token refresh and webhook subscription management                                                                                      |
+| `STRAVA_VERIFY_TOKEN`                             | Worker secret (`wrangler secret put`)                            | Webhook subscription validation ([#8](https://github.com/bendrucker/activity-hub/issues/8))                                                         |
+| `WAHOO_CLIENT_ID` / `WAHOO_CLIENT_SECRET`         | Worker secrets (`wrangler secret put`)                           | Wahoo OAuth + webhooks ([#11](https://github.com/bendrucker/activity-hub/issues/11))                                                                |
+| `WAHOO_WEBHOOK_TOKEN`                             | Worker secret (`wrangler secret put`)                            | Wahoo webhook receiver ([#11](https://github.com/bendrucker/activity-hub/issues/11))                                                                |
+| `R2_ACCOUNT_ID`                                   | Worker secret (`wrangler secret put`)                            | Decode container's S3 endpoint                                                                                                                      |
+| `R2_RAW_ACCESS_KEY_ID` / `..._SECRET_ACCESS_KEY`  | Worker secrets (`wrangler secret put`)                           | Decode container reading `activity-hub-raw`                                                                                                         |
+| `R2_LAKE_ACCESS_KEY_ID` / `..._SECRET_ACCESS_KEY` | Worker secrets (`wrangler secret put`)                           | Decode container writing `activity-hub-lake`                                                                                                        |
 
 `STRAVA_CLIENT_ID` and `STRAVA_ATHLETE_ID` are public identifiers, committed as
 vars in `wrangler.jsonc`. `STRAVA_SUBSCRIPTION_ID` is also a committed var,

@@ -1,5 +1,6 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
+import { DECODE_SCHEMA_VERSION } from "./transform/protocol";
 import {
   activityRawKeys,
   clearDerived,
@@ -187,7 +188,32 @@ describe("inputFingerprint", () => {
   it("returns the sentinel for an activity with no raw keys", async () => {
     expect(await inputFingerprint(env.RAW, [])).toBe(EMPTY_FINGERPRINT);
   });
+
+  // Pinned so bumping DECODE_SCHEMA_VERSION has to come here and say so. That
+  // bump re-decodes every activity in the archive, which is the intended
+  // effect and too expensive to trigger by accident.
+  it("covers the artifact schema version", async () => {
+    await env.RAW.put("raw/test/pinned.fit", "bytes");
+
+    expect(await inputFingerprint(env.RAW, ["raw/test/pinned.fit"])).toBe(
+      await sha256(
+        `schema:${DECODE_SCHEMA_VERSION}\nraw/test/pinned.fit:${
+          (await env.RAW.head("raw/test/pinned.fit"))?.etag
+        }`,
+      ),
+    );
+  });
 });
+
+async function sha256(payload: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(payload),
+  );
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
 
 describe("isCurrent", () => {
   beforeEach(async () => {

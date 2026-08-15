@@ -3,6 +3,13 @@
 // container builds without the Workers runtime types, so a binding type
 // reaching this file would break its typecheck.
 
+// The columns the container writes into each activity's Parquet. Raw bytes and
+// their etags say nothing about the code that read them, so a decoder that
+// gains a column leaves every existing artifact short of it and the lake build
+// fails on a table it cannot bind. Bumping this changes every decode
+// fingerprint, which is what re-decodes the corpus.
+export const DECODE_SCHEMA_VERSION = 2;
+
 export interface DecodeWork {
   activityId: string;
   // Raw R2 object keys for this activity, in the order they should be tried.

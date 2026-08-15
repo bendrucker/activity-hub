@@ -1,3 +1,5 @@
+import { DECODE_SCHEMA_VERSION } from "./transform/protocol";
+
 export type Stage = "decode" | "lake" | "publish";
 
 export type DerivedStatus = "ok" | "failed" | "skipped";
@@ -37,7 +39,8 @@ export async function activityRawKeys(
 
 // An upstream edit rewrites the raw object, which changes its etag, which
 // changes this digest. Every stage downstream is then stale by definition
-// without anything having to observe the edit.
+// without anything having to observe the edit. The artifact schema version
+// joins the etags so the same holds for a change on the decoder's side.
 export async function inputFingerprint(
   bucket: R2Bucket,
   keys: readonly string[],
@@ -50,9 +53,12 @@ export async function inputFingerprint(
   const objects = await Promise.all(sorted.map((key) => bucket.head(key)));
   // A deleted object contributes a marker rather than dropping out, so losing
   // the bytes is a fingerprint change and not a silent match.
-  const payload = sorted
-    .map((key, index) => `${key}:${objects[index]?.etag ?? MISSING_OBJECT}`)
-    .join("\n");
+  const payload = [
+    `schema:${DECODE_SCHEMA_VERSION}`,
+    ...sorted.map(
+      (key, index) => `${key}:${objects[index]?.etag ?? MISSING_OBJECT}`,
+    ),
+  ].join("\n");
 
   const digest = await crypto.subtle.digest(
     "SHA-256",
