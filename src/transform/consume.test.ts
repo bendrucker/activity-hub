@@ -2,6 +2,7 @@ import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SECRETS } from "../../test/secrets";
 import {
+  ARTIFACT_VERSION,
   EMPTY_FINGERPRINT,
   inputFingerprint,
   type DerivedStatus,
@@ -58,8 +59,8 @@ interface SeedDerived {
 
 async function seedDerived(seed: SeedDerived): Promise<void> {
   await env.REGISTRY.prepare(
-    `INSERT INTO derived (activity_id, stage, input_fingerprint, output_key, status, attempts, error, updated_at)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7)`,
+    `INSERT INTO derived (activity_id, stage, input_fingerprint, output_key, status, attempts, error, updated_at, artifact_version)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7, ?8)`,
   )
     .bind(
       seed.activityId,
@@ -69,6 +70,7 @@ async function seedDerived(seed: SeedDerived): Promise<void> {
       seed.status,
       seed.attempts ?? 0,
       seed.updatedAt ?? OLD,
+      ARTIFACT_VERSION[seed.stage],
     )
     .run();
 }
@@ -156,6 +158,7 @@ function decoded(activityId: string, errors: string[] = []): DecodeOutcome {
     activityId,
     status: "ok",
     outputKey: `decode/v1/${activityId}/`,
+    rawKey: `raw/strava/activities/${activityId}/original.fit.gz`,
     records: 3600,
     laps: 1,
     sessions: 1,

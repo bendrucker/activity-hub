@@ -1,14 +1,35 @@
+import { DECODE_SCHEMA_VERSION } from "./transform/protocol";
+
 export type Stage = "decode" | "lake" | "publish";
 
 export type DerivedStatus = "ok" | "failed" | "skipped";
 
 export const STAGES: readonly Stage[] = ["decode", "lake", "publish"];
 
+// The stages the sweep enqueues, which is also the set the staleness query
+// answers for. `lake` keeps no per-activity row by design, and `publish` is
+// not built, so asking either for its oldest stale activity returns the whole
+// registry and reads as a backlog rather than as a stage that was never
+// swept.
+export const SWEPT_STAGES: readonly Stage[] = ["decode"];
+
 // A row only reaches `failed` after the queue has exhausted its own retries,
 // so every attempt counted here is a whole separate delivery. Five rides out a
 // transient upstream outage while keeping a genuinely undecodable activity out
 // of the backlog instead of re-selecting it on every drain.
 export const MAX_ATTEMPTS = 5;
+
+// The shape of what a stage writes, which its inputs say nothing about. Raw
+// bytes and their etags describe the input alone, and nothing describes the
+// code that read them. Every row carries the version that produced it, so
+// bumping one makes every row that stage already wrote stale and the sweep
+// runs them again. Rows written before the column existed carry 0, which no
+// stage claims.
+export const ARTIFACT_VERSION: Record<Stage, number> = {
+  decode: DECODE_SCHEMA_VERSION,
+  lake: 1,
+  publish: 1,
+};
 
 // A fingerprint is a SHA-256 hex digest, so neither sentinel can collide with
 // one.
@@ -65,7 +86,10 @@ export async function inputFingerprint(
 
 // Candidate selection cannot afford a fingerprint, which costs an R2 head per
 // key. This narrows thousands of activities to the ones worth hashing. A
-// candidate that turns out to be current is caught by isCurrent.
+// candidate that turns out to be current is caught by isCurrent. The artifact
+// version is the one input SQL can compare on its own, and it has to be
+// compared here: a stage whose output shape changed leaves every source row's
+// updated_at exactly where it was, so nothing else would ever select it.
 const STALE = `
   WITH live AS (
     SELECT activity_id, MAX(updated_at) AS source_updated_at
@@ -80,6 +104,7 @@ const STALE = `
     ON derived.activity_id = live.activity_id AND derived.stage = ?1
   WHERE derived.activity_id IS NULL
      OR live.source_updated_at > derived.updated_at
+     OR derived.artifact_version <> ?4
      OR (derived.status = 'failed' AND derived.attempts < ?2)
   ORDER BY live.source_updated_at, live.activity_id
   LIMIT ?3`;
@@ -91,7 +116,7 @@ export async function staleActivities(
 ): Promise<string[]> {
   const { results } = await db
     .prepare(STALE)
-    .bind(stage, MAX_ATTEMPTS, limit)
+    .bind(stage, MAX_ATTEMPTS, limit, ARTIFACT_VERSION[stage])
     .all<{ activity_id: string; source_updated_at: string }>();
   return results.map((row) => row.activity_id);
 }
@@ -109,9 +134,10 @@ export async function isCurrent(
        WHERE activity_id = ?1
          AND stage = ?2
          AND status = 'ok'
-         AND input_fingerprint = ?3`,
+         AND input_fingerprint = ?3
+         AND artifact_version = ?4`,
     )
-    .bind(activityId, stage, fingerprint)
+    .bind(activityId, stage, fingerprint, ARTIFACT_VERSION[stage])
     .first<{ current: number }>();
   return row !== null;
 }
@@ -134,26 +160,29 @@ export async function recordOutcome(
     .prepare(
       `INSERT INTO derived (
          activity_id, stage, input_fingerprint, output_key,
-         status, attempts, error, updated_at
+         status, attempts, error, updated_at, artifact_version
        )
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
        ON CONFLICT (activity_id, stage) DO UPDATE SET
          input_fingerprint = excluded.input_fingerprint,
          output_key = excluded.output_key,
          status = excluded.status,
          -- The budget bounds retries against one input, so it belongs to the
-         -- fingerprint it accrued against. A run that got somewhere hands it
-         -- back, and new bytes start it over: a row that parked on the old
-         -- input would otherwise get one try at the new one, since its own
-         -- failure stamps the newest updated_at and STALE stops selecting it.
+         -- fingerprint and artifact version it accrued against. A run that got
+         -- somewhere hands it back, and either a new input or a new decoder
+         -- starts it over: a row that parked on the old pair would otherwise
+         -- get one try at the new one, since its own failure stamps the newest
+         -- updated_at and STALE stops selecting it.
          attempts = CASE
            WHEN excluded.status <> 'failed' THEN 0
            WHEN derived.input_fingerprint = excluded.input_fingerprint
+             AND derived.artifact_version = excluded.artifact_version
              THEN derived.attempts + 1
            ELSE 1
          END,
          error = excluded.error,
-         updated_at = excluded.updated_at`,
+         updated_at = excluded.updated_at,
+         artifact_version = excluded.artifact_version`,
     )
     .bind(
       outcome.activityId,
@@ -164,6 +193,7 @@ export async function recordOutcome(
       failed ? 1 : 0,
       outcome.error ?? null,
       new Date().toISOString(),
+      ARTIFACT_VERSION[outcome.stage],
     )
     .run();
 }
@@ -235,7 +265,11 @@ export async function pipelineReport(db: D1Database): Promise<PipelineReport> {
   const oldest = await db.batch<{
     activity_id: string;
     source_updated_at: string;
-  }>(STAGES.map((stage) => db.prepare(STALE).bind(stage, MAX_ATTEMPTS, 1)));
+  }>(
+    SWEPT_STAGES.map((stage) =>
+      db.prepare(STALE).bind(stage, MAX_ATTEMPTS, 1, ARTIFACT_VERSION[stage]),
+    ),
+  );
 
   const parked = await db
     .prepare(
@@ -267,7 +301,7 @@ export async function pipelineReport(db: D1Database): Promise<PipelineReport> {
 
   return {
     counts: counts.results,
-    oldestStale: STAGES.flatMap((stage, index) => {
+    oldestStale: SWEPT_STAGES.flatMap((stage, index) => {
       const row = oldest[index]?.results[0];
       return row === undefined
         ? []

@@ -1,8 +1,5 @@
 import { S3Client } from "bun";
-import { endpoint, type ContainerConfig } from "./env";
-
-const RAW_BUCKET = "activity-hub-raw";
-const LAKE_BUCKET = "activity-hub-lake";
+import { endpoint, LAKE_BUCKET, RAW_BUCKET, type ContainerConfig } from "./env";
 
 export interface RawStore {
   // Throws when the object is missing. A raw key the registry recorded but R2

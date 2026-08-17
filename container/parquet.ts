@@ -10,6 +10,7 @@ import {
   SESSIONS,
   type Table,
 } from "./schema";
+import { literal, quote } from "./sql";
 
 export interface ParquetFile {
   name: string;
@@ -22,6 +23,7 @@ export async function writeActivityParquet(
   instance: DuckDBInstance,
   directory: string,
   activityId: string,
+  rawKey: string,
   activity: TelemetryActivity,
 ): Promise<ParquetFile[]> {
   const connection = await instance.connect();
@@ -47,7 +49,7 @@ export async function writeActivityParquet(
         directory,
         activityId,
         META,
-        metaRows(activity),
+        metaRows(activity, rawKey),
       ),
     ];
   } finally {
@@ -75,11 +77,7 @@ async function writeTable<R extends object>(
   const name = `${table.name}.parquet`;
   const path = `${directory}/${name}`;
   await connection.run(
-    `COPY (SELECT * FROM "${table.name}") TO ${literal(path)} (FORMAT PARQUET, COMPRESSION ZSTD)`,
+    `COPY (SELECT * FROM ${quote(table.name)}) TO ${literal(path)} (FORMAT PARQUET, COMPRESSION ZSTD)`,
   );
   return { name, path };
-}
-
-function literal(value: string): string {
-  return `'${value.replaceAll("'", "''")}'`;
 }

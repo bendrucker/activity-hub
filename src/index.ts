@@ -1,5 +1,6 @@
 import {
   handleConsumeLog,
+  handleLake,
   handlePipeline,
   handleReconcile,
   handleStravaBackfill,
@@ -8,6 +9,7 @@ import {
   handleWahooIngest,
   handleWahooProbe,
 } from "./admin";
+import { buildLake, LAKE_CRON } from "./lake/build";
 import {
   appendConsumeLog,
   consumeLogEntry,
@@ -208,6 +210,12 @@ export default {
       }
       return new Response("Method Not Allowed", { status: 405 });
     }
+    if (url.pathname === "/admin/lake") {
+      if (request.method === "POST") {
+        return handleLake(request, env);
+      }
+      return new Response("Method Not Allowed", { status: 405 });
+    }
     if (url.pathname === "/admin/consume-log") {
       if (request.method === "GET") {
         return handleConsumeLog(request, env);
@@ -217,11 +225,19 @@ export default {
     return new Response("Not Found", { status: 404 });
   },
 
-  // Two independent sweeps share one cron. The transform sweep reads what the
+  // Two independent sweeps share the 06:00 cron. The transform sweep reads what the
   // registry already holds, so a Strava outage has no bearing on whether there
   // is decoding to do, and neither failure may cancel the other. Both run, then
   // the run fails if either did.
-  async scheduled(_controller, env): Promise<void> {
+  async scheduled(controller, env): Promise<void> {
+    if (controller.cron === LAKE_CRON) {
+      const { registry, response } = await buildLake(env);
+      console.log(
+        `lake rebuilt from ${registry.activities} activities: ${JSON.stringify(response.tables)}`,
+      );
+      return;
+    }
+
     const failures: unknown[] = [];
 
     try {

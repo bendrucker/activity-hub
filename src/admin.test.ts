@@ -13,7 +13,12 @@ import {
   handleWahooIngest,
   handleWahooProbe,
 } from "./admin";
-import { MAX_ATTEMPTS, type DerivedStatus, type Stage } from "./derived";
+import {
+  ARTIFACT_VERSION,
+  MAX_ATTEMPTS,
+  type DerivedStatus,
+  type Stage,
+} from "./derived";
 import type { StravaIngestMessage, WahooIngestMessage } from "./ingest";
 import { StravaClient } from "./strava/client";
 import { tokenBroker } from "./tokens/broker";
@@ -599,8 +604,8 @@ describe("handlePipeline", () => {
 
   async function seedDerived(seed: SeedDerived): Promise<void> {
     await env.REGISTRY.prepare(
-      `INSERT INTO derived (activity_id, stage, input_fingerprint, output_key, status, attempts, error, updated_at)
-       VALUES (?1, ?2, 'fingerprint', NULL, ?3, ?4, ?5, ?6)`,
+      `INSERT INTO derived (activity_id, stage, input_fingerprint, output_key, status, attempts, error, updated_at, artifact_version)
+       VALUES (?1, ?2, 'fingerprint', NULL, ?3, ?4, ?5, ?6, ?7)`,
     )
       .bind(
         seed.activityId,
@@ -609,6 +614,7 @@ describe("handlePipeline", () => {
         seed.attempts ?? 0,
         seed.error ?? null,
         RECORDED,
+        ARTIFACT_VERSION[seed.stage],
       )
       .run();
   }
@@ -700,20 +706,17 @@ describe("handlePipeline", () => {
       oldestStale: null,
     });
 
+    // Neither stage is swept, so neither reports a stale activity. Answering
+    // for them would name every activity in the registry, which reads as a
+    // backlog rather than as a stage nothing enqueues.
     const lake = stageOf(body, "lake");
     expect(lake.total).toBe(1);
     expect(lake.statuses).toEqual({ ok: 0, failed: 0, skipped: 1 });
-    expect(lake.oldestStale).toMatchObject({
-      activityId: "a2",
-      sourceUpdatedAt: NEWER,
-    });
+    expect(lake.oldestStale).toBeNull();
 
     const publish = stageOf(body, "publish");
     expect(publish.total).toBe(0);
-    expect(publish.oldestStale).toMatchObject({
-      activityId: "a1",
-      sourceUpdatedAt: OLDEST,
-    });
+    expect(publish.oldestStale).toBeNull();
 
     expect(body.failures).toEqual([
       {

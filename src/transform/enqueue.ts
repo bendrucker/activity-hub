@@ -1,4 +1,9 @@
-import { clearDerived, staleActivities, type Stage } from "../derived";
+import {
+  clearDerived,
+  staleActivities,
+  SWEPT_STAGES,
+  type Stage,
+} from "../derived";
 import type { TransformMessage } from "./consume";
 
 // Cloudflare caps a batch send at 100 messages.
@@ -9,11 +14,6 @@ const SEND_BATCH = 100;
 // cursor. Reprocessing something specific goes through enqueueActivity instead
 // of waiting for the sweep to reach it.
 export const RECONCILE_LIMIT = 1000;
-
-// Only `decode` is built. `lake` and `publish` exist in the table and the
-// message shape so both generalize, and sweeping for them now would enqueue
-// work nothing can perform.
-const IMPLEMENTED: readonly Stage[] = ["decode"];
 
 export async function enqueueTransform(
   queue: Queue<TransformMessage>,
@@ -34,7 +34,7 @@ export async function reconcileTransform(
   limit = RECONCILE_LIMIT,
 ): Promise<number> {
   let enqueued = 0;
-  for (const stage of IMPLEMENTED) {
+  for (const stage of SWEPT_STAGES) {
     const ids = await staleActivities(env.REGISTRY, stage, limit);
     enqueued += await enqueueTransform(
       env.TRANSFORM_QUEUE,

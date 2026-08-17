@@ -19,13 +19,24 @@ COPY --from=dependencies /app/node_modules ./node_modules
 COPY container/decode.ts \
   container/env.ts \
   container/index.ts \
+  container/lake.ts \
   container/parquet.ts \
+  container/s3.ts \
   container/schema.ts \
   container/server.ts \
   container/storage.ts \
+  container/tables.ts \
   ./container/
 COPY src/import/fit.ts src/import/gpx.ts src/import/telemetry.ts ./src/import/
 COPY src/transform/protocol.ts ./src/transform/
+
+# httpfs is what lets DuckDB read the decode artifacts straight out of R2.
+# Baking it in means a running container never reaches the extension
+# repository, which would otherwise sit in the path of every lake build. It
+# lands under HOME, which is the same for this layer and the running process.
+RUN bun --eval "const {DuckDBInstance} = await import('@duckdb/node-api'); \
+  const c = await (await DuckDBInstance.create(':memory:')).connect(); \
+  await c.run('INSTALL httpfs'); await c.run('LOAD httpfs');"
 
 ENV NODE_ENV=production
 EXPOSE 8080

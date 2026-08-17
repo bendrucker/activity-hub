@@ -35,6 +35,7 @@ flowchart TB
     end
     subgraph batch [Batch]
         decode[Decode container: Bun + DuckDB]
+        build[Lake build: Bun + DuckDB]
         importer[Export importer: local]
     end
     sw --> ingest
@@ -46,6 +47,9 @@ flowchart TB
     ingest -- transform queue --> decode
     raw --> decode --> lake
     decode -- outcomes --> ingest
+    ingest -- nightly cron, registry snapshot --> build
+    raw -- export CSV --> build
+    lake -- decode artifacts --> build --> lake
 ```
 
 #### Ingest Worker
@@ -79,7 +83,7 @@ The 2026 bulk export measured 4,118 activities and ~876 MB unpacked ([export.md]
 
 The unit of work is one activity at one stage, and the DAG is data-driven rather than scheduled. Nothing runs because a clock said so. Work happens because a stage's recorded output is missing or older than its input.
 
-A `derived` table in D1 carries one row per `(activity_id, stage)` with an `input_fingerprint` hashed over the raw R2 keys and etags that fed it. An upstream edit changes an etag, the fingerprint stops matching, and every downstream stage is stale by definition. Reprocessing one activity is deleting its rows or enqueueing it directly, because the stage is idempotent on that key.
+A `derived` table in D1 carries one row per `(activity_id, stage)` with an `input_fingerprint` hashed over the raw R2 keys and etags that fed it. An upstream edit changes an etag, the fingerprint stops matching, and every downstream stage is stale by definition. A second column, `artifact_version`, records the shape of what the stage wrote. A decoder that gains a column leaves the artifacts written before it unreadable by a lake build that expects the column, and no etag moves to say so. It is a column rather than another input to the hash because the sweep has to compare it in SQL: nothing else would ever select the rows a decoder change invalidated, so bumping it is what re-runs the corpus. Reprocessing one activity is deleting its rows or enqueueing it directly, because the stage is idempotent on that key.
 
 Decoding runs in a container rather than in Workers, on a `activity-hub-transform` queue with its own dead letter queue. The container takes a batch of work descriptors over HTTP, writes Parquet to R2, and returns outcomes. It never writes D1 and never reads the queue, so every state transition stays in the Worker and a container crash costs time rather than data. Cloudflare bindings do not cross into a container, so it reaches both buckets over the S3 API using two scoped tokens: read on `activity-hub-raw`, write on `activity-hub-lake`.
 
@@ -130,16 +134,19 @@ The registry lives in the hub's own D1 database, which is operational state, not
 
 #### Lake Tables
 
-Iceberg tables in R2 Data Catalog, maintained by the transform job:
+The lake stage rebuilds every table from the decode artifacts on its own nightly cron, two hours after the sweep that enqueues decoding. A full rebuild takes about two minutes over the whole corpus, which is cheaper than the bookkeeping an incremental merge would need to stay correct when an upstream edit rewrites an activity.
 
-- `activities`: one row per activity with summary metrics (distance, moving time, elevation, average/max power, heart rate, weather, training load from the export CSV), carrying both Strava's numbers and the device's under separate names, plus `power_source`, `telemetry_source`, `deleted_at`, and the quality flags
-- `records`: per-sample telemetry from FIT files (timestamp, position, altitude, power, heart rate, cadence, speed, temperature), plus a map column holding developer fields verbatim. This table answers stream-level questions like "hottest hour on a ride this year," so temperature and time live here from day one.
-- `laps`: per-lap aggregates, cheap to carry from FIT
-- `power_curve`: best power for 5 s through 60 min, one row per activity per duration. Expensive to compute on demand and useful to almost every question worth asking, so it materializes with the first transform.
+The build reads only R2. The registry reaches it as a newline-delimited JSON snapshot the Worker exports from D1 for each run, which keeps the container free of bindings and pins what a given build saw. Tables land under `lake/v1/` as ZSTD Parquet, with `records` partitioned by year. Every one below but `power_curve` is built:
+
+- `activities`: one row per activity, carrying Strava's numbers and the device's under separate names, plus `power_source`, `telemetry_origin`, `telemetry_format`, `telemetry_raw_key`, and `deleted_at`. Strava's numbers come from the archived export CSV, joined on the registry's Strava id. Device numbers come from the session rows, summed across a file's sessions with the averages weighted by timer time. An activity the registry holds but nothing decoded still gets a row.
+- `records`: per-sample telemetry (timestamp, position, altitude, power, heart rate, cadence, speed, temperature), plus a map column holding developer fields verbatim. This table answers stream-level questions like "hottest hour on a ride this year," so temperature and time live here from day one.
+- `laps`, `sessions`: per-lap and per-session aggregates, cheap to carry from FIT.
+- `meta`: one row per device and per developer field descriptor, which is what makes `telemetry_raw_key` and the developer field inventory queryable without opening record files.
+- `power_curve`: best power for 5 s through 60 min, one row per activity per duration. Expensive to compute on demand and useful to almost every question worth asking. Not yet built.
 
 Every column is marked with the provenance of its input, file-derived or API-derived. Strava's agreement bars AI/ML training on API-derived data, so a future LLM feature bounds itself with a `WHERE` clause instead of a schema migration.
 
-Plain date-partitioned Parquet under a `lake/` prefix is the fallback if the Data Catalog beta bites. The raw bucket makes that a rebuild, not a migration.
+Publishing these tables to R2 Data Catalog as Iceberg is the next step and the design's stated preference. DuckDB's `iceberg` extension installs and loads under the version the container runs, and registers the secret type the catalog needs. The image installs only `httpfs` today, so what remains is adding the extension there and writing against a live catalog. Plain Parquet under `lake/v1/` is what ships until that is proven, and the raw bucket makes the switch a rebuild rather than a migration.
 
 #### Feed Contract
 
@@ -163,7 +170,7 @@ Strava and the device disagree, and not slightly: normalized power matches Strav
 
 #### Telemetry Precedence
 
-An activity can hold a Wahoo FIT, an export FIT, a GPX, and Strava streams at once, and exactly one of them produces the `records` rows. Precedence is Wahoo FIT, export FIT, Strava streams, then GPX, recorded per activity in `telemetry_source`. GPX ranks below streams because it carries no power.
+An activity can hold a Wahoo FIT, an export FIT, a GPX, and Strava streams at once, and exactly one of them produces the `records` rows. Precedence is Wahoo FIT, export FIT, Strava streams, then GPX, recorded per activity as `telemetry_origin` and `telemetry_format`. GPX ranks below streams because it carries no power.
 
 #### Records Schema
 

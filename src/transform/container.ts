@@ -1,5 +1,10 @@
 import { Container, getContainer } from "@cloudflare/containers";
-import type { DecodeRequest, DecodeResponse } from "./protocol";
+import type {
+  DecodeRequest,
+  DecodeResponse,
+  LakeRequest,
+  LakeResponse,
+} from "./protocol";
 
 export class DecodeContainer extends Container<Env> {
   defaultPort = 8080;
@@ -22,6 +27,10 @@ export interface DecodeClient {
   decode(request: DecodeRequest): Promise<DecodeResponse>;
 }
 
+export interface LakeClient {
+  build(request: LakeRequest): Promise<LakeResponse>;
+}
+
 // Every batch lands on the same instance. The work is CPU-bound inside the
 // container and it paces itself across its own vCPUs, so spreading batches over
 // several instances would multiply cold starts and memory without decoding any
@@ -30,19 +39,27 @@ const INSTANCE = "decode";
 
 export function decodeClient(env: Env): DecodeClient {
   return {
-    async decode(request) {
-      const container = getContainer(env.DECODE_CONTAINER, INSTANCE);
-      const response = await container.fetch("http://container/decode", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(request),
-      });
-      if (!response.ok) {
-        throw new Error(
-          `decode container returned ${response.status}: ${await response.text()}`,
-        );
-      }
-      return (await response.json()) as DecodeResponse;
-    },
+    decode: (request) => call(env, "decode", request),
   };
+}
+
+export function lakeClient(env: Env): LakeClient {
+  return {
+    build: (request) => call(env, "lake", request),
+  };
+}
+
+async function call<T>(env: Env, route: string, request: unknown): Promise<T> {
+  const container = getContainer(env.DECODE_CONTAINER, INSTANCE);
+  const response = await container.fetch(`http://container/${route}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `${route} container returned ${response.status}: ${await response.text()}`,
+    );
+  }
+  return (await response.json()) as T;
 }

@@ -26,10 +26,12 @@ flowchart TB
         tqueue[Transform queue]
         consumer[Transform consumer]
         derived[(D1 derived)]
+        lakecron[Nightly lake build]
     end
 
     subgraph compute[Compute plane: container]
         decode[POST /decode]
+        lake[POST /lake]
     end
 
     strava --> ingest
@@ -40,11 +42,16 @@ flowchart TB
 
     registry --> cron --> tqueue --> consumer
     consumer -->|batch of work| decode
-    decode --> raw
+    raw --> decode
     decode --> parquet[(R2 per-activity Parquet)]
     decode -->|outcomes| consumer
     consumer --> derived
     derived --> cron
+
+    registry --> lakecron -->|registry snapshot| lake
+    parquet --> lake
+    raw -->|Strava export CSV| lake
+    lake --> tables[(R2 lake tables)]
 ```
 
 The raw bucket is the system of record. Everything downstream can be rebuilt from it.
@@ -61,12 +68,15 @@ The unit of work is **one activity at one stage**, and the DAG is data-driven ra
 | ---------------------- | ----------------------------------------------------------------- |
 | `activity_id`, `stage` | Primary key. One row per activity per stage.                      |
 | `input_fingerprint`    | Hash over the raw R2 keys and etags that fed the stage.           |
+| `artifact_version`     | The version of the stage's output shape that wrote the row.       |
 | `output_key`           | The artifact the stage produced.                                  |
 | `status`               | `ok`, `failed`, or `skipped`.                                     |
 | `attempts`             | Deliveries spent. Past the ceiling a row parks as visibly failed. |
 | `error`, `updated_at`  | What went wrong, and when the row last moved.                     |
 
 That one table carries every requirement. Reprocessing a single activity is a `POST /admin/transform?activityId=...`, because the stage is idempotent on `(activity_id, stage)`. An upstream edit changes the raw object's etag, so the recomputed fingerprint stops matching and every downstream stage is stale by definition. Nothing has to notice the edit explicitly.
+
+The fingerprint describes the input alone, and a stage's own output shape can change while every input sits still. That is what `artifact_version` records, from `ARTIFACT_VERSION` in `src/derived.ts`, which reads the decode stage's version off `DECODE_SCHEMA_VERSION` in `src/transform/protocol.ts`. Bumping that constant makes the whole archive stale and the nightly sweep re-decodes it. [docs/design.md](docs/design.md) covers why it is a column the sweep compares rather than another input to the hash.
 
 Monitoring is `GET /admin/pipeline`. It reports counts by stage and status, the lag on the oldest activity still waiting, and recent failures with their attempt counts. It also reports `parked` per stage, the failures that have spent every attempt. Those are invisible to the staleness query for the same reason they will never retry, so without that count a stage holding nothing but parked rows would read as caught up. A parked row is the record of an activity given up on, and the pipeline keeps running around it.
 
@@ -75,10 +85,12 @@ Monitoring is `GET /admin/pipeline`. It reports counts by stage and status, the 
 | Stage     | Input                | Output                     |
 | --------- | -------------------- | -------------------------- |
 | `decode`  | raw FIT/GPX          | per-activity Parquet in R2 |
-| `lake`    | all decode artifacts | Iceberg or Parquet tables  |
+| `lake`    | all decode artifacts | corpus-wide Parquet tables |
 | `publish` | lake                 | site D1 feed rows          |
 
-Only `decode` is built. `lake` and `publish` are named in the table and the queue message shape so both generalize, and remain gated on open design questions.
+`decode` and `lake` are built. `publish` is named in the table and the queue message shape so it generalizes, and remains gated on open design questions.
+
+`lake` carries no `derived` row, because it has no per-activity unit: a table is consistent only once every row in it came from the same rebuild. It rebuilds nightly on its own cron and on `POST /admin/lake`.
 
 ### Transforming One Activity
 
@@ -114,17 +126,17 @@ The consumer re-reads raw keys from the registry rather than trusting the messag
 
 Inventory of every credential the system needs and where it lives.
 
-| Secret                                            | Location                               | Consumer                                                                                               |
-| ------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `ADMIN_TOKEN`                                     | Worker secret (`wrangler secret put`)  | Manual triggers (`POST /admin/reconcile`, `POST /admin/wahoo-backfill`, `POST /admin/strava-backfill`) |
-| `CLOUDFLARE_API_TOKEN`                            | GitHub Actions repo secret             | `deploy.yml` (migrations + `wrangler deploy`)                                                          |
-| `STRAVA_CLIENT_SECRET`                            | Worker secret (`wrangler secret put`)  | Strava OAuth token refresh and webhook subscription management                                         |
-| `STRAVA_VERIFY_TOKEN`                             | Worker secret (`wrangler secret put`)  | Webhook subscription validation ([#8](https://github.com/bendrucker/activity-hub/issues/8))            |
-| `WAHOO_CLIENT_ID` / `WAHOO_CLIENT_SECRET`         | Worker secrets (`wrangler secret put`) | Wahoo OAuth + webhooks ([#11](https://github.com/bendrucker/activity-hub/issues/11))                   |
-| `WAHOO_WEBHOOK_TOKEN`                             | Worker secret (`wrangler secret put`)  | Wahoo webhook receiver ([#11](https://github.com/bendrucker/activity-hub/issues/11))                   |
-| `R2_ACCOUNT_ID`                                   | Worker secret (`wrangler secret put`)  | Decode container's S3 endpoint                                                                         |
-| `R2_RAW_ACCESS_KEY_ID` / `..._SECRET_ACCESS_KEY`  | Worker secrets (`wrangler secret put`) | Decode container reading `activity-hub-raw`                                                            |
-| `R2_LAKE_ACCESS_KEY_ID` / `..._SECRET_ACCESS_KEY` | Worker secrets (`wrangler secret put`) | Decode container writing `activity-hub-lake`                                                           |
+| Secret                                            | Location                                                         | Consumer                                                                                                                                            |
+| ------------------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ADMIN_TOKEN`                                     | Worker secret (`wrangler secret put`)                            | Manual triggers (`POST /admin/reconcile`, `POST /admin/wahoo-backfill`, `POST /admin/strava-backfill`, `POST /admin/transform`, `POST /admin/lake`) |
+| `CLOUDFLARE_API_TOKEN`                            | GitHub Actions repo secret, and a Terraform output for local use | `deploy.yml` (migrations + `wrangler deploy`), and `wrangler` from a laptop                                                                         |
+| `STRAVA_CLIENT_SECRET`                            | Worker secret (`wrangler secret put`)                            | Strava OAuth token refresh and webhook subscription management                                                                                      |
+| `STRAVA_VERIFY_TOKEN`                             | Worker secret (`wrangler secret put`)                            | Webhook subscription validation ([#8](https://github.com/bendrucker/activity-hub/issues/8))                                                         |
+| `WAHOO_CLIENT_ID` / `WAHOO_CLIENT_SECRET`         | Worker secrets (`wrangler secret put`)                           | Wahoo OAuth + webhooks ([#11](https://github.com/bendrucker/activity-hub/issues/11))                                                                |
+| `WAHOO_WEBHOOK_TOKEN`                             | Worker secret (`wrangler secret put`)                            | Wahoo webhook receiver ([#11](https://github.com/bendrucker/activity-hub/issues/11))                                                                |
+| `R2_ACCOUNT_ID`                                   | Worker secret (`wrangler secret put`)                            | Decode container's S3 endpoint                                                                                                                      |
+| `R2_RAW_ACCESS_KEY_ID` / `..._SECRET_ACCESS_KEY`  | Worker secrets (`wrangler secret put`)                           | Decode container reading `activity-hub-raw`                                                                                                         |
+| `R2_LAKE_ACCESS_KEY_ID` / `..._SECRET_ACCESS_KEY` | Worker secrets (`wrangler secret put`)                           | Decode container writing `activity-hub-lake`                                                                                                        |
 
 `STRAVA_CLIENT_ID` and `STRAVA_ATHLETE_ID` are public identifiers, committed as
 vars in `wrangler.jsonc`. `STRAVA_SUBSCRIPTION_ID` is also a committed var,
@@ -203,12 +215,20 @@ curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
 # fingerprint still matches and the stage would otherwise be a no-op.
 curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
   "https://hub.bendrucker.me/admin/transform?activityId=$ID&force=true"
+
+# Rebuild every lake table from the decode artifacts. Takes about two minutes
+# over the whole corpus and answers with a row count per table, which is the
+# cheap check that a rebuild did not lose a table's inputs.
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  https://hub.bendrucker.me/admin/lake
 ```
+
+The lake rebuilds nightly on its own cron at 08:00, two hours after the 06:00 sweep that enqueues decoding. The two crons stay separate because the sweep only enqueues. Decoding drains through the queue afterwards, so a rebuild in the same invocation would read the artifacts that sweep was about to replace.
 
 ## Status
 
 The Strava pipeline is live. The historical export is imported, OAuth and webhooks run, and a daily reconciliation cron catches anything webhooks miss. Wahoo is in progress ([#11](https://github.com/bendrucker/activity-hub/issues/11)).
 
-The transform pipeline's `decode` stage is built: the FIT and GPX decoders, the `derived` table, the queue, and the container. The `lake` and `publish` stages are not ([#13](https://github.com/bendrucker/activity-hub/issues/13), [#14](https://github.com/bendrucker/activity-hub/issues/14)).
+The transform pipeline's `decode` stage is built: the FIT and GPX decoders, the `derived` table, the queue, and the container. The `lake` stage builds `activities`, `records`, `laps`, `sessions`, and `meta` as Parquet under `lake/v1/`. Publishing them to R2 Data Catalog as Iceberg and materializing `power_curve` remain ([#13](https://github.com/bendrucker/activity-hub/issues/13)). The `publish` stage is not built ([#14](https://github.com/bendrucker/activity-hub/issues/14)).
 
 Supersedes the Strava pipeline previously planned inside bendrucker.me ([#100](https://github.com/bendrucker/bendrucker.me/issues/100)).

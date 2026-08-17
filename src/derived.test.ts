@@ -1,7 +1,9 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
+import { DECODE_SCHEMA_VERSION } from "./transform/protocol";
 import {
   activityRawKeys,
+  ARTIFACT_VERSION,
   clearDerived,
   EMPTY_FINGERPRINT,
   inputFingerprint,
@@ -60,12 +62,13 @@ interface SeedDerived {
   attempts?: number;
   error?: string;
   updatedAt?: string;
+  artifactVersion?: number;
 }
 
 async function seedDerived(seed: SeedDerived): Promise<void> {
   await env.REGISTRY.prepare(
-    `INSERT INTO derived (activity_id, stage, input_fingerprint, output_key, status, attempts, error, updated_at)
-     VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7)`,
+    `INSERT INTO derived (activity_id, stage, input_fingerprint, output_key, status, attempts, error, updated_at, artifact_version)
+     VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8)`,
   )
     .bind(
       seed.activityId,
@@ -75,6 +78,7 @@ async function seedDerived(seed: SeedDerived): Promise<void> {
       seed.attempts ?? 0,
       seed.error ?? null,
       seed.updatedAt ?? NEWER,
+      seed.artifactVersion ?? ARTIFACT_VERSION[seed.stage],
     )
     .run();
 }
@@ -187,7 +191,96 @@ describe("inputFingerprint", () => {
   it("returns the sentinel for an activity with no raw keys", async () => {
     expect(await inputFingerprint(env.RAW, [])).toBe(EMPTY_FINGERPRINT);
   });
+
+  // Pinned so a change to what the digest covers has to come here and say so.
+  // Every fingerprint moving re-runs every stage over the whole archive.
+  it("digests the keys and etags and nothing else", async () => {
+    await env.RAW.put("raw/test/pinned.fit", "bytes");
+
+    expect(await inputFingerprint(env.RAW, ["raw/test/pinned.fit"])).toBe(
+      await sha256(
+        `raw/test/pinned.fit:${
+          (await env.RAW.head("raw/test/pinned.fit"))?.etag
+        }`,
+      ),
+    );
+  });
 });
+
+// The decoder's own shape is invisible to the raw bytes, so a bump has to
+// reach the sweep on its own. This is the whole mechanism that re-decodes an
+// archive after a decoder gains a column.
+describe("artifact version", () => {
+  beforeEach(async () => {
+    await seedActivity("a1");
+    await seedSource({ source: "wahoo", sourceId: "1", activityId: "a1" });
+  });
+
+  it("selects a row written by an older decoder", async () => {
+    await seedDerived({
+      activityId: "a1",
+      stage: "decode",
+      status: "ok",
+      artifactVersion: DECODE_SCHEMA_VERSION - 1,
+    });
+
+    expect(await staleActivities(env.REGISTRY, "decode", 10)).toEqual(["a1"]);
+  });
+
+  it("leaves a row written by the current decoder alone", async () => {
+    await seedDerived({ activityId: "a1", stage: "decode", status: "ok" });
+
+    expect(await staleActivities(env.REGISTRY, "decode", 10)).toEqual([]);
+  });
+
+  // Without this the sweep would enqueue the activity and the consumer would
+  // ack it as current on a fingerprint that never moved, so the bump would
+  // spend a queue delivery per activity and decode none of them.
+  it("is not current on a matching fingerprint under an older decoder", async () => {
+    await seedDerived({
+      activityId: "a1",
+      stage: "decode",
+      status: "ok",
+      artifactVersion: DECODE_SCHEMA_VERSION - 1,
+    });
+
+    expect(await isCurrent(env.REGISTRY, "a1", "decode", "fingerprint")).toBe(
+      false,
+    );
+  });
+
+  // A parked row gets its budget back, because the ceiling counts attempts
+  // against one decoder and this is a different one.
+  it("starts a parked row's attempts over", async () => {
+    await seedDerived({
+      activityId: "a1",
+      stage: "decode",
+      status: "failed",
+      attempts: MAX_ATTEMPTS,
+      artifactVersion: DECODE_SCHEMA_VERSION - 1,
+    });
+
+    await recordOutcome(env.REGISTRY, {
+      activityId: "a1",
+      stage: "decode",
+      inputFingerprint: "fingerprint",
+      status: "failed",
+      error: "still broken",
+    });
+
+    expect(await attemptsFor("a1", "decode")).toBe(1);
+  });
+});
+
+async function sha256(payload: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(payload),
+  );
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
 
 describe("isCurrent", () => {
   beforeEach(async () => {
@@ -539,6 +632,7 @@ describe("pipelineReport", () => {
   it("counts by stage and status, and names the oldest stale activity", async () => {
     await seedActivity("a1");
     await seedActivity("a2");
+    await seedActivity("a3");
     await seedSource({ source: "wahoo", sourceId: "1", activityId: "a1" });
     await seedSource({
       source: "wahoo",
@@ -546,6 +640,7 @@ describe("pipelineReport", () => {
       activityId: "a2",
       updatedAt: "2026-02-01T00:00:00.000Z",
     });
+    await seedSource({ source: "wahoo", sourceId: "3", activityId: "a3" });
     await seedDerived({ activityId: "a1", stage: "decode", status: "ok" });
     await seedDerived({
       activityId: "a2",
@@ -562,9 +657,10 @@ describe("pipelineReport", () => {
       { stage: "decode", status: "failed", count: 1 },
       { stage: "decode", status: "ok", count: 1 },
     ]);
+    // Only `decode`. Neither other stage writes a row, so asking either for
+    // its oldest stale activity would answer with the whole registry.
     expect(report.oldestStale).toEqual([
-      { stage: "lake", activityId: "a1", sourceUpdatedAt: OLD },
-      { stage: "publish", activityId: "a1", sourceUpdatedAt: OLD },
+      { stage: "decode", activityId: "a3", sourceUpdatedAt: OLD },
     ]);
     expect(report.failures).toEqual([
       {

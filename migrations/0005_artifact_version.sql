@@ -1,0 +1,1 @@
+ALTER TABLE derived ADD COLUMN artifact_version INTEGER NOT NULL DEFAULT 0;

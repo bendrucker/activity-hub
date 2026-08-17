@@ -8,6 +8,7 @@ import type {
   TelemetrySession,
   TelemetrySource,
 } from "../src/import/telemetry";
+import { quote } from "./sql";
 
 // Every numeric telemetry column is DOUBLE rather than a width matched to the
 // field's FIT profile type. A double is exact for every integer the decoders
@@ -39,6 +40,10 @@ export type MetaKind = "device" | "developer_field";
 export interface MetaRow {
   kind: MetaKind;
   source: TelemetrySource;
+  // The raw object these rows were decoded from. `source` says the format;
+  // this says which of an activity's files won, which is what separates a
+  // Wahoo upload from the same ride's Strava export copy.
+  raw_key: string;
   manufacturer: string | null;
   product: string | null;
   product_name: string | null;
@@ -171,6 +176,7 @@ export const META: Table<MetaRow> = {
   columns: {
     kind: "VARCHAR NOT NULL",
     source: "VARCHAR NOT NULL",
+    raw_key: "VARCHAR NOT NULL",
     manufacturer: "VARCHAR",
     product: "VARCHAR",
     product_name: "VARCHAR",
@@ -192,22 +198,27 @@ export const META: Table<MetaRow> = {
 // the activity without reparsing object keys out of `filename`.
 const ACTIVITY_ID = "activity_id";
 
-export function metaRows(activity: TelemetryActivity): MetaRow[] {
+export function metaRows(
+  activity: TelemetryActivity,
+  rawKey: string,
+): MetaRow[] {
   return [
-    deviceRow(activity.source, activity.device),
+    deviceRow(activity.source, rawKey, activity.device),
     ...activity.developerFields.map((descriptor) =>
-      developerFieldRow(activity.source, descriptor),
+      developerFieldRow(activity.source, rawKey, descriptor),
     ),
   ];
 }
 
 function deviceRow(
   source: TelemetrySource,
+  rawKey: string,
   device: TelemetryDevice | null,
 ): MetaRow {
   return {
     kind: "device",
     source,
+    raw_key: rawKey,
     manufacturer: device?.manufacturer ?? null,
     product: device?.product ?? null,
     product_name: device?.product_name ?? null,
@@ -227,11 +238,13 @@ function deviceRow(
 
 function developerFieldRow(
   source: TelemetrySource,
+  rawKey: string,
   descriptor: DeveloperFieldDescriptor,
 ): MetaRow {
   return {
     kind: "developer_field",
     source,
+    raw_key: rawKey,
     manufacturer: null,
     product: null,
     product_name: null,
@@ -247,6 +260,20 @@ function developerFieldRow(
     base_type_id: descriptor.base_type_id,
     native_mesg_num: descriptor.native_mesg_num,
   };
+}
+
+// A relation with the decode artifact's exact shape and no rows. The lake
+// build substitutes it when no activity has been decoded yet, because a glob
+// matching no files is an error in DuckDB rather than an empty scan, and the
+// first build necessarily runs before any decode has landed.
+export function emptySelectSql<R>(table: Table<R>): string {
+  const columns = [
+    `NULL::VARCHAR AS ${quote(ACTIVITY_ID)}`,
+    ...columnNames(table).map(
+      (name) => `NULL::${castType(table.columns[name])} AS ${quote(name)}`,
+    ),
+  ];
+  return `SELECT * FROM (SELECT ${columns.join(", ")}) WHERE false`;
 }
 
 export function createTableSql<R>(table: Table<R>): string {
@@ -322,6 +349,8 @@ function storageType(type: ColumnType): string {
   return type === "JSON" ? "VARCHAR" : type;
 }
 
-function quote(identifier: string): string {
-  return `"${identifier.replaceAll('"', '""')}"`;
+// A cast names a type and cannot carry a constraint, so the nullability that
+// belongs in a column definition is dropped here.
+function castType(type: ColumnType): string {
+  return storageType(type).replace(" NOT NULL", "");
 }

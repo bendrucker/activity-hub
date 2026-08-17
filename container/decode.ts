@@ -65,11 +65,12 @@ async function decodeActivity(
   try {
     const bytes = await deps.raw.get(key);
     const activity = await deps.decode(bytes, key);
-    await publish(work.activityId, activity, deps);
+    await publish(work.activityId, key, activity, deps);
     return {
       activityId: work.activityId,
       status: "ok",
       outputKey: outputKey(work.activityId),
+      rawKey: key,
       records: activity.records.length,
       laps: activity.laps.length,
       sessions: activity.sessions.length,
@@ -86,6 +87,7 @@ async function decodeActivity(
 
 async function publish(
   activityId: string,
+  rawKey: string,
   activity: TelemetryActivity,
   deps: DecodeDeps,
 ): Promise<void> {
@@ -95,6 +97,7 @@ async function publish(
       deps.instance,
       directory,
       activityId,
+      rawKey,
       activity,
     );
     const prefix = outputKey(activityId);
