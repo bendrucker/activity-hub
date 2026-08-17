@@ -75,3 +75,65 @@ export interface LakeResponse {
   outputKey: string;
   tables: LakeTableResult[];
 }
+
+// The shape of what the publish stage sends the website. A change here means
+// every published row is one version behind what the site should be holding,
+// which is what makes the sweep republish the corpus.
+export const PUBLISH_SCHEMA_VERSION = 1;
+
+export interface PublishWork {
+  activityId: string;
+  // Prefix holding this activity's decode Parquet files.
+  decode: string;
+}
+
+export interface PublishRequest {
+  work: PublishWork;
+}
+
+export interface PowerBest {
+  durationS: number;
+  watts: number;
+}
+
+export type PowerSource = "measured" | "estimated" | "none";
+
+// Everything in the feed row that only the telemetry can answer. The Worker
+// supplies the registry fields, because a Worker cannot read Parquet and the
+// container cannot read D1.
+export interface PublishArtifact {
+  // Encoded polyline, decimated to every tenth point.
+  polyline: string | null;
+  // 100 altitudes in metres, evenly spaced by distance rather than by time.
+  elevationProfile: number[] | null;
+  averageWatts: number | null;
+  powerSource: PowerSource;
+  bests: PowerBest[];
+  // What the recording device totalled for the ride, null where it recorded
+  // nothing. The lake's activities table prefers these over the provider's
+  // numbers, and the feed row follows the same order.
+  distanceM: number | null;
+  elevationM: number | null;
+  movingS: number | null;
+}
+
+export type PublishOutcome =
+  | {
+      activityId: string;
+      status: "ok";
+      artifact: PublishArtifact;
+    }
+  | {
+      activityId: string;
+      status: "failed";
+      error: string;
+    }
+  | {
+      activityId: string;
+      status: "skipped";
+      reason: string;
+    };
+
+export interface PublishResponse {
+  outcome: PublishOutcome;
+}

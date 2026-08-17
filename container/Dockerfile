@@ -22,6 +22,7 @@ COPY container/decode.ts \
   container/lake.ts \
   container/parquet.ts \
   container/power.ts \
+  container/publish.ts \
   container/s3.ts \
   container/schema.ts \
   container/server.ts \

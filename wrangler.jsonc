@@ -72,6 +72,16 @@
     { "binding": "RAW", "bucket_name": "activity-hub-raw" },
     { "binding": "LAKE", "bucket_name": "activity-hub-lake" },
   ],
+  // The website's write surface. A service binding carries no credential and
+  // tells the callee nothing about who called, so holding this binding is the
+  // authorization and Publish's three methods are the whole boundary.
+  "services": [
+    {
+      "binding": "SITE",
+      "service": "bendrucker-me",
+      "entrypoint": "Publish",
+    },
+  ],
   "d1_databases": [
     {
       "binding": "REGISTRY",

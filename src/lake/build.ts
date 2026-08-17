@@ -1,5 +1,6 @@
 import { lakeClient, type LakeClient } from "../transform/container";
 import type { LakeResponse } from "../transform/protocol";
+import { DECODE_PREFIX, lakeUri, OUTPUT_PREFIX, rawUri } from "./location";
 import { exportRegistry, type RegistrySnapshot } from "./registry";
 
 // Matches the second entry in wrangler.jsonc's crons. The scheduled handler
@@ -7,11 +8,6 @@ import { exportRegistry, type RegistrySnapshot } from "./registry";
 // have to stay in step.
 export const LAKE_CRON = "0 8 * * *";
 
-const RAW_BUCKET = "activity-hub-raw";
-const LAKE_BUCKET = "activity-hub-lake";
-
-const DECODE_PREFIX = "decode/v1";
-const OUTPUT_PREFIX = "lake/v1";
 const EXPORT_PREFIX = "raw/strava/export/";
 const EXPORT_CSV = "activities.csv";
 
@@ -38,10 +34,10 @@ export async function buildLake(
 
   const client = options.client ?? lakeClient(env);
   const response = await client.build({
-    decode: uri(LAKE_BUCKET, DECODE_PREFIX),
-    registry: uri(LAKE_BUCKET, registry.key),
-    stravaExport: stravaExport === null ? null : uri(RAW_BUCKET, stravaExport),
-    output: uri(LAKE_BUCKET, OUTPUT_PREFIX),
+    decode: lakeUri(DECODE_PREFIX),
+    registry: lakeUri(registry.key),
+    stravaExport: stravaExport === null ? null : rawUri(stravaExport),
+    output: lakeUri(OUTPUT_PREFIX),
   });
 
   return { registry, stravaExport, response };
@@ -67,8 +63,4 @@ export async function latestExportCsv(
   // An export whose CSV never uploaded would otherwise fail the whole build
   // inside DuckDB, where the error names a URI rather than a missing archive.
   return (await bucket.head(key)) === null ? null : key;
-}
-
-function uri(bucket: string, key: string): string {
-  return `s3://${bucket}/${key}`;
 }

@@ -117,7 +117,11 @@ Titles, descriptions, gear, and full-resolution photos come from the export tree
 
 #### Publishing
 
-bendrucker.me exposes a named `WorkerEntrypoint` (`Publish`) that owns writes to its own D1. The hub binds it as a service and calls `publishActivity(row)` after ingest. The website owns its schema and migrations. The hub cannot corrupt them. A daily reconciliation cron re-publishes recent activities to heal missed webhooks.
+bendrucker.me exposes a named `WorkerEntrypoint` (`Publish`) that owns writes to its own D1. The hub binds it as a service and calls `publishActivity(row)`, `publishPowerCurve(activityId, bests)`, and `deleteActivity(activityId)`. The website owns its schema and migrations. The hub cannot corrupt them.
+
+The binding carries no credential and gives the callee no caller identity, so holding one is the authorization and any Worker on the account can hold one. The method list is therefore the entire security boundary: one activity per call, upsert and delete only, no bulk write and no read. Every field is validated by name on arrival. A shape violation throws `ValidationError`, and the hub branches on that name to park the activity instead of retrying a row that will never be valid, because an error's `name` and `message` are all that cross the boundary.
+
+Rows carry SI units. The hub is the system of record and stores SI, so converting on the way out would put rounding somewhere neither side can check.
 
 ## Data Model
 
@@ -136,13 +140,13 @@ The registry lives in the hub's own D1 database, which is operational state, not
 
 The lake stage rebuilds every table from the decode artifacts on its own nightly cron, two hours after the sweep that enqueues decoding. A full rebuild takes about two minutes over the whole corpus, which is cheaper than the bookkeeping an incremental merge would need to stay correct when an upstream edit rewrites an activity.
 
-The build reads only R2. The registry reaches it as a newline-delimited JSON snapshot the Worker exports from D1 for each run, which keeps the container free of bindings and pins what a given build saw. Tables land under `lake/v1/` as ZSTD Parquet, with `records` partitioned by year. Every one below but `power_curve` is built:
+The build reads only R2. The registry reaches it as a newline-delimited JSON snapshot the Worker exports from D1 for each run, which keeps the container free of bindings and pins what a given build saw. Tables land under `lake/v1/` as ZSTD Parquet, with `records` partitioned by year:
 
 - `activities`: one row per activity, carrying Strava's numbers and the device's under separate names, plus `power_source`, `telemetry_origin`, `telemetry_format`, `telemetry_raw_key`, and `deleted_at`. Strava's numbers come from the archived export CSV, joined on the registry's Strava id. Device numbers come from the session rows, summed across a file's sessions with the averages weighted by timer time. An activity the registry holds but nothing decoded still gets a row.
 - `records`: per-sample telemetry (timestamp, position, altitude, power, heart rate, cadence, speed, temperature), plus a map column holding developer fields verbatim. This table answers stream-level questions like "hottest hour on a ride this year," so temperature and time live here from day one.
 - `laps`, `sessions`: per-lap and per-session aggregates, cheap to carry from FIT.
 - `meta`: one row per device and per developer field descriptor, which is what makes `telemetry_raw_key` and the developer field inventory queryable without opening record files.
-- `power_curve`: best power for 5 s through 60 min, one row per activity per duration. Expensive to compute on demand and useful to almost every question worth asking. Not yet built.
+- `power_curve`: best power across nineteen durations from 5 s to 60 min, one row per activity per duration, tagged with `power_source` so estimated-power rides are marked rather than excluded. Windows roll over a zero-filled 1 Hz elapsed grid, which is what makes a paused ride's two ten-minute efforts fail to add up to a twenty-minute one.
 
 Every column is marked with the provenance of its input, file-derived or API-derived. Strava's agreement bars AI/ML training on API-derived data, so a future LLM feature bounds itself with a `WHERE` clause instead of a schema migration.
 
@@ -150,7 +154,13 @@ Publishing these tables to R2 Data Catalog as Iceberg is the next step and the d
 
 #### Feed Contract
 
-The `Publish` RPC accepts a feed row: hub ID, Strava ID (for permalinks), name, sport, start time, distance, moving time, elevation gain, average power if present, encoded polyline, and photo URLs. The website renders from D1 alone.
+The `Publish` RPC accepts a feed row: hub ID, Strava ID (for permalinks), name, sport, start time, timezone, distance, moving time, elevation gain, average power and its source, an encoded polyline, an elevation profile, and photo keys. Power-curve bests arrive as a second call, replacing the activity's rows outright. The website renders from D1 alone and derives every aggregate itself.
+
+The polyline holds every tenth track point, which keeps a five-hour ride under two kilobytes and renders identically at map scale. The elevation profile is 100 altitudes in metres spaced by distance rather than by time, so a climb occupies the width it covers on the map instead of the width it took to ride.
+
+Photos serve from the raw bucket through a route on the website that matches the whole photo key, since the binding it uses reaches every raw telemetry file.
+
+The registry answers when and what sport. The container answers everything only the telemetry knows, including the device's own distance, elevation, and moving time. Strava's archived `detail.json` supplies the title, and stands in for the totals when a file carries records but no session summary.
 
 ## Transform Decisions
 
@@ -158,7 +168,9 @@ Measurements against the local export settled these. They are recorded because t
 
 #### Freshness
 
-A ride reaches the website within minutes. Ingest writes a provisional feed row and the nightly job overwrites it, distinguished by a `revision` column. The cost is one extra code path. The benefit is that the website keeps working when the lake does not.
+A ride reaches the website within minutes, without a provisional row and without a `revision` column. Publish is a per-activity stage reading the decode artifact, so it runs the moment decode finishes rather than waiting on the corpus-wide lake rebuild, and a successful decode enqueues it directly.
+
+Correctness still comes from the table rather than the chain. An activity whose decode row is newer than its publish row is stale, so a dropped chain message, a decoder bump, or a re-decode all heal on the next sweep. The chain only supplies latency.
 
 #### Whose Numbers
 

@@ -5,6 +5,7 @@ import {
 } from "../ingest";
 import { markSourceDeleted, upsertSourceRecord } from "../registry";
 import { sportFromStrava } from "../sport";
+import { enqueueActivity } from "../transform/enqueue";
 import { stravaClient, type StravaClient } from "./client";
 
 export interface ConsumeOptions {
@@ -286,7 +287,14 @@ export async function consumeStravaEvent(
   const activityId = message.objectId;
 
   if (message.kind === "delete") {
-    await markSourceDeleted(env.REGISTRY, "strava", String(activityId));
+    const deleted = await markSourceDeleted(
+      env.REGISTRY,
+      "strava",
+      String(activityId),
+    );
+    if (deleted !== null) {
+      await enqueueActivity(env, deleted, "publish");
+    }
     return;
   }
 

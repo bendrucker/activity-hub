@@ -3,6 +3,7 @@ import {
   handleLake,
   handlePipeline,
   handleReconcile,
+  handlePhotoBackfill,
   handleStravaBackfill,
   handleTransform,
   handleWahooBackfill,
@@ -177,6 +178,12 @@ export default {
     if (url.pathname === "/admin/strava-backfill") {
       if (request.method === "POST") {
         return handleStravaBackfill(request, env);
+      }
+      return new Response("Method Not Allowed", { status: 405 });
+    }
+    if (url.pathname === "/admin/photo-backfill") {
+      if (request.method === "POST") {
+        return handlePhotoBackfill(request, env);
       }
       return new Response("Method Not Allowed", { status: 405 });
     }

@@ -1,12 +1,14 @@
 import { decodeBatch, type DecodeDeps } from "./decode";
 import { buildLake, type LakeDeps } from "./lake";
+import { publishActivity, type PublishDeps } from "./publish";
 import type {
   DecodeRequest,
   DecodeWork,
   LakeRequest,
+  PublishRequest,
 } from "../src/transform/protocol";
 
-export function routes(deps: DecodeDeps & LakeDeps) {
+export function routes(deps: DecodeDeps & LakeDeps & PublishDeps) {
   return {
     "/health": () => new Response("ok"),
     "/decode": {
@@ -15,7 +17,27 @@ export function routes(deps: DecodeDeps & LakeDeps) {
     "/lake": {
       POST: (request: Request) => lake(request, deps),
     },
+    "/publish": {
+      POST: (request: Request) => publish(request, deps),
+    },
   };
+}
+
+// One activity per request, so the outcome carries the failure the same way a
+// decode outcome does and the Worker never retries a whole batch for one bad
+// artifact.
+export async function publish(
+  request: Request,
+  deps: PublishDeps,
+): Promise<Response> {
+  const parsed = parsePublishRequest(await body(request));
+  if (parsed === null) {
+    return Response.json(
+      { error: "expected { work: { activityId, decode } }" },
+      { status: 400 },
+    );
+  }
+  return Response.json(await publishActivity(parsed, deps));
 }
 
 // The lake build is one indivisible unit: there is no per-item outcome to
@@ -77,6 +99,21 @@ function parseLakeRequest(body: unknown): LakeRequest | null {
     return null;
   }
   return { decode, registry, stravaExport, output };
+}
+
+function parsePublishRequest(body: unknown): PublishRequest | null {
+  if (typeof body !== "object" || body === null) {
+    return null;
+  }
+  const item = (body as Record<string, unknown>).work;
+  if (typeof item !== "object" || item === null) {
+    return null;
+  }
+  const { activityId, decode } = item as Record<string, unknown>;
+  if (typeof activityId !== "string" || typeof decode !== "string") {
+    return null;
+  }
+  return { work: { activityId, decode } };
 }
 
 function parseDecodeRequest(body: unknown): DecodeRequest | null {

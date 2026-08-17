@@ -483,6 +483,48 @@ describe("staleActivities", () => {
     expect(await staleActivities(env.REGISTRY, "lake", 10)).toEqual(["a1"]);
   });
 
+  // Nothing about the source changed, so every other disjunct is false. The
+  // upstream join is the only thing that can see a decode that ran again, and
+  // without it a decoder bump would re-decode the corpus and republish none of
+  // it.
+  it("selects a stage whose upstream ran after it did", async () => {
+    await seedActivity("a1");
+    await seedSource({ source: "wahoo", sourceId: "1", activityId: "a1" });
+    await seedDerived({
+      activityId: "a1",
+      stage: "publish",
+      status: "ok",
+      updatedAt: "2026-06-01T00:00:00.000Z",
+    });
+
+    expect(await staleActivities(env.REGISTRY, "publish", 10)).toEqual([]);
+
+    await seedDerived({
+      activityId: "a1",
+      stage: "decode",
+      status: "ok",
+      updatedAt: NEWER,
+    });
+
+    expect(await staleActivities(env.REGISTRY, "publish", 10)).toEqual(["a1"]);
+  });
+
+  // decode joins to itself, where the comparison is a row against its own
+  // timestamp. A stage with no upstream has to come out exactly as it did
+  // before the join existed.
+  it("leaves a stage with no upstream unaffected", async () => {
+    await seedActivity("a1");
+    await seedSource({ source: "wahoo", sourceId: "1", activityId: "a1" });
+    await seedDerived({
+      activityId: "a1",
+      stage: "decode",
+      status: "ok",
+      updatedAt: NEWER,
+    });
+
+    expect(await staleActivities(env.REGISTRY, "decode", 10)).toEqual([]);
+  });
+
   it("drains oldest first and honors the limit", async () => {
     for (const { activityId, updatedAt } of [
       { activityId: "a1", updatedAt: "2026-03-01T00:00:00.000Z" },
@@ -657,10 +699,12 @@ describe("pipelineReport", () => {
       { stage: "decode", status: "failed", count: 1 },
       { stage: "decode", status: "ok", count: 1 },
     ]);
-    // Only `decode`. Neither other stage writes a row, so asking either for
-    // its oldest stale activity would answer with the whole registry.
+    // `lake` is absent because it writes no per-activity row, so asking it for
+    // its oldest stale activity would answer with the whole registry. Publish
+    // has written none of these yet, so its oldest is simply the oldest source.
     expect(report.oldestStale).toEqual([
       { stage: "decode", activityId: "a3", sourceUpdatedAt: OLD },
+      { stage: "publish", activityId: "a1", sourceUpdatedAt: OLD },
     ]);
     expect(report.failures).toEqual([
       {
