@@ -2,6 +2,7 @@ import { parse } from "csv-parse/sync";
 
 export interface ExportActivity {
   sourceId: string;
+  name: string | null;
   startedAt: string;
   sportType: string;
   elapsedS: number;
@@ -71,6 +72,9 @@ export function parseActivitiesCsv(text: string): ExportActivity[] {
   }) as Record<string, string>[];
   return rows.map((row) => ({
     sourceId: field(row, "Activity ID"),
+    // Strava lets a title be blank, and the export writes the empty string
+    // rather than omitting the column.
+    name: row["Activity Name"] || null,
     startedAt: parseExportDate(field(row, "Activity Date")),
     // The CSV holds display names ("Virtual Ride", "E-Bike Ride"); stripping
     // spaces and hyphens recovers the API sport_type ("VirtualRide").

@@ -175,7 +175,7 @@ async function publishFromDetailOnly(
   await site.publishActivity({
     activityId,
     stravaId: stravaSource(registry.sources)?.sourceId ?? null,
-    name: detail.name,
+    name: title(registry, detail),
     sport: registry.sport,
     startedAt: registry.startedAt,
     timezone: registry.timezone,
@@ -198,10 +198,21 @@ interface ActivitySource {
 }
 
 interface ActivityRow {
+  name: string | null;
   sport: string;
   startedAt: string;
   timezone: string;
   sources: ActivitySource[];
+}
+
+// Strava's archived detail is the live title and wins wherever it exists. The
+// registry's name comes from the bulk export, which is a snapshot, so it
+// stands in for the activities whose detail was never archived.
+function title(
+  registry: ActivityRow,
+  detail: StravaDetail | null,
+): string | null {
+  return detail?.name ?? registry.name;
 }
 
 // The device's own totals win where it recorded them, matching how the lake's
@@ -217,7 +228,7 @@ function row(
   return {
     activityId,
     stravaId: stravaSource(registry.sources)?.sourceId ?? null,
-    name: detail?.name ?? null,
+    name: title(registry, detail),
     sport: registry.sport,
     startedAt: registry.startedAt,
     timezone: registry.timezone,
@@ -238,7 +249,8 @@ async function activityRow(
 ): Promise<ActivityRow | null> {
   const { results } = await db
     .prepare(
-      `SELECT activities.sport, activities.started_at, activities.timezone,
+      `SELECT activities.name, activities.sport, activities.started_at,
+              activities.timezone,
               sources.source, sources.source_id, sources.raw_keys
        FROM activities
        LEFT JOIN activity_sources AS sources
@@ -249,6 +261,7 @@ async function activityRow(
     )
     .bind(activityId)
     .all<{
+      name: string | null;
       sport: string;
       started_at: string;
       timezone: string;
@@ -262,6 +275,7 @@ async function activityRow(
     return null;
   }
   return {
+    name: first.name,
     sport: first.sport,
     startedAt: first.started_at,
     timezone: first.timezone,

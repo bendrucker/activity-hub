@@ -5,6 +5,7 @@ import { placeActivity, toSourceRecord } from "./placement";
 function activity(overrides: Partial<ExportActivity> = {}): ExportActivity {
   return {
     sourceId: "19324502491",
+    name: "Headlands",
     startedAt: "2026-07-15T13:11:54.000Z",
     sportType: "Ride",
     elapsedS: 6770,

@@ -24,12 +24,15 @@ const testEnv: Env = { ...env, ...SECRETS };
 const OLD = "2026-01-01T00:00:00.000Z";
 const RETRY = { delaySeconds: 60 };
 
-async function seedActivity(activityId: string): Promise<void> {
+async function seedActivity(
+  activityId: string,
+  name: string | null = null,
+): Promise<void> {
   await env.REGISTRY.prepare(
-    `INSERT INTO activities (activity_id, started_at, timezone, sport, duration_s, created_at, updated_at)
-     VALUES (?1, '2026-01-01T14:00:00.000Z', 'America/Los_Angeles', 'ride', 3600, ?2, ?2)`,
+    `INSERT INTO activities (activity_id, name, started_at, timezone, sport, duration_s, created_at, updated_at)
+     VALUES (?1, ?3, '2026-01-01T14:00:00.000Z', 'America/Los_Angeles', 'ride', 3600, ?2, ?2)`,
   )
-    .bind(activityId, OLD)
+    .bind(activityId, OLD, name)
     .run();
 }
 
@@ -575,6 +578,61 @@ describe("the publish stage", () => {
         movingS: 5000,
         elevationM: 480,
       }),
+    );
+  });
+
+  // Only a few hundred activities ever had a detail body archived, so most of
+  // the corpus reaches the site titled only by what the export left behind.
+  it("titles a row from the registry when no detail is archived", async () => {
+    await seedActivity("a1", "Old La Honda");
+    await seedSource({
+      source: "strava",
+      sourceId: "9001",
+      activityId: "a1",
+      rawKeys: { original: "raw/test/a1.fit" },
+    });
+    await seedDerived({
+      activityId: "a1",
+      stage: "decode",
+      status: "ok",
+      outputKey: "decode/v1/a1/",
+    });
+    const site = siteStub();
+
+    await consumeTransformBatch(batchOf([publishMessage("a1")]), testEnv, {
+      container: {
+        summarize: summarizeReturning({
+          outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+        }),
+      },
+      site,
+    });
+
+    expect(site.publishActivity).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Old La Honda" }),
+    );
+  });
+
+  // The export is a snapshot and the detail body is live, so a title edited
+  // after the export was taken still reaches the site.
+  it("prefers the archived detail's title over the registry's", async () => {
+    await seedPublishable("a1");
+    await env.REGISTRY.prepare(
+      "UPDATE activities SET name = 'Stale Export Title' WHERE activity_id = 'a1'",
+    ).run();
+    const site = siteStub();
+
+    await consumeTransformBatch(batchOf([publishMessage("a1")]), testEnv, {
+      container: {
+        summarize: summarizeReturning({
+          outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+        }),
+      },
+      site,
+    });
+
+    expect(site.publishActivity).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Kings Mountain" }),
     );
   });
 
