@@ -174,7 +174,7 @@ Correctness still comes from the table rather than the chain. An activity whose 
 
 #### Whose Numbers
 
-Strava and the device disagree, and not slightly: normalized power matches Strava's weighted average on 0.3% of rides, a median 17 W apart, and average power matches on 2.6%. Distance and elevation are effectively passthrough. The lake carries both with explicit provenance. The website shows Strava's numbers so a card matches its permalink when you click through. Analytics uses device numbers so results stay internally consistent and reproducible from files I own. Anything published as a headline stat names which one it used.
+Strava and the device disagree, and not slightly: normalized power matches Strava's weighted average on 0.3% of rides, a median 17 W apart, and average power matches on 2.6%. Distance and elevation are effectively passthrough. The lake carries both with explicit provenance. The website shows the device's own totals where it recorded them, falling back to Strava's for a file that carries records but no session summary, matching how the lake's `activities` table resolves the same disagreement. Analytics uses device numbers so results stay internally consistent and reproducible from files I own. Anything published as a headline stat names which one it used.
 
 #### Estimated Power
 

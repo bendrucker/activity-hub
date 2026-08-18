@@ -79,7 +79,7 @@ export interface LakeResponse {
 // The shape of what the publish stage sends the website. A change here means
 // every published row is one version behind what the site should be holding,
 // which is what makes the sweep republish the corpus.
-export const PUBLISH_SCHEMA_VERSION = 1;
+export const PUBLISH_SCHEMA_VERSION = 2;
 
 export interface PublishWork {
   activityId: string;

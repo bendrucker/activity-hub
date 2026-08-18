@@ -3,7 +3,7 @@
 // Strava's archived detail supplies the title and the numbers a device without
 // sessions never recorded.
 
-import { isCurrent, stageArtifact } from "../derived";
+import { inputFingerprint, isCurrent, stageArtifact } from "../derived";
 import { lakeUri } from "../lake/location";
 import { publishClient, type PublishClient } from "./container";
 import type { PowerBest, PowerSource, PublishArtifact } from "./protocol";
@@ -66,6 +66,16 @@ export type PublishResult = { fingerprint: string } & (
 const DELETED = "deleted";
 const UNDECODED = "undecoded";
 
+function notDecoded(reason = "activity has not been decoded"): PublishResult {
+  return { fingerprint: UNDECODED, status: "skipped", reason };
+}
+
+function stravaSource(
+  sources: readonly ActivitySource[],
+): ActivitySource | undefined {
+  return sources.find((source) => source.source === "strava");
+}
+
 export async function publishToSite(
   env: Env,
   activityId: string,
@@ -94,11 +104,16 @@ export async function publishToSite(
 
   const decode = await stageArtifact(env.REGISTRY, activityId, "decode");
   if (decode === null || decode.outputKey === null) {
-    return {
-      fingerprint: UNDECODED,
-      status: "skipped",
-      reason: "activity has not been decoded",
-    };
+    // No archived original means decode will never run, so this is the only
+    // route this activity can reach the site by. Strava's detail carries
+    // totals but no telemetry, so the row publishes with no power or map.
+    const hasOriginal = registry.sources.some(
+      (source) => source.rawKeys.original !== undefined,
+    );
+    if (!hasOriginal) {
+      return publishFromDetailOnly(env, activityId, registry, site);
+    }
+    return notDecoded();
   }
 
   const fingerprint = `${decode.inputFingerprint}:${decode.artifactVersion}`;
@@ -128,6 +143,54 @@ export async function publishToSite(
   return { fingerprint, status: "ok" };
 }
 
+// Reached only when there is no archived original, so decode never ran and
+// there is no Parquet to summarize. The fingerprint is the detail file's
+// etag, since there is no decode row.
+async function publishFromDetailOnly(
+  env: Env,
+  activityId: string,
+  registry: ActivityRow,
+  site: SitePublisher,
+): Promise<PublishResult> {
+  const detailKey = stravaSource(registry.sources)?.rawKeys.detail;
+  if (detailKey === undefined) {
+    return notDecoded(
+      "activity has no archived original and no Strava detail to publish from",
+    );
+  }
+
+  const fingerprint = await inputFingerprint(env.RAW, [detailKey]);
+  if (await isCurrent(env.REGISTRY, activityId, "publish", fingerprint)) {
+    return { fingerprint, status: "current" };
+  }
+
+  const [detail, photoKeys] = await Promise.all([
+    stravaDetail(env.RAW, registry.sources),
+    photos(env.RAW, registry.sources),
+  ]);
+  if (detail === null) {
+    return notDecoded();
+  }
+
+  await site.publishActivity({
+    activityId,
+    stravaId: stravaSource(registry.sources)?.sourceId ?? null,
+    name: detail.name,
+    sport: registry.sport,
+    startedAt: registry.startedAt,
+    timezone: registry.timezone,
+    distanceM: detail.distance,
+    movingS: detail.movingTime,
+    elevationM: detail.elevationGain,
+    averageWatts: null,
+    powerSource: "none",
+    polyline: null,
+    elevationProfile: null,
+    photoKeys,
+  });
+  return { fingerprint, status: "ok" };
+}
+
 interface ActivitySource {
   source: string;
   sourceId: string;
@@ -153,9 +216,7 @@ function row(
 ): PublishedActivity {
   return {
     activityId,
-    stravaId:
-      registry.sources.find((source) => source.source === "strava")?.sourceId ??
-      null,
+    stravaId: stravaSource(registry.sources)?.sourceId ?? null,
     name: detail?.name ?? null,
     sport: registry.sport,
     startedAt: registry.startedAt,
@@ -246,8 +307,7 @@ async function stravaDetail(
   bucket: R2Bucket,
   sources: readonly ActivitySource[],
 ): Promise<StravaDetail | null> {
-  const key = sources.find((source) => source.source === "strava")?.rawKeys
-    .detail;
+  const key = stravaSource(sources)?.rawKeys.detail;
   if (key === undefined) {
     return null;
   }
