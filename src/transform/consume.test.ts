@@ -661,6 +661,26 @@ describe("the publish stage", () => {
     expect(summary).toEqual({ ...EMPTY_SUMMARY, failed: 1 });
   });
 
+  it("skips an activity with an archived original that has not decoded yet", async () => {
+    await seedArchived("a1", "raw/test/a1.fit");
+    const summarize = summarizeReturning({
+      outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+    });
+
+    const summary = await consumeTransformBatch(
+      batchOf([publishMessage("a1")]),
+      testEnv,
+      { container: { summarize }, site: siteStub() },
+    );
+
+    expect(summarize).not.toHaveBeenCalled();
+    expect(await publishRow("a1")).toMatchObject({
+      status: "skipped",
+      error: "activity has not been decoded",
+    });
+    expect(summary).toEqual({ ...EMPTY_SUMMARY, skipped: 1 });
+  });
+
   // The 2013-2019 manual Strava entries have no archived original, so decode
   // permanently skips them.
   it("publishes from Strava's detail alone when there is no archived original", async () => {
