@@ -661,27 +661,6 @@ describe("the publish stage", () => {
     expect(summary).toEqual({ ...EMPTY_SUMMARY, failed: 1 });
   });
 
-  it("skips an activity that has not been decoded", async () => {
-    await seedActivity("a1");
-    await seedSource({ source: "wahoo", sourceId: "1", activityId: "a1" });
-    const summarize = summarizeReturning({
-      outcome: { activityId: "a1", status: "ok", artifact: artifact() },
-    });
-
-    const summary = await consumeTransformBatch(
-      batchOf([publishMessage("a1")]),
-      testEnv,
-      { container: { summarize }, site: siteStub() },
-    );
-
-    expect(summarize).not.toHaveBeenCalled();
-    expect(await publishRow("a1")).toMatchObject({
-      status: "skipped",
-      error: "activity has not been decoded",
-    });
-    expect(summary).toEqual({ ...EMPTY_SUMMARY, skipped: 1 });
-  });
-
   // The 2013-2019 manual Strava entries have no archived original, so decode
   // permanently skips them. Strava's own detail is the only source of totals
   // this row will ever have.
@@ -738,16 +717,21 @@ describe("the publish stage", () => {
   it("skips when neither an archived original nor a Strava detail exists", async () => {
     await seedActivity("a1");
     await seedSource({ source: "wahoo", sourceId: "1", activityId: "a1" });
+    const summarize = summarizeReturning({
+      outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+    });
 
     const summary = await consumeTransformBatch(
       batchOf([publishMessage("a1")]),
       testEnv,
-      { site: siteStub() },
+      { container: { summarize }, site: siteStub() },
     );
 
+    expect(summarize).not.toHaveBeenCalled();
     expect(await publishRow("a1")).toMatchObject({
       status: "skipped",
-      error: "activity has not been decoded",
+      error:
+        "activity has no archived original and no Strava detail to publish from",
     });
     expect(summary).toEqual({ ...EMPTY_SUMMARY, skipped: 1 });
   });

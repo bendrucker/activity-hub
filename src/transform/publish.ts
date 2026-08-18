@@ -3,12 +3,7 @@
 // Strava's archived detail supplies the title and the numbers a device without
 // sessions never recorded.
 
-import {
-  activityRawKeys,
-  inputFingerprint,
-  isCurrent,
-  stageArtifact,
-} from "../derived";
+import { inputFingerprint, isCurrent, stageArtifact } from "../derived";
 import { lakeUri } from "../lake/location";
 import { publishClient, type PublishClient } from "./container";
 import type { PowerBest, PowerSource, PublishArtifact } from "./protocol";
@@ -71,6 +66,16 @@ export type PublishResult = { fingerprint: string } & (
 const DELETED = "deleted";
 const UNDECODED = "undecoded";
 
+function notDecoded(reason = "activity has not been decoded"): PublishResult {
+  return { fingerprint: UNDECODED, status: "skipped", reason };
+}
+
+function stravaSource(
+  sources: readonly ActivitySource[],
+): ActivitySource | undefined {
+  return sources.find((source) => source.source === "strava");
+}
+
 export async function publishToSite(
   env: Env,
   activityId: string,
@@ -102,15 +107,13 @@ export async function publishToSite(
     // No archived original means decode will never run, so this is the only
     // route this activity can reach the site by. Strava's detail carries
     // totals but no telemetry, so the row publishes with no power or map.
-    const rawKeys = await activityRawKeys(env.REGISTRY, activityId);
-    if (rawKeys.length === 0) {
+    const hasOriginal = registry.sources.some(
+      (source) => source.rawKeys.original !== undefined,
+    );
+    if (!hasOriginal) {
       return publishFromDetailOnly(env, activityId, registry, site);
     }
-    return {
-      fingerprint: UNDECODED,
-      status: "skipped",
-      reason: "activity has not been decoded",
-    };
+    return notDecoded();
   }
 
   const fingerprint = `${decode.inputFingerprint}:${decode.artifactVersion}`;
@@ -150,15 +153,11 @@ async function publishFromDetailOnly(
   registry: ActivityRow,
   site: SitePublisher,
 ): Promise<PublishResult> {
-  const detailKey = registry.sources.find(
-    (source) => source.source === "strava",
-  )?.rawKeys.detail;
+  const detailKey = stravaSource(registry.sources)?.rawKeys.detail;
   if (detailKey === undefined) {
-    return {
-      fingerprint: UNDECODED,
-      status: "skipped",
-      reason: "activity has not been decoded",
-    };
+    return notDecoded(
+      "activity has no archived original and no Strava detail to publish from",
+    );
   }
 
   const fingerprint = await inputFingerprint(env.RAW, [detailKey]);
@@ -171,18 +170,12 @@ async function publishFromDetailOnly(
     photos(env.RAW, registry.sources),
   ]);
   if (detail === null) {
-    return {
-      fingerprint: UNDECODED,
-      status: "skipped",
-      reason: "activity has not been decoded",
-    };
+    return notDecoded();
   }
 
   await site.publishActivity({
     activityId,
-    stravaId:
-      registry.sources.find((source) => source.source === "strava")?.sourceId ??
-      null,
+    stravaId: stravaSource(registry.sources)?.sourceId ?? null,
     name: detail.name,
     sport: registry.sport,
     startedAt: registry.startedAt,
@@ -224,9 +217,7 @@ function row(
 ): PublishedActivity {
   return {
     activityId,
-    stravaId:
-      registry.sources.find((source) => source.source === "strava")?.sourceId ??
-      null,
+    stravaId: stravaSource(registry.sources)?.sourceId ?? null,
     name: detail?.name ?? null,
     sport: registry.sport,
     startedAt: registry.startedAt,
@@ -317,8 +308,7 @@ async function stravaDetail(
   bucket: R2Bucket,
   sources: readonly ActivitySource[],
 ): Promise<StravaDetail | null> {
-  const key = sources.find((source) => source.source === "strava")?.rawKeys
-    .detail;
+  const key = stravaSource(sources)?.rawKeys.detail;
   if (key === undefined) {
     return null;
   }
