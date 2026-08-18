@@ -26,6 +26,7 @@ COPY container/decode.ts \
   container/s3.ts \
   container/schema.ts \
   container/server.ts \
+  container/sql.ts \
   container/storage.ts \
   container/tables.ts \
   ./container/
