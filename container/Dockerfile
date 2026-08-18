@@ -12,6 +12,13 @@ RUN bun install --frozen-lockfile --production
 FROM --platform=linux/amd64 oven/bun:1.3.14-slim
 WORKDIR /app
 
+# The slim image ships no CA bundle. Bun's own fetch carries its roots, so the
+# S3 writes work without one, but DuckDB's httpfs verifies through the system
+# store and fails every read out of R2 without this.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
 # Module resolution walks up from both container/ and src/import/, so the
 # installed packages belong at the app root rather than beside either one.
 COPY --from=dependencies /app/node_modules ./node_modules
