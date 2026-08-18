@@ -14,17 +14,31 @@ import { literal } from "./sql";
 export function configureS3(
   config: ContainerConfig,
 ): (connection: DuckDBConnection) => Promise<void> {
+  // Secrets belong to the instance rather than the connection, so two requests
+  // defining the same name at once collide on the catalog. The credentials are
+  // the same every time, so the first caller defines them and the rest await
+  // that same work. A failure clears the slot so the next caller retries.
+  let secrets: Promise<void> | undefined;
   return async (connection) => {
     await connection.run("LOAD httpfs");
-    // The two buckets carry different credentials, and the raw one is
-    // deliberately read-only.
-    await connection.run(
-      secret("raw", RAW_BUCKET, config.accountId, config.raw),
-    );
-    await connection.run(
-      secret("lake", LAKE_BUCKET, config.accountId, config.lake),
-    );
+    secrets ??= defineSecrets(connection, config).catch((error: unknown) => {
+      secrets = undefined;
+      throw error;
+    });
+    await secrets;
   };
+}
+
+async function defineSecrets(
+  connection: DuckDBConnection,
+  config: ContainerConfig,
+): Promise<void> {
+  // The two buckets carry different credentials, and the raw one is
+  // deliberately read-only.
+  await connection.run(secret("raw", RAW_BUCKET, config.accountId, config.raw));
+  await connection.run(
+    secret("lake", LAKE_BUCKET, config.accountId, config.lake),
+  );
 }
 
 function secret(
