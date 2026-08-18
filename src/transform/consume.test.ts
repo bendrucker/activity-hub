@@ -682,6 +682,76 @@ describe("the publish stage", () => {
     expect(summary).toEqual({ ...EMPTY_SUMMARY, skipped: 1 });
   });
 
+  // The 2013-2019 manual Strava entries have no archived original, so decode
+  // permanently skips them. Strava's own detail is the only source of totals
+  // this row will ever have.
+  it("publishes from Strava's detail alone when there is no archived original", async () => {
+    await seedActivity("a1");
+    await env.RAW.put(
+      "raw/test/detail.json",
+      JSON.stringify({
+        name: "Old Kings Mountain",
+        distance: 41000,
+        moving_time: 5000,
+        total_elevation_gain: 480,
+      }),
+    );
+    await seedSource({
+      source: "strava",
+      sourceId: "9001",
+      activityId: "a1",
+      rawKeys: { detail: "raw/test/detail.json" },
+    });
+    const summarize = summarizeReturning({
+      outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+    });
+    const site = siteStub();
+
+    const summary = await consumeTransformBatch(
+      batchOf([publishMessage("a1")]),
+      testEnv,
+      { container: { summarize }, site },
+    );
+
+    expect(summarize).not.toHaveBeenCalled();
+    expect(site.publishActivity).toHaveBeenCalledWith({
+      activityId: "a1",
+      stravaId: "9001",
+      name: "Old Kings Mountain",
+      sport: "ride",
+      startedAt: "2026-01-01T14:00:00.000Z",
+      timezone: "America/Los_Angeles",
+      distanceM: 41000,
+      movingS: 5000,
+      elevationM: 480,
+      averageWatts: null,
+      powerSource: "none",
+      polyline: null,
+      elevationProfile: null,
+      photoKeys: [],
+    });
+    expect(site.publishPowerCurve).not.toHaveBeenCalled();
+    expect(await publishRow("a1")).toMatchObject({ status: "ok" });
+    expect(summary).toEqual({ ...EMPTY_SUMMARY, published: 1 });
+  });
+
+  it("skips when neither an archived original nor a Strava detail exists", async () => {
+    await seedActivity("a1");
+    await seedSource({ source: "wahoo", sourceId: "1", activityId: "a1" });
+
+    const summary = await consumeTransformBatch(
+      batchOf([publishMessage("a1")]),
+      testEnv,
+      { site: siteStub() },
+    );
+
+    expect(await publishRow("a1")).toMatchObject({
+      status: "skipped",
+      error: "activity has not been decoded",
+    });
+    expect(summary).toEqual({ ...EMPTY_SUMMARY, skipped: 1 });
+  });
+
   // A deleted activity drops out of the staleness query at the same moment it
   // stops having live sources, so this message is the only thing that will
   // ever take the row off the site.

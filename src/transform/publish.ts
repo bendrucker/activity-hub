@@ -3,7 +3,12 @@
 // Strava's archived detail supplies the title and the numbers a device without
 // sessions never recorded.
 
-import { isCurrent, stageArtifact } from "../derived";
+import {
+  activityRawKeys,
+  inputFingerprint,
+  isCurrent,
+  stageArtifact,
+} from "../derived";
 import { lakeUri } from "../lake/location";
 import { publishClient, type PublishClient } from "./container";
 import type { PowerBest, PowerSource, PublishArtifact } from "./protocol";
@@ -94,6 +99,13 @@ export async function publishToSite(
 
   const decode = await stageArtifact(env.REGISTRY, activityId, "decode");
   if (decode === null || decode.outputKey === null) {
+    // No archived original means decode will never run, so this is the only
+    // route this activity can reach the site by. Strava's detail carries
+    // totals but no telemetry, so the row publishes with no power or map.
+    const rawKeys = await activityRawKeys(env.REGISTRY, activityId);
+    if (rawKeys.length === 0) {
+      return publishFromDetailOnly(env, activityId, registry, site);
+    }
     return {
       fingerprint: UNDECODED,
       status: "skipped",
@@ -125,6 +137,65 @@ export async function publishToSite(
     row(activityId, registry, outcome.artifact, detail, photoKeys),
   );
   await site.publishPowerCurve(activityId, outcome.artifact.bests);
+  return { fingerprint, status: "ok" };
+}
+
+// The only telemetry-free path to the site: a Strava import that never got an
+// archived original, so decode permanently skips it and there is no Parquet
+// to summarize. Strava's own totals are the whole row, and the fingerprint is
+// the detail file's etag rather than a decode row's, since there is none.
+async function publishFromDetailOnly(
+  env: Env,
+  activityId: string,
+  registry: ActivityRow,
+  site: SitePublisher,
+): Promise<PublishResult> {
+  const detailKey = registry.sources.find(
+    (source) => source.source === "strava",
+  )?.rawKeys.detail;
+  if (detailKey === undefined) {
+    return {
+      fingerprint: UNDECODED,
+      status: "skipped",
+      reason: "activity has not been decoded",
+    };
+  }
+
+  const fingerprint = await inputFingerprint(env.RAW, [detailKey]);
+  if (await isCurrent(env.REGISTRY, activityId, "publish", fingerprint)) {
+    return { fingerprint, status: "current" };
+  }
+
+  const [detail, photoKeys] = await Promise.all([
+    stravaDetail(env.RAW, registry.sources),
+    photos(env.RAW, registry.sources),
+  ]);
+  if (detail === null) {
+    return {
+      fingerprint: UNDECODED,
+      status: "skipped",
+      reason: "activity has not been decoded",
+    };
+  }
+
+  await site.publishActivity({
+    activityId,
+    stravaId:
+      registry.sources.find((source) => source.source === "strava")?.sourceId ??
+      null,
+    name: detail.name,
+    sport: registry.sport,
+    startedAt: registry.startedAt,
+    timezone: registry.timezone,
+    distanceM: detail.distance,
+    movingS: detail.movingTime,
+    elevationM: detail.elevationGain,
+    averageWatts: null,
+    powerSource: "none",
+    polyline: null,
+    elevationProfile: null,
+    photoKeys,
+  });
   return { fingerprint, status: "ok" };
 }
 
