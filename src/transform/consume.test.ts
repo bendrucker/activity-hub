@@ -9,7 +9,15 @@ import {
   type Stage,
 } from "../derived";
 import { consumeTransformBatch, type TransformMessage } from "./consume";
-import type { DecodeOutcome, DecodeRequest, DecodeResponse } from "./protocol";
+import type {
+  DecodeOutcome,
+  DecodeRequest,
+  DecodeResponse,
+  PublishArtifact,
+  PublishRequest,
+  PublishResponse,
+} from "./protocol";
+import type { SitePublisher } from "./publish";
 
 const testEnv: Env = { ...env, ...SECRETS };
 
@@ -168,6 +176,7 @@ function decoded(activityId: string, errors: string[] = []): DecodeOutcome {
 
 const EMPTY_SUMMARY = {
   decoded: 0,
+  published: 0,
   current: 0,
   skipped: 0,
   failed: 0,
@@ -356,7 +365,7 @@ describe("consumeTransformBatch", () => {
     expect(summary).toEqual({ ...EMPTY_SUMMARY, decoded: 1 });
   });
 
-  it("drops a message for a stage nothing implements", async () => {
+  it("drops a message for a stage with no per-activity grain", async () => {
     const logged = vi.spyOn(console, "warn").mockImplementation(() => {});
     await seedArchived("a1", "raw/test/a1.fit");
     const message = stubMessage({ activityId: "a1", stage: "lake" });
@@ -391,5 +400,336 @@ describe("consumeTransformBatch", () => {
       error: "dropped 3 records; power stream ends early",
     });
     expect(summary).toEqual({ ...EMPTY_SUMMARY, decoded: 1 });
+  });
+
+  it("enqueues publish once an activity decodes", async () => {
+    await seedArchived("a1", "raw/test/a1.fit");
+    const send = vi.spyOn(testEnv.TRANSFORM_QUEUE, "send");
+
+    await consumeTransformBatch(batchOf([decodeMessage("a1")]), testEnv, {
+      client: { decode: decodeReturning(decoded("a1")) },
+    });
+
+    expect(send).toHaveBeenCalledWith({
+      activityId: "a1",
+      stage: "publish",
+    });
+    send.mockRestore();
+  });
+});
+
+class ValidationError extends Error {
+  override readonly name = "ValidationError";
+}
+
+function artifact(overrides: Partial<PublishArtifact> = {}): PublishArtifact {
+  return {
+    polyline: "_p~iF~ps|U",
+    elevationProfile: [10, 20, 30],
+    averageWatts: 210,
+    powerSource: "measured",
+    bests: [{ durationS: 5, watts: 400 }],
+    distanceM: 42000,
+    elevationM: 500,
+    movingS: 5400,
+    ...overrides,
+  };
+}
+
+function summarizeReturning(response: PublishResponse) {
+  return vi.fn<(request: PublishRequest) => Promise<PublishResponse>>(() =>
+    Promise.resolve(response),
+  );
+}
+
+function siteStub(overrides: Partial<SitePublisher> = {}) {
+  return {
+    publishActivity: vi.fn(() => Promise.resolve()),
+    publishPowerCurve: vi.fn(() => Promise.resolve()),
+    deleteActivity: vi.fn(() => Promise.resolve()),
+    ...overrides,
+  };
+}
+
+function publishMessage(activityId: string) {
+  return stubMessage({ activityId, stage: "publish" });
+}
+
+function publishRow(activityId: string): Promise<DerivedRow | null> {
+  return env.REGISTRY.prepare(
+    `SELECT input_fingerprint, output_key, status, attempts, error, updated_at
+     FROM derived
+     WHERE activity_id = ?1 AND stage = 'publish'`,
+  )
+    .bind(activityId)
+    .first<DerivedRow>();
+}
+
+// A Strava activity with an archived detail body and two photos, decoded.
+async function seedPublishable(activityId: string): Promise<void> {
+  await seedActivity(activityId);
+  await env.RAW.put(
+    "raw/test/detail.json",
+    JSON.stringify({
+      name: "Kings Mountain",
+      distance: 41000,
+      moving_time: 5000,
+      total_elevation_gain: 480,
+    }),
+  );
+  await env.RAW.put("raw/test/photos/one.jpg", "one");
+  await env.RAW.put("raw/test/photos/two.jpg", "two");
+  await seedSource({
+    source: "strava",
+    sourceId: "9001",
+    activityId,
+    rawKeys: {
+      detail: "raw/test/detail.json",
+      photos: "raw/test/photos/",
+    },
+  });
+  await seedDerived({
+    activityId,
+    stage: "decode",
+    status: "ok",
+    outputKey: `decode/v1/${activityId}/`,
+  });
+}
+
+// The publish fingerprint is the decode row's, so it moves when the bytes
+// change or the decoder does, and stands still otherwise.
+const PUBLISHED = `fingerprint:${ARTIFACT_VERSION.decode}`;
+
+describe("the publish stage", () => {
+  it("assembles the row from the registry, the archive, and the container", async () => {
+    await seedPublishable("a1");
+    const site = siteStub();
+    const summarize = summarizeReturning({
+      outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+    });
+
+    const summary = await consumeTransformBatch(
+      batchOf([publishMessage("a1")]),
+      testEnv,
+      { container: { summarize }, site },
+    );
+
+    expect(summarize).toHaveBeenCalledWith({
+      work: {
+        activityId: "a1",
+        decode: "s3://activity-hub-lake/decode/v1/a1/",
+      },
+    });
+    expect(site.publishActivity).toHaveBeenCalledWith({
+      activityId: "a1",
+      stravaId: "9001",
+      name: "Kings Mountain",
+      sport: "ride",
+      startedAt: "2026-01-01T14:00:00.000Z",
+      timezone: "America/Los_Angeles",
+      distanceM: 42000,
+      movingS: 5400,
+      elevationM: 500,
+      averageWatts: 210,
+      powerSource: "measured",
+      polyline: "_p~iF~ps|U",
+      elevationProfile: [10, 20, 30],
+      photoKeys: ["raw/test/photos/one.jpg", "raw/test/photos/two.jpg"],
+    });
+    expect(site.publishPowerCurve).toHaveBeenCalledWith("a1", [
+      { durationS: 5, watts: 400 },
+    ]);
+    expect(await publishRow("a1")).toMatchObject({
+      status: "ok",
+      input_fingerprint: PUBLISHED,
+    });
+    expect(summary).toEqual({ ...EMPTY_SUMMARY, published: 1 });
+  });
+
+  // Strava's numbers stand in where the device recorded no session summary,
+  // which is every GPX file and any FIT the ride was cut short of writing.
+  it("falls back to the provider's totals when the device wrote none", async () => {
+    await seedPublishable("a1");
+    const site = siteStub();
+
+    await consumeTransformBatch(batchOf([publishMessage("a1")]), testEnv, {
+      container: {
+        summarize: summarizeReturning({
+          outcome: {
+            activityId: "a1",
+            status: "ok",
+            artifact: artifact({
+              distanceM: null,
+              elevationM: null,
+              movingS: null,
+            }),
+          },
+        }),
+      },
+      site,
+    });
+
+    expect(site.publishActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        distanceM: 41000,
+        movingS: 5000,
+        elevationM: 480,
+      }),
+    );
+  });
+
+  // The site rejecting the row's shape is the one failure a retry cannot fix,
+  // and the error's name is all that crosses the RPC boundary to say so.
+  it("parks a row the site rejects instead of retrying it", async () => {
+    await seedPublishable("a1");
+    const message = publishMessage("a1");
+    const site = siteStub({
+      publishActivity: vi.fn(() =>
+        Promise.reject(new ValidationError("sport is required")),
+      ),
+    });
+
+    const summary = await consumeTransformBatch(batchOf([message]), testEnv, {
+      container: {
+        summarize: summarizeReturning({
+          outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+        }),
+      },
+      site,
+    });
+
+    expect(message.ack).toHaveBeenCalled();
+    expect(message.retry).not.toHaveBeenCalled();
+    expect(await publishRow("a1")).toMatchObject({
+      status: "failed",
+      error: "sport is required",
+    });
+    expect(summary).toEqual({ ...EMPTY_SUMMARY, failed: 1 });
+  });
+
+  it("retries when the site is unreachable", async () => {
+    await seedPublishable("a1");
+    const message = publishMessage("a1");
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const site = siteStub({
+      publishActivity: vi.fn(() =>
+        Promise.reject(new Error("Network connection lost")),
+      ),
+    });
+
+    const summary = await consumeTransformBatch(batchOf([message]), testEnv, {
+      container: {
+        summarize: summarizeReturning({
+          outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+        }),
+      },
+      site,
+    });
+
+    expect(message.retry).toHaveBeenCalledWith(RETRY);
+    expect(await publishRow("a1")).toBeNull();
+    expect(summary).toEqual({ ...EMPTY_SUMMARY, retried: 1 });
+    logged.mockRestore();
+  });
+
+  it("records a failure the container attributes to the artifact", async () => {
+    await seedPublishable("a1");
+    const site = siteStub();
+
+    const summary = await consumeTransformBatch(
+      batchOf([publishMessage("a1")]),
+      testEnv,
+      {
+        container: {
+          summarize: summarizeReturning({
+            outcome: {
+              activityId: "a1",
+              status: "failed",
+              error: "No files found that match the pattern",
+            },
+          }),
+        },
+        site,
+      },
+    );
+
+    expect(site.publishActivity).not.toHaveBeenCalled();
+    expect(await publishRow("a1")).toMatchObject({
+      status: "failed",
+      error: "No files found that match the pattern",
+    });
+    expect(summary).toEqual({ ...EMPTY_SUMMARY, failed: 1 });
+  });
+
+  it("skips an activity that has not been decoded", async () => {
+    await seedActivity("a1");
+    await seedSource({ source: "wahoo", sourceId: "1", activityId: "a1" });
+    const summarize = summarizeReturning({
+      outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+    });
+
+    const summary = await consumeTransformBatch(
+      batchOf([publishMessage("a1")]),
+      testEnv,
+      { container: { summarize }, site: siteStub() },
+    );
+
+    expect(summarize).not.toHaveBeenCalled();
+    expect(await publishRow("a1")).toMatchObject({
+      status: "skipped",
+      error: "activity has not been decoded",
+    });
+    expect(summary).toEqual({ ...EMPTY_SUMMARY, skipped: 1 });
+  });
+
+  // A deleted activity drops out of the staleness query at the same moment it
+  // stops having live sources, so this message is the only thing that will
+  // ever take the row off the site.
+  it("deletes an activity whose sources are all gone", async () => {
+    await seedPublishable("a1");
+    await env.REGISTRY.prepare(
+      "UPDATE activity_sources SET deleted_at = ?1 WHERE activity_id = 'a1'",
+    )
+      .bind(OLD)
+      .run();
+    const site = siteStub();
+
+    const summary = await consumeTransformBatch(
+      batchOf([publishMessage("a1")]),
+      testEnv,
+      {
+        container: { summarize: summarizeReturning({} as PublishResponse) },
+        site,
+      },
+    );
+
+    expect(site.deleteActivity).toHaveBeenCalledWith("a1");
+    expect(site.publishActivity).not.toHaveBeenCalled();
+    expect(await publishRow("a1")).toMatchObject({ status: "ok" });
+    expect(summary).toEqual({ ...EMPTY_SUMMARY, published: 1 });
+  });
+
+  it("leaves a published activity alone until its decode artifact moves", async () => {
+    await seedPublishable("a1");
+    await seedDerived({
+      activityId: "a1",
+      stage: "publish",
+      status: "ok",
+      fingerprint: PUBLISHED,
+    });
+    const summarize = summarizeReturning({
+      outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+    });
+    const site = siteStub();
+
+    const summary = await consumeTransformBatch(
+      batchOf([publishMessage("a1")]),
+      testEnv,
+      { container: { summarize }, site },
+    );
+
+    expect(summarize).not.toHaveBeenCalled();
+    expect(site.publishActivity).not.toHaveBeenCalled();
+    expect(summary).toEqual({ ...EMPTY_SUMMARY, current: 1 });
   });
 });

@@ -83,18 +83,24 @@ export async function upsertSourceRecord(
   return { activityId: plan.activity.activityId, outcome: plan.outcome };
 }
 
+// Answers with the activity the source belonged to, or null when the source
+// was never recorded. A deleted activity drops out of every staleness query,
+// so the deletion has to be carried downstream by whoever performed it.
 export async function markSourceDeleted(
   db: D1Database,
   source: Source,
   sourceId: string,
-): Promise<void> {
+): Promise<string | null> {
   const now = new Date().toISOString();
-  await db
+  const row = await db
     .prepare(
-      "UPDATE activity_sources SET deleted_at = ?1, updated_at = ?1 WHERE source = ?2 AND source_id = ?3",
+      `UPDATE activity_sources SET deleted_at = ?1, updated_at = ?1
+       WHERE source = ?2 AND source_id = ?3
+       RETURNING activity_id`,
     )
     .bind(now, source, sourceId)
-    .run();
+    .first<{ activity_id: string }>();
+  return row?.activity_id ?? null;
 }
 
 function prepare(db: D1Database, statement: Statement): D1PreparedStatement {

@@ -6,6 +6,7 @@ import { stubQueue } from "../test/queue-stub";
 import { SECRETS } from "../test/secrets";
 import {
   handleConsumeLog,
+  handlePhotoBackfill,
   handlePipeline,
   handleReconcile,
   handleStravaBackfill,
@@ -177,6 +178,85 @@ describe("handleStravaBackfill", () => {
 
     expect(response.status).toBe(200);
     expect(queue.messages).toEqual([]);
+  });
+});
+
+function photoBackfillRequest(authorization?: string, limit?: string): Request {
+  const url = new URL("https://hub.example/admin/photo-backfill");
+  if (limit !== undefined) {
+    url.searchParams.set("limit", limit);
+  }
+  return new Request(url, {
+    method: "POST",
+    headers: authorization ? { Authorization: authorization } : {},
+  });
+}
+
+describe("handlePhotoBackfill", () => {
+  beforeEach(async () => {
+    const now = new Date().toISOString();
+    await env.REGISTRY.batch([
+      env.REGISTRY.prepare(
+        "INSERT INTO activities (activity_id, started_at, timezone, sport, duration_s, created_at, updated_at) VALUES ('activity-101', '2018-07-01T14:00:00.000Z', 'America/Los_Angeles', 'ride', 3600, ?1, ?1)",
+      ).bind(now),
+      env.REGISTRY.prepare(
+        "INSERT INTO activity_sources (source, source_id, activity_id, raw_keys, created_at, updated_at) VALUES ('strava', '101', 'activity-101', '{}', ?1, ?1)",
+      ).bind(now),
+    ]);
+  });
+
+  it("rejects a request without an Authorization header", async () => {
+    const response = await handlePhotoBackfill(
+      photoBackfillRequest(),
+      testEnv(),
+    );
+    expect(response.status).toBe(403);
+  });
+
+  it("enqueues refreshes for activities with no archived photo", async () => {
+    const queue = stubQueue<StravaIngestMessage>();
+
+    const response = await handlePhotoBackfill(
+      photoBackfillRequest("Bearer admin-secret"),
+      testEnv({ INGEST_QUEUE: queue }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      enqueued: 1,
+      remaining: 1,
+      done: true,
+    });
+    expect(queue.messages).toEqual([
+      { source: "strava", kind: "refresh", objectId: 101 },
+    ]);
+  });
+
+  // Every activity swept costs a call to an undocumented endpoint, so the
+  // caller has to be able to take a small bite.
+  it("honors a limit smaller than the gap", async () => {
+    const now = new Date().toISOString();
+    await env.REGISTRY.batch([
+      env.REGISTRY.prepare(
+        "INSERT INTO activities (activity_id, started_at, timezone, sport, duration_s, created_at, updated_at) VALUES ('activity-102', '2018-07-01T14:00:00.000Z', 'America/Los_Angeles', 'ride', 3600, ?1, ?1)",
+      ).bind(now),
+      env.REGISTRY.prepare(
+        "INSERT INTO activity_sources (source, source_id, activity_id, raw_keys, created_at, updated_at) VALUES ('strava', '102', 'activity-102', '{}', ?1, ?1)",
+      ).bind(now),
+    ]);
+    const queue = stubQueue<StravaIngestMessage>();
+
+    const response = await handlePhotoBackfill(
+      photoBackfillRequest("Bearer admin-secret", "1"),
+      testEnv({ INGEST_QUEUE: queue }),
+    );
+
+    expect(await response.json()).toEqual({
+      enqueued: 1,
+      remaining: 2,
+      done: false,
+      nextCursor: "101",
+    });
   });
 });
 
@@ -706,17 +786,19 @@ describe("handlePipeline", () => {
       oldestStale: null,
     });
 
-    // Neither stage is swept, so neither reports a stale activity. Answering
-    // for them would name every activity in the registry, which reads as a
-    // backlog rather than as a stage nothing enqueues.
+    // The lake is not swept, so it reports no stale activity. Answering for it
+    // would name every activity in the registry, which reads as a backlog
+    // rather than as a stage with no per-activity grain.
     const lake = stageOf(body, "lake");
     expect(lake.total).toBe(1);
     expect(lake.statuses).toEqual({ ok: 0, failed: 0, skipped: 1 });
     expect(lake.oldestStale).toBeNull();
 
+    // Publish has written nothing, so every activity is stale for it and the
+    // oldest source leads.
     const publish = stageOf(body, "publish");
     expect(publish.total).toBe(0);
-    expect(publish.oldestStale).toBeNull();
+    expect(publish.oldestStale).toMatchObject({ activityId: "a1" });
 
     expect(body.failures).toEqual([
       {

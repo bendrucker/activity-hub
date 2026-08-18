@@ -5,6 +5,7 @@ import {
 } from "@cloudflare/vitest-pool-workers";
 import { configDefaults, defineConfig } from "vitest/config";
 import { SECRETS } from "./test/secrets";
+import { SITE_STUB, SITE_WORKER } from "./test/site";
 
 export default defineConfig(async () => {
   const migrations = await readD1Migrations(
@@ -17,6 +18,7 @@ export default defineConfig(async () => {
         wrangler: { configPath: "./wrangler.jsonc" },
         miniflare: {
           bindings: { TEST_MIGRATIONS: migrations, ...SECRETS },
+          workers: [{ name: SITE_WORKER, modules: true, script: SITE_STUB }],
         },
       }),
     ],

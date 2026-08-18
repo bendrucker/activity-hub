@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { stubQueue, type QueueStub } from "../../test/queue-stub";
 import { SECRETS } from "../../test/secrets";
 import type { StravaIngestMessage } from "../ingest";
-import { backfillStravaStreams } from "./backfill";
+import { backfillStravaPhotos, backfillStravaStreams } from "./backfill";
 
 function testEnv(queue: QueueStub<StravaIngestMessage>): Env {
   return { ...env, ...SECRETS, INGEST_QUEUE: queue };
@@ -123,5 +123,60 @@ describe("backfillStravaStreams", () => {
 
     expect(result.enqueued).toBe(1);
     expect(result.remaining).toBe(4);
+  });
+});
+
+describe("backfillStravaPhotos", () => {
+  it("enqueues a refresh for a row with no archived photo", async () => {
+    await seed("101", '{"detail":"raw/strava/activities/101/detail.json"}');
+    const queue = stubQueue<StravaIngestMessage>();
+
+    const result = await backfillStravaPhotos(testEnv(queue));
+
+    expect(queue.messages).toEqual([
+      { source: "strava", kind: "refresh", objectId: 101 },
+    ]);
+    expect(result).toEqual({ enqueued: 1, remaining: 1, done: true });
+  });
+
+  // The webhook path records the prefix under one key.
+  it("skips a row whose photos arrived through a webhook", async () => {
+    await seed("101", '{"photos":"raw/strava/activities/101/photos/"}');
+    const queue = stubQueue<StravaIngestMessage>();
+
+    const result = await backfillStravaPhotos(testEnv(queue));
+
+    expect(queue.messages).toEqual([]);
+    expect(result.remaining).toBe(0);
+  });
+
+  // The bulk import records one key per file instead.
+  it("skips a row whose photos came out of the bulk import", async () => {
+    await seed(
+      "101",
+      '{"photos/IMG_1.jpg":"raw/strava/export/photos/IMG_1.jpg"}',
+    );
+    const queue = stubQueue<StravaIngestMessage>();
+
+    const result = await backfillStravaPhotos(testEnv(queue));
+
+    expect(queue.messages).toEqual([]);
+    expect(result.remaining).toBe(0);
+  });
+
+  it("walks the gap in pages the caller drives", async () => {
+    await seed("101", "{}");
+    await seed("102", "{}");
+    await seed("103", "{}");
+    const queue = stubQueue<StravaIngestMessage>();
+
+    const first = await backfillStravaPhotos(testEnv(queue), { perRun: 2 });
+
+    expect(first).toEqual({
+      enqueued: 2,
+      remaining: 3,
+      done: false,
+      nextCursor: "102",
+    });
   });
 });

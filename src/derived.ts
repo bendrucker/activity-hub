@@ -1,4 +1,7 @@
-import { DECODE_SCHEMA_VERSION } from "./transform/protocol";
+import {
+  DECODE_SCHEMA_VERSION,
+  PUBLISH_SCHEMA_VERSION,
+} from "./transform/protocol";
 
 export type Stage = "decode" | "lake" | "publish";
 
@@ -7,11 +10,19 @@ export type DerivedStatus = "ok" | "failed" | "skipped";
 export const STAGES: readonly Stage[] = ["decode", "lake", "publish"];
 
 // The stages the sweep enqueues, which is also the set the staleness query
-// answers for. `lake` keeps no per-activity row by design, and `publish` is
-// not built, so asking either for its oldest stale activity returns the whole
-// registry and reads as a backlog rather than as a stage that was never
-// swept.
-export const SWEPT_STAGES: readonly Stage[] = ["decode"];
+// answers for. `lake` keeps no per-activity row by design, so asking it for its
+// oldest stale activity returns the whole registry and reads as a backlog
+// rather than as a stage that has no per-activity grain.
+export const SWEPT_STAGES: readonly Stage[] = ["decode", "publish"];
+
+// A stage reads another stage's output, so the upstream running again leaves
+// it stale even when nothing about the source changed. Without this a decode
+// schema bump would re-decode the whole corpus and republish none of it, and
+// one sweep could enqueue decode and publish for the same activity in the same
+// batch with publish reading the previous artifact.
+export const STAGE_DEPENDS_ON: Partial<Record<Stage, Stage>> = {
+  publish: "decode",
+};
 
 // A row only reaches `failed` after the queue has exhausted its own retries,
 // so every attempt counted here is a whole separate delivery. Five rides out a
@@ -28,7 +39,7 @@ export const MAX_ATTEMPTS = 5;
 export const ARTIFACT_VERSION: Record<Stage, number> = {
   decode: DECODE_SCHEMA_VERSION,
   lake: 1,
-  publish: 1,
+  publish: PUBLISH_SCHEMA_VERSION,
 };
 
 // A fingerprint is a SHA-256 hex digest, so neither sentinel can collide with
@@ -102,12 +113,21 @@ const STALE = `
   FROM live
   LEFT JOIN derived
     ON derived.activity_id = live.activity_id AND derived.stage = ?1
+  LEFT JOIN derived AS upstream
+    ON upstream.activity_id = live.activity_id AND upstream.stage = ?5
   WHERE derived.activity_id IS NULL
      OR live.source_updated_at > derived.updated_at
      OR derived.artifact_version <> ?4
      OR (derived.status = 'failed' AND derived.attempts < ?2)
+     OR (upstream.updated_at IS NOT NULL AND upstream.updated_at > derived.updated_at)
   ORDER BY live.source_updated_at, live.activity_id
   LIMIT ?3`;
+
+// A stage with no upstream joins to its own row, where the comparison is a row
+// against itself and the clause can never fire.
+function upstreamStage(stage: Stage): Stage {
+  return STAGE_DEPENDS_ON[stage] ?? stage;
+}
 
 export async function staleActivities(
   db: D1Database,
@@ -116,7 +136,13 @@ export async function staleActivities(
 ): Promise<string[]> {
   const { results } = await db
     .prepare(STALE)
-    .bind(stage, MAX_ATTEMPTS, limit, ARTIFACT_VERSION[stage])
+    .bind(
+      stage,
+      MAX_ATTEMPTS,
+      limit,
+      ARTIFACT_VERSION[stage],
+      upstreamStage(stage),
+    )
     .all<{ activity_id: string; source_updated_at: string }>();
   return results.map((row) => row.activity_id);
 }
@@ -140,6 +166,42 @@ export async function isCurrent(
     .bind(activityId, stage, fingerprint, ARTIFACT_VERSION[stage])
     .first<{ current: number }>();
   return row !== null;
+}
+
+export interface StageArtifact {
+  outputKey: string | null;
+  inputFingerprint: string;
+  artifactVersion: number;
+}
+
+// What an upstream stage last produced. A stage that reads another's output
+// learns the location from the row that recorded it rather than rebuilding the
+// key, so the two cannot drift apart, and takes its own fingerprint from the
+// same row because that artifact is its input.
+export async function stageArtifact(
+  db: D1Database,
+  activityId: string,
+  stage: Stage,
+): Promise<StageArtifact | null> {
+  const row = await db
+    .prepare(
+      `SELECT output_key, input_fingerprint, artifact_version
+       FROM derived
+       WHERE activity_id = ?1 AND stage = ?2 AND status = 'ok'`,
+    )
+    .bind(activityId, stage)
+    .first<{
+      output_key: string | null;
+      input_fingerprint: string;
+      artifact_version: number;
+    }>();
+  return row === null
+    ? null
+    : {
+        outputKey: row.output_key,
+        inputFingerprint: row.input_fingerprint,
+        artifactVersion: row.artifact_version,
+      };
 }
 
 export interface DerivedOutcome {
@@ -267,7 +329,15 @@ export async function pipelineReport(db: D1Database): Promise<PipelineReport> {
     source_updated_at: string;
   }>(
     SWEPT_STAGES.map((stage) =>
-      db.prepare(STALE).bind(stage, MAX_ATTEMPTS, 1, ARTIFACT_VERSION[stage]),
+      db
+        .prepare(STALE)
+        .bind(
+          stage,
+          MAX_ATTEMPTS,
+          1,
+          ARTIFACT_VERSION[stage],
+          upstreamStage(stage),
+        ),
     ),
   );
 

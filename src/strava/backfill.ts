@@ -68,3 +68,59 @@ async function countUnarchived(db: D1Database): Promise<number> {
     .first<{ n: number }>();
   return row?.n ?? 0;
 }
+
+// Photos arrive under two key shapes: the webhook path records a single
+// `photos` entry holding a prefix, and the bulk import records a
+// `photos/<name>` entry per file. An activity with neither has no archived
+// photo, which is not the same as having none to archive.
+const UNPHOTOGRAPHED = `
+  FROM activity_sources
+  WHERE source = 'strava'
+    AND deleted_at IS NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM json_each(activity_sources.raw_keys) AS entry
+      WHERE entry.key = 'photos' OR entry.key LIKE 'photos/%'
+    )`;
+
+// A refresh re-reads the detail and runs syncPhotos, which is the only code
+// that knows how to list and download Strava's photos. The photo listing is an
+// undocumented endpoint and every activity swept costs a call against it, so
+// this walks in pages the caller drives rather than enqueuing the whole gap.
+export async function backfillStravaPhotos(
+  env: Env,
+  options: StravaBackfillOptions = {},
+): Promise<StravaBackfillResult> {
+  const perRun = options.perRun ?? PER_RUN;
+  const cursor = options.cursor ?? "";
+
+  const { results } = await env.REGISTRY.prepare(
+    `SELECT source_id ${UNPHOTOGRAPHED} AND source_id > ?1 ORDER BY source_id LIMIT ?2`,
+  )
+    .bind(cursor, perRun)
+    .all<{ source_id: string }>();
+
+  const messages: IngestMessage[] = results.map((row) => ({
+    source: "strava",
+    kind: "refresh",
+    objectId: Number(row.source_id),
+  }));
+  await sendBatched(env.INGEST_QUEUE, messages);
+
+  const remaining = await countUnphotographed(env.REGISTRY);
+  const last = results.at(-1)?.source_id;
+  const done = results.length < perRun;
+
+  return {
+    enqueued: messages.length,
+    remaining,
+    done,
+    ...(done || last === undefined ? {} : { nextCursor: last }),
+  };
+}
+
+async function countUnphotographed(db: D1Database): Promise<number> {
+  const row = await db
+    .prepare(`SELECT COUNT(*) AS n ${UNPHOTOGRAPHED}`)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}

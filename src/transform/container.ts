@@ -4,6 +4,8 @@ import type {
   DecodeResponse,
   LakeRequest,
   LakeResponse,
+  PublishRequest,
+  PublishResponse,
 } from "./protocol";
 
 export class DecodeContainer extends Container<Env> {
@@ -31,6 +33,10 @@ export interface LakeClient {
   build(request: LakeRequest): Promise<LakeResponse>;
 }
 
+export interface PublishClient {
+  summarize(request: PublishRequest): Promise<PublishResponse>;
+}
+
 // Every batch lands on the same instance. The work is CPU-bound inside the
 // container and it paces itself across its own vCPUs, so spreading batches over
 // several instances would multiply cold starts and memory without decoding any
@@ -46,6 +52,12 @@ export function decodeClient(env: Env): DecodeClient {
 export function lakeClient(env: Env): LakeClient {
   return {
     build: (request) => call(env, "lake", request),
+  };
+}
+
+export function publishClient(env: Env): PublishClient {
+  return {
+    summarize: (request) => call(env, "publish", request),
   };
 }
 

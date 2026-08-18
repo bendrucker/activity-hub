@@ -9,6 +9,7 @@ import {
 import { RateLimitedError } from "./ingest";
 import { buildLake, type LakeBuildOptions } from "./lake/build";
 import {
+  backfillStravaPhotos,
   backfillStravaStreams,
   type StravaBackfillOptions,
 } from "./strava/backfill";
@@ -219,6 +220,34 @@ export async function handleStravaBackfill(
   try {
     return Response.json(
       await backfillStravaStreams(env, { cursor, ...options }),
+    );
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+// Deliberately manual. Every activity swept costs a call to an undocumented
+// Strava endpoint, and a run wide enough to cover the archive would spend a
+// day's read budget, so nothing schedules this.
+export async function handlePhotoBackfill(
+  request: Request,
+  env: Env,
+  options: StravaBackfillOptions = {},
+): Promise<Response> {
+  if (!authorized(request, env)) {
+    return new Response("Forbidden", { status: 403 });
+  }
+
+  const params = new URL(request.url).searchParams;
+  const limit = params.get("limit");
+
+  try {
+    return Response.json(
+      await backfillStravaPhotos(env, {
+        cursor: params.get("cursor") ?? undefined,
+        ...(limit === null ? {} : { perRun: Number(limit) }),
+        ...options,
+      }),
     );
   } catch (error) {
     return errorResponse(error);

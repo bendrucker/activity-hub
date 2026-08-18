@@ -326,6 +326,44 @@ describe("consumeStravaEvent", () => {
     expect(activity).not.toBeNull();
   });
 
+  // A deleted activity leaves the staleness query at the same moment it loses
+  // its last live source, so nothing would ever select it for publish again.
+  // This message is what takes the row off the site.
+  it("enqueues publish so the deletion reaches the site", async () => {
+    const stub = stubFetch(
+      respondByPath({
+        [`/api/v3/activities/${ACTIVITY_ID}`]: () => new Response(DETAIL_JSON),
+        [`/api/v3/activities/${ACTIVITY_ID}/streams`]: () =>
+          new Response(STREAMS_JSON),
+        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () => new Response("[]"),
+      }),
+    );
+    await consumeStravaEvent(message(), testEnv, { client: apiClient(stub) });
+    const row = await sourceRow(String(ACTIVITY_ID));
+    const send = vi.spyOn(testEnv.TRANSFORM_QUEUE, "send");
+
+    await consumeStravaEvent(message({ kind: "delete" }), testEnv, {
+      client: apiClient(stubFetch(() => new Response("[]"))),
+    });
+
+    expect(send).toHaveBeenCalledWith({
+      activityId: row?.activity_id,
+      stage: "publish",
+    });
+    send.mockRestore();
+  });
+
+  it("enqueues nothing when the deleted source was never recorded", async () => {
+    const send = vi.spyOn(testEnv.TRANSFORM_QUEUE, "send");
+
+    await consumeStravaEvent(message({ kind: "delete" }), testEnv, {
+      client: apiClient(stubFetch(() => new Response("[]"))),
+    });
+
+    expect(send).not.toHaveBeenCalled();
+    send.mockRestore();
+  });
+
   it("clears deleted_at when the activity is upserted again", async () => {
     const stub = stubFetch(
       respondByPath({

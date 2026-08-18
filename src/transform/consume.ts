@@ -7,7 +7,13 @@ import {
   type Stage,
 } from "../derived";
 import { decodeClient, type DecodeClient } from "./container";
+import { enqueueActivity } from "./enqueue";
 import type { DecodeOutcome, DecodeWork } from "./protocol";
+import {
+  publishToSite,
+  type PublishOptions,
+  type PublishResult,
+} from "./publish";
 
 export interface TransformMessage {
   activityId: string;
@@ -20,12 +26,13 @@ export const TRANSFORM_QUEUE = "activity-hub-transform";
 
 const RETRY_DELAY_S = 60;
 
-export interface TransformBatchOptions {
+export interface TransformBatchOptions extends PublishOptions {
   client?: DecodeClient;
 }
 
 export interface TransformSummary {
   decoded: number;
+  published: number;
   current: number;
   skipped: number;
   failed: number;
@@ -46,6 +53,7 @@ export async function consumeTransformBatch(
 ): Promise<TransformSummary> {
   const summary: TransformSummary = {
     decoded: 0,
+    published: 0,
     current: 0,
     skipped: 0,
     failed: 0,
@@ -60,10 +68,14 @@ export async function consumeTransformBatch(
 
   for (const message of batch.messages) {
     const { activityId, stage } = message.body;
+    if (stage === "publish") {
+      await consumePublish(activityId, message, env, options, summary);
+      continue;
+    }
     if (stage !== "decode") {
-      // Named in the table and the message shape, but nothing builds them yet.
-      // Acking keeps a stray message from cycling to the dead letter queue.
-      console.warn(`transform stage ${stage} is not implemented, dropping`);
+      // The lake stage has no per-activity grain, so a message naming it is a
+      // stray. Acking keeps it from cycling to the dead letter queue.
+      console.warn(`transform stage ${stage} is not per-activity, dropping`);
       message.ack();
       continue;
     }
@@ -150,6 +162,12 @@ export async function consumeTransformBatch(
 
     try {
       await recordOutcome(env.REGISTRY, derivedOutcome(item, outcome));
+      // The staleness query would pick this up on the next sweep anyway. The
+      // chain is what makes a new ride reach the site in minutes rather than
+      // by tomorrow morning.
+      if (outcome.status === "ok") {
+        await enqueueActivity(env, item.activityId, "publish");
+      }
       count(summary, outcome);
       ackAll(item);
     } catch (error) {
@@ -162,6 +180,74 @@ export async function consumeTransformBatch(
   }
 
   return summary;
+}
+
+// One activity at a time: the container reads that activity's Parquet and
+// nothing about the work is shared across a batch, so batching would only make
+// one bad artifact everyone else's retry.
+async function consumePublish(
+  activityId: string,
+  message: Message<TransformMessage>,
+  env: Env,
+  options: TransformBatchOptions,
+  summary: TransformSummary,
+): Promise<void> {
+  let result: PublishResult;
+  try {
+    result = await publishToSite(env, activityId, options);
+  } catch (error) {
+    // The site rejected the row's shape, which no retry changes. Anything else
+    // (the container, D1, R2, a service binding that could not connect) says
+    // nothing about this activity.
+    if (!(error instanceof Error) || error.name !== "ValidationError") {
+      console.error(`failed to publish ${activityId}: ${String(error)}`);
+      message.retry({ delaySeconds: RETRY_DELAY_S });
+      summary.retried += 1;
+      return;
+    }
+    result = {
+      fingerprint: "rejected",
+      status: "failed",
+      error: error.message,
+    };
+  }
+
+  if (result.status === "current") {
+    summary.current += 1;
+    message.ack();
+    return;
+  }
+
+  try {
+    await recordOutcome(env.REGISTRY, {
+      activityId,
+      stage: "publish",
+      inputFingerprint: result.fingerprint,
+      status: result.status,
+      error: result.status === "ok" ? undefined : reason(result),
+    });
+  } catch (error) {
+    console.error(`failed to record publish ${activityId}: ${String(error)}`);
+    message.retry({ delaySeconds: RETRY_DELAY_S });
+    summary.retried += 1;
+    return;
+  }
+
+  if (result.status === "ok") {
+    summary.published += 1;
+  } else if (result.status === "skipped") {
+    summary.skipped += 1;
+  } else {
+    summary.failed += 1;
+  }
+  message.ack();
+}
+
+function reason(result: PublishResult): string | undefined {
+  if (result.status === "skipped") {
+    return result.reason;
+  }
+  return result.status === "failed" ? result.error : undefined;
 }
 
 function derivedOutcome(item: Pending, outcome: DecodeOutcome): DerivedOutcome {
