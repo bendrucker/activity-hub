@@ -11,6 +11,7 @@ import {
   SESSIONS as SESSIONS_SCHEMA,
   type Table,
 } from "./schema";
+import { powerBestsSql } from "./power";
 import { literal, quote } from "./sql";
 
 export interface LakeSources {
@@ -353,12 +354,38 @@ export const ACTIVITIES: LakeTable = {
     ORDER BY registry.started_at, registry.activity_id`,
 };
 
+// Nineteen rows per powered activity, about 81 thousand across the corpus. Too
+// few to earn a partition key: every partition costs a file, and a reader
+// asking for one duration across all years would pay for the split without
+// ever skipping a file.
+//
+// Estimated power is tagged rather than dropped, so a query comparing seasons
+// can exclude it with a WHERE clause and a query asking what the rider did on
+// a GPX-only ride still has an answer.
+export const POWER_CURVE: LakeTable = {
+  name: "power_curve",
+  sql: (sources) => `
+    SELECT
+      bests.activity_id,
+      bests.duration_s,
+      bests.watts,
+      CASE WHEN format.telemetry_format = 'gpx' THEN 'estimated' ELSE 'measured' END AS power_source
+    FROM (${powerBestsSql(scan(sources, "records", RECORDS_SCHEMA))}) AS bests
+    LEFT JOIN (
+      SELECT activity_id, source AS telemetry_format
+      FROM (${scan(sources, "meta", META_SCHEMA)})
+      WHERE kind = 'device'
+    ) AS format ON format.activity_id = bests.activity_id
+    ORDER BY bests.activity_id, bests.duration_s`,
+};
+
 export const TABLES: readonly LakeTable[] = [
   ACTIVITIES,
   RECORDS,
   LAPS,
   SESSIONS,
   TELEMETRY_META,
+  POWER_CURVE,
 ];
 
 function strava(sources: LakeSources): string {

@@ -128,6 +128,146 @@ async function recordYears(): Promise<number[]> {
   return reader.getRowObjects().map((row) => Number(row.year));
 }
 
+async function powerCurve(): Promise<Record<string, unknown>[]> {
+  const connection = await instance.connect();
+  const reader = await connection.runAndReadAll(
+    `SELECT activity_id, CAST(duration_s AS INTEGER) AS duration_s, watts, power_source
+     FROM read_parquet('${join(work, "out")}/power_curve/**/*.parquet')
+     ORDER BY activity_id, duration_s`,
+  );
+  return reader.getRowObjects();
+}
+
+const RIDE_START = new Date("2026-01-01T14:00:00.000Z");
+
+// A 1 Hz stretch of records at one wattage, starting `offset` seconds in. The
+// gap between two stretches is the absence of records, which is exactly how a
+// paused ride reaches the decode artifact.
+function effort(
+  offset: number,
+  seconds: number,
+  power: number | null,
+): TelemetryRecord[] {
+  return Array.from({ length: seconds }, (_, index) =>
+    record({
+      timestamp: new Date(RIDE_START.getTime() + (offset + index) * 1000),
+      power,
+    }),
+  );
+}
+
+test("reports the sustained wattage at every duration the ride outlasts", async () => {
+  await seed(
+    [
+      {
+        activityId: "a",
+        rawKey: "raw/wahoo/a.fit",
+        activity: activity({ records: effort(0, 600, 250) }),
+      },
+    ],
+    [registryRow("a")],
+  );
+
+  await build();
+
+  const rows = await powerCurve();
+  expect(rows.map((row) => Number(row.duration_s))).toEqual([
+    5, 10, 15, 20, 30, 45, 60, 120, 180, 300, 480, 600,
+  ]);
+  expect(rows.every((row) => Number(row.watts) === 250)).toBe(true);
+});
+
+// The zero-fill decision, pinned. Two efforts an idle ten minutes apart are
+// not a twenty-minute effort. An implementation that compresses the pause out
+// reads 300 W here, and a rider's twenty-minute best is the number the whole
+// table exists to report.
+test("counts a stop as real time at zero watts", async () => {
+  await seed(
+    [
+      {
+        activityId: "a",
+        rawKey: "raw/wahoo/a.fit",
+        activity: activity({
+          records: [...effort(0, 600, 300), ...effort(1200, 600, 300)],
+        }),
+      },
+    ],
+    [registryRow("a")],
+  );
+
+  await build();
+
+  const rows = await powerCurve();
+  expect(
+    Number(rows.find((row) => Number(row.duration_s) === 600)?.watts),
+  ).toBe(300);
+  expect(
+    Number(rows.find((row) => Number(row.duration_s) === 1200)?.watts),
+  ).toBe(150);
+});
+
+test("omits a duration the ride is shorter than", async () => {
+  await seed(
+    [
+      {
+        activityId: "a",
+        rawKey: "raw/wahoo/a.fit",
+        activity: activity({ records: effort(0, 60, 200) }),
+      },
+    ],
+    [registryRow("a")],
+  );
+
+  await build();
+
+  const durations = (await powerCurve()).map((row) => Number(row.duration_s));
+  expect(durations).toContain(60);
+  expect(durations).not.toContain(120);
+});
+
+test("tags a GPX ride's bests as estimated", async () => {
+  await seed(
+    [
+      {
+        activityId: "gpx",
+        rawKey: "raw/strava/gpx.gpx",
+        activity: activity({ source: "gpx", records: effort(0, 60, 200) }),
+      },
+      {
+        activityId: "fit",
+        rawKey: "raw/strava/fit.fit",
+        activity: activity({ records: effort(0, 60, 200) }),
+      },
+    ],
+    [registryRow("gpx"), registryRow("fit")],
+  );
+
+  await build();
+
+  expect(
+    Object.fromEntries(
+      (await powerCurve()).map((row) => [row.activity_id, row.power_source]),
+    ),
+  ).toEqual({ gpx: "estimated", fit: "measured" });
+});
+
+test("produces no rows for a ride that recorded no power", async () => {
+  await seed(
+    [
+      {
+        activityId: "a",
+        rawKey: "raw/wahoo/a.fit",
+        activity: activity({ records: effort(0, 600, null) }),
+      },
+    ],
+    [registryRow("a")],
+  );
+
+  const response = await build();
+
+  expect(response.tables.find((t) => t.name === "power_curve")?.rows).toBe(0);
+});
+
 test("unions every activity's rows into one table per grain", async () => {
   await seed(
     [
@@ -145,7 +285,14 @@ test("unions every activity's rows into one table per grain", async () => {
 
   expect(
     Object.fromEntries(response.tables.map((t) => [t.name, t.rows])),
-  ).toEqual({ activities: 2, records: 3, laps: 0, sessions: 0, meta: 2 });
+  ).toEqual({
+    activities: 2,
+    records: 3,
+    laps: 0,
+    sessions: 0,
+    meta: 2,
+    power_curve: 0,
+  });
 });
 
 test("reads telemetry provenance off the raw key that produced the rows", async () => {
