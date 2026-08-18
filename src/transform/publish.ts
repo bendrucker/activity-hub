@@ -143,10 +143,9 @@ export async function publishToSite(
   return { fingerprint, status: "ok" };
 }
 
-// The only telemetry-free path to the site: a Strava import that never got an
-// archived original, so decode permanently skips it and there is no Parquet
-// to summarize. Strava's own totals are the whole row, and the fingerprint is
-// the detail file's etag rather than a decode row's, since there is none.
+// Reached only when there is no archived original, so decode never ran and
+// there is no Parquet to summarize. The fingerprint is the detail file's
+// etag, since there is no decode row.
 async function publishFromDetailOnly(
   env: Env,
   activityId: string,

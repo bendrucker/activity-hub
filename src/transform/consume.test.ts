@@ -662,8 +662,7 @@ describe("the publish stage", () => {
   });
 
   // The 2013-2019 manual Strava entries have no archived original, so decode
-  // permanently skips them. Strava's own detail is the only source of totals
-  // this row will ever have.
+  // permanently skips them.
   it("publishes from Strava's detail alone when there is no archived original", async () => {
     await seedActivity("a1");
     await env.RAW.put(
