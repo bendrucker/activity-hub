@@ -29,15 +29,17 @@
     "WAHOO_USER_ID": "587205",
   },
   "triggers": {
-    // 06:00 sweeps Strava and enqueues stale transform work. Strava drops a
-    // webhook event after three failed deliveries, so the sweep bounds any
-    // loss to a day's delay.
+    // 06:00 sweeps Strava. Strava drops a webhook event after three failed
+    // deliveries, so the sweep bounds any loss to a day's delay.
     //
-    // 08:00 rebuilds the lake. It is a separate trigger because the 06:00
-    // sweep only enqueues: decoding drains through the queue afterwards, and a
-    // rebuild in the same invocation would read the artifacts that sweep was
-    // about to replace. Two hours is far more than a full backlog needs.
-    "crons": ["0 6 * * *", "0 8 * * *"],
+    // 08:00 rebuilds the lake. It is a separate trigger because a sweep only
+    // enqueues: decoding drains through the queue afterwards, and a rebuild in
+    // the same invocation would read the artifacts that sweep was about to
+    // replace. Two hours is far more than a full backlog needs.
+    //
+    // :30 every hour enqueues stale transform work. See SWEEP_CRON for why
+    // this one runs hourly while the others run daily.
+    "crons": ["0 6 * * *", "0 8 * * *", "30 * * * *"],
   },
   "kv_namespaces": [
     { "binding": "TOKENS", "id": "bc72d180846d490395293eb92370f99b" },

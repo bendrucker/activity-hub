@@ -15,6 +15,17 @@ const SEND_BATCH = 100;
 // of waiting for the sweep to reach it.
 export const RECONCILE_LIMIT = 1000;
 
+// Matches the third entry in wrangler.jsonc's crons. The scheduled handler
+// serves every trigger and tells them apart by this expression, so the two have
+// to stay in step.
+//
+// Hourly rather than daily because the limit above is per run, and a stage
+// whose schema version changed leaves the entire corpus stale at once. Waiting
+// a day per thousand activities makes a version bump a week-long migration.
+// Selection depends on the previous batch having been consumed, so running this
+// in a loop would keep reselecting the same oldest rows.
+export const SWEEP_CRON = "30 * * * *";
+
 export async function enqueueTransform(
   queue: Queue<TransformMessage>,
   messages: readonly TransformMessage[],

@@ -2,8 +2,10 @@ import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SECRETS } from "../test/secrets";
 import { readConsumeLog } from "./consumelog";
-import { consumeBatch } from "./index";
+import worker, { consumeBatch } from "./index";
 import { RateLimitedError, type IngestMessage } from "./ingest";
+import { SWEEP_CRON } from "./transform/enqueue";
+import type { TransformMessage } from "./transform/consume";
 
 const testEnv: Env = { ...env, ...SECRETS };
 
@@ -224,6 +226,50 @@ describe("consumeBatch", () => {
     const entries = await readConsumeLog(env.TOKENS);
     expect(entries.map((entry) => entry.outcome)).toEqual([
       "skipped: third-party sync stub",
+    ]);
+  });
+});
+
+describe("the scheduled handler", () => {
+  // The sweep's own trigger has to return before the Strava reconciliation,
+  // which needs credentials and the network. Losing that branch would also
+  // drop the corpus back to a daily sweep cadence with nothing to show for it.
+  it("runs only the transform sweep on the sweep cron", async () => {
+    const seeded = "2026-01-01T00:00:00.000Z";
+    await env.REGISTRY.prepare(
+      `INSERT INTO activities (activity_id, started_at, timezone, sport, duration_s, created_at, updated_at)
+       VALUES ('a1', '2026-01-01T14:00:00.000Z', 'America/Los_Angeles', 'ride', 3600, ?1, ?1)`,
+    )
+      .bind(seeded)
+      .run();
+    await env.REGISTRY.prepare(
+      `INSERT INTO activity_sources (source, source_id, activity_id, raw_keys, created_at, updated_at, deleted_at)
+       VALUES ('strava', '9001', 'a1', '{}', ?1, ?1, NULL)`,
+    )
+      .bind(seeded)
+      .run();
+
+    const sent: TransformMessage[] = [];
+    const sweepEnv: Env = {
+      ...testEnv,
+      TRANSFORM_QUEUE: {
+        sendBatch: (messages: Iterable<{ body: TransformMessage }>) => {
+          for (const message of messages) {
+            sent.push(message.body);
+          }
+          return Promise.resolve();
+        },
+      } as unknown as Env["TRANSFORM_QUEUE"],
+    };
+
+    await worker.scheduled(
+      { cron: SWEEP_CRON, scheduledTime: 0, noRetry: () => undefined },
+      sweepEnv,
+    );
+
+    expect(sent).toEqual([
+      { activityId: "a1", stage: "decode" },
+      { activityId: "a1", stage: "publish" },
     ]);
   });
 });
