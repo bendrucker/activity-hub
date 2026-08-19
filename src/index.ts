@@ -32,7 +32,7 @@ import {
   TRANSFORM_QUEUE,
   type TransformMessage,
 } from "./transform/consume";
-import { reconcileTransform } from "./transform/enqueue";
+import { reconcileTransform, SWEEP_CRON } from "./transform/enqueue";
 import { consumeWahooEvent } from "./wahoo/consume";
 import {
   handleAuthorize as wahooAuthorize,
@@ -232,10 +232,9 @@ export default {
     return new Response("Not Found", { status: 404 });
   },
 
-  // Two independent sweeps share the 06:00 cron. The transform sweep reads what the
-  // registry already holds, so a Strava outage has no bearing on whether there
-  // is decoding to do, and neither failure may cancel the other. Both run, then
-  // the run fails if either did.
+  // One job per trigger, told apart by the cron expression. The transform
+  // sweep reads what the registry already holds, so it needs nothing from
+  // Strava and runs on its own schedule.
   async scheduled(controller, env): Promise<void> {
     if (controller.cron === LAKE_CRON) {
       const { registry, response } = await buildLake(env);
@@ -245,7 +244,11 @@ export default {
       return;
     }
 
-    const failures: unknown[] = [];
+    if (controller.cron === SWEEP_CRON) {
+      const enqueued = await reconcileTransform(env);
+      console.log(`transform reconciliation enqueued ${enqueued} messages`);
+      return;
+    }
 
     try {
       const { enqueued, refreshed } = await reconcileStravaActivities(env);
@@ -253,24 +256,12 @@ export default {
         `Strava reconciliation enqueued ${enqueued} new and ${refreshed} refresh messages`,
       );
     } catch (error) {
-      if (error instanceof RateLimitedError) {
-        // The next daily run resumes from the same high-water mark, so
-        // there's nothing to retry now.
-        console.warn("Strava reconciliation rate limited, ending run");
-      } else {
-        failures.push(error);
+      if (!(error instanceof RateLimitedError)) {
+        throw error;
       }
-    }
-
-    try {
-      const enqueued = await reconcileTransform(env);
-      console.log(`transform reconciliation enqueued ${enqueued} messages`);
-    } catch (error) {
-      failures.push(error);
-    }
-
-    if (failures.length > 0) {
-      throw new AggregateError(failures, "scheduled reconciliation failed");
+      // The next daily run resumes from the same high-water mark, so there's
+      // nothing to retry now.
+      console.warn("Strava reconciliation rate limited, ending run");
     }
   },
 
