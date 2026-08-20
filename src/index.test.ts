@@ -1,9 +1,11 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { stubQueue } from "../test/queue-stub";
 import { SECRETS } from "../test/secrets";
 import { readConsumeLog } from "./consumelog";
 import worker, { consumeBatch } from "./index";
 import { RateLimitedError, type IngestMessage } from "./ingest";
+import { PHOTO_CRON } from "./strava/backfill";
 import { SWEEP_CRON } from "./transform/enqueue";
 import type { TransformMessage } from "./transform/consume";
 
@@ -271,5 +273,46 @@ describe("the scheduled handler", () => {
       { activityId: "a1", stage: "decode" },
       { activityId: "a1", stage: "publish" },
     ]);
+  });
+
+  // It must enqueue photos rather than refreshes. A refresh spends two further
+  // reads per activity.
+  it("drains only the photo backfill targets on the photo cron", async () => {
+    const seeded = "2026-01-01T00:00:00.000Z";
+    await env.REGISTRY.batch([
+      env.REGISTRY.prepare("DELETE FROM activity_sources"),
+      env.REGISTRY.prepare("DELETE FROM activities"),
+      env.REGISTRY.prepare("DELETE FROM photo_backfill_targets"),
+    ]);
+    await env.REGISTRY.prepare(
+      `INSERT INTO activities (activity_id, started_at, timezone, sport, duration_s, created_at, updated_at)
+       VALUES ('a1', '2026-01-01T14:00:00.000Z', 'America/Los_Angeles', 'ride', 3600, ?1, ?1)`,
+    )
+      .bind(seeded)
+      .run();
+    await env.REGISTRY.prepare(
+      `INSERT INTO activity_sources (source, source_id, activity_id, raw_keys, created_at, updated_at)
+       VALUES ('strava', '9001', 'a1', '{}', ?1, ?1)`,
+    )
+      .bind(seeded)
+      .run();
+    await env.REGISTRY.prepare(
+      "INSERT INTO photo_backfill_targets (source_id, added_at) VALUES ('9001', ?1)",
+    )
+      .bind(seeded)
+      .run();
+
+    const ingest = stubQueue<IngestMessage>();
+    const transform = stubQueue<TransformMessage>();
+
+    await worker.scheduled(
+      { cron: PHOTO_CRON, scheduledTime: 0, noRetry: () => undefined },
+      { ...testEnv, INGEST_QUEUE: ingest, TRANSFORM_QUEUE: transform },
+    );
+
+    expect(ingest.messages).toEqual([
+      { source: "strava", kind: "photos", objectId: 9001 },
+    ]);
+    expect(transform.messages).toEqual([]);
   });
 });

@@ -48,7 +48,17 @@ export interface StravaRefreshMessage {
   objectId: number;
 }
 
-export type StravaIngestMessage = StravaWebhookMessage | StravaRefreshMessage;
+// The photo listing is one Strava read and the bytes come from the CDN, which
+// is not billed at all. A refresh costs two more reads for detail and streams,
+// neither of which the photo backfill wants, so it gets its own kind.
+export interface StravaPhotosMessage {
+  source: "strava";
+  kind: "photos";
+  objectId: number;
+}
+
+export type StravaIngestMessage =
+  StravaWebhookMessage | StravaRefreshMessage | StravaPhotosMessage;
 
 // Wahoo webhook events carry the full workout summary, FIT file URL
 // included, so the message carries it too and the consumer never calls the

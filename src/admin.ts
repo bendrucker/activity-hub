@@ -13,6 +13,7 @@ import {
   backfillStravaPhotos,
   backfillStravaStreams,
   PER_RUN,
+  seedPhotoBackfillTargets,
   type StravaBackfillOptions,
 } from "./strava/backfill";
 import {
@@ -48,6 +49,14 @@ function errorResponse(error: unknown): Response {
     },
     { status: 500 },
   );
+}
+
+// The body validators reject by throwing, and the message they throw is the
+// whole explanation of what the caller got wrong.
+function badRequest(error: unknown): Response {
+  return new Response(error instanceof Error ? error.message : String(error), {
+    status: 400,
+  });
 }
 
 export async function handleReconcile(
@@ -273,10 +282,7 @@ export async function handlePhotoBackfill(
     try {
       ids = listedIds(JSON.parse(body));
     } catch (error) {
-      return new Response(
-        error instanceof Error ? error.message : String(error),
-        { status: 400 },
-      );
+      return badRequest(error);
     }
   }
 
@@ -290,6 +296,30 @@ export async function handlePhotoBackfill(
           })
         : await backfillListedStravaPhotos(env, ids),
     );
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+// Seeding spends no Strava read, so the per-request cap bounds nothing but the
+// D1 batch. It is kept at PER_RUN anyway so both endpoints take the same page.
+export async function handlePhotoBackfillTargets(
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  if (!authorized(request, env)) {
+    return new Response("Forbidden", { status: 403 });
+  }
+
+  let ids: string[];
+  try {
+    ids = listedIds(await request.json());
+  } catch (error) {
+    return badRequest(error);
+  }
+
+  try {
+    return Response.json(await seedPhotoBackfillTargets(env, ids));
   } catch (error) {
     return errorResponse(error);
   }

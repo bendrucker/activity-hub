@@ -7,6 +7,7 @@ import { SECRETS } from "../test/secrets";
 import {
   handleConsumeLog,
   handlePhotoBackfill,
+  handlePhotoBackfillTargets,
   handlePipeline,
   handleReconcile,
   handleStravaBackfill,
@@ -359,6 +360,94 @@ describe("handlePhotoBackfill", () => {
       photoBackfillRequest("Bearer admin-secret", undefined, {
         ids: ["101; DROP TABLE activities"],
       }),
+      testEnv(),
+    );
+
+    expect(response.status).toBe(400);
+  });
+});
+
+function photoTargetsRequest(authorization?: string, body?: unknown): Request {
+  return new Request("https://hub.example/admin/photo-backfill/targets", {
+    method: "POST",
+    headers: authorization ? { Authorization: authorization } : {},
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+}
+
+describe("handlePhotoBackfillTargets", () => {
+  beforeEach(async () => {
+    await env.REGISTRY.prepare("DELETE FROM photo_backfill_targets").run();
+  });
+
+  it("rejects a request without an Authorization header", async () => {
+    const response = await handlePhotoBackfillTargets(
+      photoTargetsRequest(undefined, { ids: ["101"] }),
+      testEnv(),
+    );
+    expect(response.status).toBe(403);
+  });
+
+  it("records the ids the caller named", async () => {
+    const response = await handlePhotoBackfillTargets(
+      photoTargetsRequest("Bearer admin-secret", { ids: ["101", "102"] }),
+      testEnv(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      added: 2,
+      alreadyPresent: 0,
+      pending: 2,
+    });
+  });
+
+  // The file goes up in fourteen pages, so a page resent after a failed
+  // request has to cost nothing.
+  it("is idempotent on a page that already landed", async () => {
+    await handlePhotoBackfillTargets(
+      photoTargetsRequest("Bearer admin-secret", { ids: ["101", "102"] }),
+      testEnv(),
+    );
+
+    const response = await handlePhotoBackfillTargets(
+      photoTargetsRequest("Bearer admin-secret", { ids: ["102", "103"] }),
+      testEnv(),
+    );
+
+    expect(await response.json()).toEqual({
+      added: 1,
+      alreadyPresent: 1,
+      pending: 3,
+    });
+  });
+
+  it("rejects a page longer than the per-run limit", async () => {
+    const ids = Array.from({ length: PER_RUN + 1 }, (_, i) => String(i + 1));
+
+    const response = await handlePhotoBackfillTargets(
+      photoTargetsRequest("Bearer admin-secret", { ids }),
+      testEnv(),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("further pages");
+  });
+
+  it("rejects ids that are not Strava numeric ids", async () => {
+    const response = await handlePhotoBackfillTargets(
+      photoTargetsRequest("Bearer admin-secret", {
+        ids: ["101; DROP TABLE activities"],
+      }),
+      testEnv(),
+    );
+
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects a request with no body", async () => {
+    const response = await handlePhotoBackfillTargets(
+      photoTargetsRequest("Bearer admin-secret"),
       testEnv(),
     );
 

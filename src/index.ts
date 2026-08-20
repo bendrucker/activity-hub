@@ -4,6 +4,7 @@ import {
   handlePipeline,
   handleReconcile,
   handlePhotoBackfill,
+  handlePhotoBackfillTargets,
   handleStravaBackfill,
   handleTransform,
   handleWahooBackfill,
@@ -17,6 +18,7 @@ import {
   type ConsumeLogEntry,
 } from "./consumelog";
 import { RateLimitedError, type IngestMessage } from "./ingest";
+import { drainPhotoBackfillTargets, PHOTO_CRON } from "./strava/backfill";
 import { consumeStravaEvent } from "./strava/consume";
 import { reconcileStravaActivities } from "./strava/reconcile";
 import {
@@ -187,6 +189,12 @@ export default {
       }
       return new Response("Method Not Allowed", { status: 405 });
     }
+    if (url.pathname === "/admin/photo-backfill/targets") {
+      if (request.method === "POST") {
+        return handlePhotoBackfillTargets(request, env);
+      }
+      return new Response("Method Not Allowed", { status: 405 });
+    }
     if (url.pathname === "/admin/wahoo-backfill") {
       if (request.method === "POST") {
         return handleWahooBackfill(request, env);
@@ -247,6 +255,15 @@ export default {
     if (controller.cron === SWEEP_CRON) {
       const enqueued = await reconcileTransform(env);
       console.log(`transform reconciliation enqueued ${enqueued} messages`);
+      return;
+    }
+
+    if (controller.cron === PHOTO_CRON) {
+      const { enqueued, dropped, unknown, pending } =
+        await drainPhotoBackfillTargets(env);
+      console.log(
+        `photo backfill enqueued ${enqueued}, dropped ${dropped} already-archived and ${unknown} unregistered targets, ${pending} left`,
+      );
       return;
     }
 

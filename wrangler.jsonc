@@ -39,7 +39,11 @@
     //
     // :30 every hour enqueues stale transform work. See SWEEP_CRON for why
     // this one runs hourly while the others run daily.
-    "crons": ["0 6 * * *", "0 8 * * *", "30 * * * *"],
+    //
+    // :15 every hour trickles ten activities through the Strava photo
+    // backfill, clear of the sweep and the dailies. See PHOTO_CRON for why the
+    // job is paced this slowly.
+    "crons": ["0 6 * * *", "0 8 * * *", "30 * * * *", "15 * * * *"],
   },
   "kv_namespaces": [
     { "binding": "TOKENS", "id": "bc72d180846d490395293eb92370f99b" },

@@ -83,6 +83,36 @@ export async function upsertSourceRecord(
   return { activityId: plan.activity.activityId, outcome: plan.outcome };
 }
 
+// Records raw keys for a source already in the registry, for a caller that
+// archived bytes without the detail an upsert needs. Answers whether the merge
+// wrote anything.
+//
+// Unlike the upsert path this leaves `deleted_at` alone. A fresh upsert means
+// the source is live upstream again and deliberately reverses a soft delete.
+// Finding a photo says nothing about whether the activity still exists.
+export async function mergeRawKeys(
+  db: D1Database,
+  source: Source,
+  sourceId: string,
+  keys: Record<string, string>,
+): Promise<boolean> {
+  // Both the merge and the did-anything-change test run in SQL. Reading the row
+  // first and writing back a merged copy would drop a key another writer added
+  // in between, costing a re-fetch of bytes already in R2. The WHERE clause
+  // matches no row when the source is absent and none when every key is already
+  // recorded, which is the same answer the caller wants in both cases.
+  const row = await db
+    .prepare(
+      `UPDATE activity_sources SET raw_keys = json_patch(raw_keys, ?1), updated_at = ?2
+       WHERE source = ?3 AND source_id = ?4
+         AND raw_keys != json_patch(raw_keys, ?1)
+       RETURNING source_id`,
+    )
+    .bind(JSON.stringify(keys), new Date().toISOString(), source, sourceId)
+    .first<{ source_id: string }>();
+  return row !== null;
+}
+
 // Answers with the activity the source belonged to, or null when the source
 // was never recorded. A deleted activity drops out of every staleness query,
 // so the deletion has to be carried downstream by whoever performed it.
