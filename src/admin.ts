@@ -231,9 +231,8 @@ export async function handleStravaBackfill(
 // Deliberately manual. Every activity swept costs a call to an undocumented
 // Strava endpoint, and a run wide enough to cover the archive would spend a
 // day's read budget, so nothing schedules this.
-// A body of `{"ids": [...]}` aims the run at those activities instead of
-// walking the whole gap. The list goes in the body rather than the query string
-// because a page of ids is a few kilobytes.
+// A body of `{"ids": [...]}` aims the run at those activities. The list goes
+// in the body because a page of ids is a few kilobytes.
 function listedIds(body: unknown): string[] {
   if (typeof body !== "object" || body === null || !("ids" in body)) {
     throw new Error("body must be an object with an ids array");
@@ -245,9 +244,9 @@ function listedIds(body: unknown): string[] {
   if (!ids.every((id) => typeof id === "string" && /^\d+$/.test(id))) {
     throw new Error("ids must be Strava numeric ids, as strings");
   }
-  // Refusing an over-long page rather than trimming it: a caller that got a
-  // short enqueued count back would have no way to tell a trim from a page
-  // whose activities were already archived.
+  // Refusing an over-long page: a caller that got a short enqueued count back
+  // would have no way to tell a trim from a page whose activities were already
+  // archived.
   if (ids.length > PER_RUN) {
     throw new Error(
       `ids is limited to ${PER_RUN} per request, send the rest as further pages`,
