@@ -289,9 +289,33 @@ describe("handlePhotoBackfill", () => {
       enqueued: 1,
       skipped: 0,
       remaining: 2,
+      done: true,
     });
     expect(queue.messages).toEqual([
       { source: "strava", kind: "refresh", objectId: 102 },
+    ]);
+  });
+
+  // `IN` matches a repeated id once, so counting skipped against the raw list
+  // would report a skip for an activity that was enqueued.
+  it("counts a repeated id once", async () => {
+    const queue = stubQueue<StravaIngestMessage>();
+
+    const response = await handlePhotoBackfill(
+      photoBackfillRequest("Bearer admin-secret", undefined, {
+        ids: ["101", "101"],
+      }),
+      testEnv({ INGEST_QUEUE: queue }),
+    );
+
+    expect(await response.json()).toEqual({
+      enqueued: 1,
+      skipped: 0,
+      remaining: 1,
+      done: true,
+    });
+    expect(queue.messages).toEqual([
+      { source: "strava", kind: "refresh", objectId: 101 },
     ]);
   });
 
@@ -313,6 +337,7 @@ describe("handlePhotoBackfill", () => {
       enqueued: 0,
       skipped: 1,
       remaining: 0,
+      done: true,
     });
     expect(queue.messages).toEqual([]);
   });

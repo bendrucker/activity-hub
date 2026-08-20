@@ -5,6 +5,16 @@ import { sendBatched, type IngestMessage } from "../ingest";
 // queue and park the tail. The caller walks the gap by looping on nextCursor.
 export const PER_RUN = 100;
 
+function refreshMessages(
+  rows: readonly { source_id: string }[],
+): IngestMessage[] {
+  return rows.map((row) => ({
+    source: "strava",
+    kind: "refresh",
+    objectId: Number(row.source_id),
+  }));
+}
+
 export interface StravaBackfillOptions {
   cursor?: string;
   perRun?: number;
@@ -43,11 +53,7 @@ export async function backfillStravaStreams(
     .bind(cursor, perRun)
     .all<{ source_id: string }>();
 
-  const messages: IngestMessage[] = results.map((row) => ({
-    source: "strava",
-    kind: "refresh",
-    objectId: Number(row.source_id),
-  }));
+  const messages = refreshMessages(results);
   await sendBatched(env.INGEST_QUEUE, messages);
 
   const remaining = await countUnarchived(env.REGISTRY);
@@ -99,11 +105,7 @@ export async function backfillStravaPhotos(
     .bind(cursor, perRun)
     .all<{ source_id: string }>();
 
-  const messages: IngestMessage[] = results.map((row) => ({
-    source: "strava",
-    kind: "refresh",
-    objectId: Number(row.source_id),
-  }));
+  const messages = refreshMessages(results);
   await sendBatched(env.INGEST_QUEUE, messages);
 
   const remaining = await countUnphotographed(env.REGISTRY);
@@ -125,44 +127,48 @@ async function countUnphotographed(db: D1Database): Promise<number> {
   return row?.n ?? 0;
 }
 
-export interface ListedPhotoBackfillResult {
-  enqueued: number;
+export interface ListedPhotoBackfillResult extends StravaBackfillResult {
   skipped: number;
-  remaining: number;
 }
 
-// An activity with no photos never gains a `photos` key, so it never leaves the
-// population above and the cursor walk re-reads it on every future run. The
-// bulk export's Media column says which activities have photos, so a caller
-// holding it can name them and skip the rest: against the 2026-07-16 export
-// that was 2,631 of 4,016 rows never worth a Strava read.
+// An activity with no photos never gains a `photos` key, so it never leaves
+// UNPHOTOGRAPHED and the cursor walk re-reads it on every future run. The bulk
+// export's Media column says which activities have photos, so a caller holding
+// it can name them and skip the rest: against the 2026-07-16 export that was
+// 2,631 of 4,016 rows never worth a Strava read.
 //
-// The named ids are still filtered through UNPHOTOGRAPHED, so re-sending a page
-// that already landed costs one query rather than a Strava read per activity.
+// The named ids are still filtered through UNPHOTOGRAPHED, so an id archived by
+// an earlier page costs one query rather than a Strava read. An id that
+// refreshed to zero photos gained no key, so it stays selectable and a resend
+// does spend a read on it.
 export async function backfillListedStravaPhotos(
   env: Env,
   ids: readonly string[],
 ): Promise<ListedPhotoBackfillResult> {
-  const placeholders = ids.map((_, index) => `?${index + 1}`).join(", ");
+  // Deduped before the query because `IN` matches a repeated id once, which
+  // would leave skipped counting a difference the caller never asked for.
+  const named = [...new Set(ids)];
+  const placeholders = named.map((_, index) => `?${index + 1}`).join(", ");
   const { results } = await env.REGISTRY.prepare(
     `SELECT source_id ${UNPHOTOGRAPHED} AND source_id IN (${placeholders}) ORDER BY source_id`,
   )
-    .bind(...ids)
+    .bind(...named)
     .all<{ source_id: string }>();
 
-  const messages: IngestMessage[] = results.map((row) => ({
-    source: "strava",
-    kind: "refresh",
-    objectId: Number(row.source_id),
-  }));
-  await sendBatched(env.INGEST_QUEUE, messages);
+  const messages = refreshMessages(results);
+  const [, remaining] = await Promise.all([
+    sendBatched(env.INGEST_QUEUE, messages),
+    countUnphotographed(env.REGISTRY),
+  ]);
 
   return {
     enqueued: messages.length,
     // Anything the caller named that this did not enqueue: already archived,
     // soft-deleted, or not a Strava row at all. A page that is entirely skipped
     // is how a re-run reports itself.
-    skipped: ids.length - messages.length,
-    remaining: await countUnphotographed(env.REGISTRY),
+    skipped: named.length - messages.length,
+    remaining,
+    // The caller's list is the whole run, so there is no next page to ask for.
+    done: true,
   };
 }

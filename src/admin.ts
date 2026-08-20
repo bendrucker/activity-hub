@@ -228,9 +228,6 @@ export async function handleStravaBackfill(
   }
 }
 
-// Deliberately manual. Every activity swept costs a call to an undocumented
-// Strava endpoint, and a run wide enough to cover the archive would spend a
-// day's read budget, so nothing schedules this.
 // A body of `{"ids": [...]}` aims the run at those activities. The list goes
 // in the body because a page of ids is a few kilobytes.
 function listedIds(body: unknown): string[] {
@@ -255,6 +252,9 @@ function listedIds(body: unknown): string[] {
   return ids as string[];
 }
 
+// Deliberately manual. Every activity swept costs a call to an undocumented
+// Strava endpoint, and a run wide enough to cover the archive would spend a
+// day's read budget, so nothing schedules this.
 export async function handlePhotoBackfill(
   request: Request,
   env: Env,
@@ -268,27 +268,27 @@ export async function handlePhotoBackfill(
   const limit = params.get("limit");
 
   const body = await request.text();
+  let ids: string[] | null = null;
   if (body.trim() !== "") {
-    let ids: string[];
     try {
       ids = listedIds(JSON.parse(body));
     } catch (error) {
-      return new Response(String(error), { status: 400 });
-    }
-    try {
-      return Response.json(await backfillListedStravaPhotos(env, ids));
-    } catch (error) {
-      return errorResponse(error);
+      return new Response(
+        error instanceof Error ? error.message : String(error),
+        { status: 400 },
+      );
     }
   }
 
   try {
     return Response.json(
-      await backfillStravaPhotos(env, {
-        cursor: params.get("cursor") ?? undefined,
-        ...(limit === null ? {} : { perRun: Number(limit) }),
-        ...options,
-      }),
+      ids === null
+        ? await backfillStravaPhotos(env, {
+            cursor: params.get("cursor") ?? undefined,
+            ...(limit === null ? {} : { perRun: Number(limit) }),
+            ...options,
+          })
+        : await backfillListedStravaPhotos(env, ids),
     );
   } catch (error) {
     return errorResponse(error);
