@@ -1,7 +1,11 @@
 import { env } from "cloudflare:test";
 import { decodeTime } from "ulid";
 import { beforeEach, describe, expect, it } from "vitest";
-import { upsertSourceRecord, type SourceRecord } from "./registry";
+import {
+  mergeRawKeys,
+  upsertSourceRecord,
+  type SourceRecord,
+} from "./registry";
 
 const START = "2026-07-01T14:00:00.000Z";
 
@@ -173,5 +177,72 @@ describe("upsertSourceRecord", () => {
     const result = await upsertSourceRecord(env.REGISTRY, wahoo());
     expect(result.outcome).toBe("attached");
     expect(result.activityId).toBe(near.activityId);
+  });
+});
+
+describe("mergeRawKeys", () => {
+  beforeEach(async () => {
+    await env.REGISTRY.batch([
+      env.REGISTRY.prepare("DELETE FROM activity_sources"),
+      env.REGISTRY.prepare("DELETE FROM activities"),
+    ]);
+  });
+
+  async function sourceRow(): Promise<Record<string, unknown>> {
+    const row = await env.REGISTRY.prepare(
+      "SELECT * FROM activity_sources WHERE source = 'strava' AND source_id = '12345'",
+    ).first();
+    return row!;
+  }
+
+  it("adds a key without displacing the ones already recorded", async () => {
+    await upsertSourceRecord(env.REGISTRY, strava());
+
+    const merged = await mergeRawKeys(env.REGISTRY, "strava", "12345", {
+      photos: "raw/strava/activities/12345/photos/",
+    });
+
+    expect(merged).toBe(true);
+    expect(JSON.parse((await sourceRow()).raw_keys as string)).toEqual({
+      detail: "raw/strava/12345/detail.json",
+      photos: "raw/strava/activities/12345/photos/",
+    });
+  });
+
+  // The upsert path clears deleted_at deliberately: a fresh upsert means the
+  // source is live upstream again. Archiving a photo is not that signal, and
+  // resurrecting the row here would republish an activity deleted on purpose.
+  it("leaves a soft delete in place", async () => {
+    await upsertSourceRecord(env.REGISTRY, strava());
+    await env.REGISTRY.prepare(
+      "UPDATE activity_sources SET deleted_at = ?1 WHERE source = 'strava' AND source_id = '12345'",
+    )
+      .bind(START)
+      .run();
+
+    const merged = await mergeRawKeys(env.REGISTRY, "strava", "12345", {
+      photos: "raw/strava/activities/12345/photos/",
+    });
+
+    expect(merged).toBe(true);
+    expect((await sourceRow()).deleted_at).toBe(START);
+  });
+
+  it("writes nothing when every key is already recorded", async () => {
+    await upsertSourceRecord(env.REGISTRY, strava());
+    const before = (await sourceRow()).updated_at;
+
+    const merged = await mergeRawKeys(env.REGISTRY, "strava", "12345", {
+      detail: "raw/strava/12345/detail.json",
+    });
+
+    expect(merged).toBe(false);
+    expect((await sourceRow()).updated_at).toBe(before);
+  });
+
+  it("answers false for a source that was never recorded", async () => {
+    expect(
+      await mergeRawKeys(env.REGISTRY, "strava", "99999", { photos: "p/" }),
+    ).toBe(false);
   });
 });

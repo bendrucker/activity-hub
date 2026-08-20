@@ -83,6 +83,48 @@ export async function upsertSourceRecord(
   return { activityId: plan.activity.activityId, outcome: plan.outcome };
 }
 
+// Records raw keys for a source already in the registry, for a caller that
+// archived bytes without the detail an upsert needs. Answers whether the merge
+// wrote anything.
+//
+// Unlike the upsert path this leaves `deleted_at` alone. A fresh upsert means
+// the source is live upstream again and deliberately reverses a soft delete.
+// Finding a photo says nothing about whether the activity still exists.
+export async function mergeRawKeys(
+  db: D1Database,
+  source: Source,
+  sourceId: string,
+  keys: Record<string, string>,
+): Promise<boolean> {
+  const existing = await db
+    .prepare(
+      "SELECT raw_keys FROM activity_sources WHERE source = ?1 AND source_id = ?2",
+    )
+    .bind(source, sourceId)
+    .first<{ raw_keys: string }>();
+  if (existing === null) {
+    return false;
+  }
+
+  const rawKeys = JSON.parse(existing.raw_keys) as Record<string, string>;
+  if (Object.entries(keys).every(([key, value]) => rawKeys[key] === value)) {
+    return false;
+  }
+
+  await db
+    .prepare(
+      "UPDATE activity_sources SET raw_keys = ?1, updated_at = ?2 WHERE source = ?3 AND source_id = ?4",
+    )
+    .bind(
+      JSON.stringify({ ...rawKeys, ...keys }),
+      new Date().toISOString(),
+      source,
+      sourceId,
+    )
+    .run();
+  return true;
+}
+
 // Answers with the activity the source belonged to, or null when the source
 // was never recorded. A deleted activity drops out of every staleness query,
 // so the deletion has to be carried downstream by whoever performed it.

@@ -13,6 +13,7 @@ import {
   backfillStravaPhotos,
   backfillStravaStreams,
   PER_RUN,
+  seedPhotoBackfillTargets,
   type StravaBackfillOptions,
 } from "./strava/backfill";
 import {
@@ -290,6 +291,35 @@ export async function handlePhotoBackfill(
           })
         : await backfillListedStravaPhotos(env, ids),
     );
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+// Seeding spends no Strava read, so the per-request cap bounds nothing but the
+// D1 batch. It is kept at PER_RUN anyway so both endpoints take the same page.
+export async function handlePhotoBackfillTargets(
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  if (!authorized(request, env)) {
+    return new Response("Forbidden", { status: 403 });
+  }
+
+  let ids: string[];
+  try {
+    ids = listedIds(await request.json());
+  } catch (error) {
+    return new Response(
+      error instanceof Error ? error.message : String(error),
+      {
+        status: 400,
+      },
+    );
+  }
+
+  try {
+    return Response.json(await seedPhotoBackfillTargets(env, ids));
   } catch (error) {
     return errorResponse(error);
   }

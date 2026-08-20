@@ -140,17 +140,17 @@ The consumer re-reads raw keys from the registry rather than trusting the messag
 
 Inventory of every credential the system needs and where it lives.
 
-| Secret                                            | Location                                                         | Consumer                                                                                                                                                                          |
-| ------------------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ADMIN_TOKEN`                                     | Worker secret (`wrangler secret put`)                            | Manual triggers (`POST /admin/reconcile`, `POST /admin/wahoo-backfill`, `POST /admin/strava-backfill`, `POST /admin/photo-backfill`, `POST /admin/transform`, `POST /admin/lake`) |
-| `CLOUDFLARE_API_TOKEN`                            | GitHub Actions repo secret, and a Terraform output for local use | `deploy.yml` (migrations + `wrangler deploy`), and `wrangler` from a laptop                                                                                                       |
-| `STRAVA_CLIENT_SECRET`                            | Worker secret (`wrangler secret put`)                            | Strava OAuth token refresh and webhook subscription management                                                                                                                    |
-| `STRAVA_VERIFY_TOKEN`                             | Worker secret (`wrangler secret put`)                            | Webhook subscription validation ([#8](https://github.com/bendrucker/activity-hub/issues/8))                                                                                       |
-| `WAHOO_CLIENT_ID` / `WAHOO_CLIENT_SECRET`         | Worker secrets (`wrangler secret put`)                           | Wahoo OAuth + webhooks ([#11](https://github.com/bendrucker/activity-hub/issues/11))                                                                                              |
-| `WAHOO_WEBHOOK_TOKEN`                             | Worker secret (`wrangler secret put`)                            | Wahoo webhook receiver ([#11](https://github.com/bendrucker/activity-hub/issues/11))                                                                                              |
-| `R2_ACCOUNT_ID`                                   | Worker secret (`wrangler secret put`)                            | Decode container's S3 endpoint                                                                                                                                                    |
-| `R2_RAW_ACCESS_KEY_ID` / `..._SECRET_ACCESS_KEY`  | Worker secrets (`wrangler secret put`)                           | Decode container reading `activity-hub-raw`                                                                                                                                       |
-| `R2_LAKE_ACCESS_KEY_ID` / `..._SECRET_ACCESS_KEY` | Worker secrets (`wrangler secret put`)                           | Decode container writing `activity-hub-lake`                                                                                                                                      |
+| Secret                                            | Location                                                         | Consumer                                                                                                                                                                                                                |
+| ------------------------------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ADMIN_TOKEN`                                     | Worker secret (`wrangler secret put`)                            | Manual triggers (`POST /admin/reconcile`, `POST /admin/wahoo-backfill`, `POST /admin/strava-backfill`, `POST /admin/photo-backfill`, `POST /admin/photo-backfill/targets`, `POST /admin/transform`, `POST /admin/lake`) |
+| `CLOUDFLARE_API_TOKEN`                            | GitHub Actions repo secret, and a Terraform output for local use | `deploy.yml` (migrations + `wrangler deploy`), and `wrangler` from a laptop                                                                                                                                             |
+| `STRAVA_CLIENT_SECRET`                            | Worker secret (`wrangler secret put`)                            | Strava OAuth token refresh and webhook subscription management                                                                                                                                                          |
+| `STRAVA_VERIFY_TOKEN`                             | Worker secret (`wrangler secret put`)                            | Webhook subscription validation ([#8](https://github.com/bendrucker/activity-hub/issues/8))                                                                                                                             |
+| `WAHOO_CLIENT_ID` / `WAHOO_CLIENT_SECRET`         | Worker secrets (`wrangler secret put`)                           | Wahoo OAuth + webhooks ([#11](https://github.com/bendrucker/activity-hub/issues/11))                                                                                                                                    |
+| `WAHOO_WEBHOOK_TOKEN`                             | Worker secret (`wrangler secret put`)                            | Wahoo webhook receiver ([#11](https://github.com/bendrucker/activity-hub/issues/11))                                                                                                                                    |
+| `R2_ACCOUNT_ID`                                   | Worker secret (`wrangler secret put`)                            | Decode container's S3 endpoint                                                                                                                                                                                          |
+| `R2_RAW_ACCESS_KEY_ID` / `..._SECRET_ACCESS_KEY`  | Worker secrets (`wrangler secret put`)                           | Decode container reading `activity-hub-raw`                                                                                                                                                                             |
+| `R2_LAKE_ACCESS_KEY_ID` / `..._SECRET_ACCESS_KEY` | Worker secrets (`wrangler secret put`)                           | Decode container writing `activity-hub-lake`                                                                                                                                                                            |
 
 `STRAVA_CLIENT_ID` and `STRAVA_ATHLETE_ID` are public identifiers, committed as
 vars in `wrangler.jsonc`. `STRAVA_SUBSCRIPTION_ID` is also a committed var,
@@ -249,9 +249,21 @@ curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
 curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
   --json '{"ids": ["19324502491", "19311006481"]}' \
   "https://hub.bendrucker.me/admin/photo-backfill"
+
+# Hand the same list to the hourly trickle instead of archiving it now. Ids
+# land in a work table the cron drains ten at a time, and the answer reports
+# how many are still waiting.
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  --json '{"ids": ["19324502491", "19311006481"]}' \
+  "https://hub.bendrucker.me/admin/photo-backfill/targets"
+# {"added":2,"alreadyPresent":0,"pending":1385}
 ```
 
 Prefer naming ids over walking. An activity with no photos never gains a `photos` key, so it never leaves the set the cursor walk selects from and gets re-read on every future run. The bulk export's `Media` column says which activities have photos, and against the 2026-07-16 export that ruled out 2,631 of 4,016 rows as never worth a call.
+
+Historical photos are worth little and the read budget is worth a lot, so seeded targets drain on their own rather than under supervision. The cron at :15 sends ten per run as `photos` messages, a kind that fetches the photo listing and nothing else. A `refresh` would spend two further reads on detail and streams that these activities already have archived from the bulk export. Ten an hour is 240 reads a day against a budget of 1,000, and never enough in one window to crowd a new ride's webhook out of Strava's 100-per-15-minutes cap.
+
+Targets are deleted as they are enqueued, so the table draining to zero is the measure of progress. The unphotographed count stalls above zero instead, because an activity that turns out to have no photos gains no key and stays in that set forever. Once the table is empty the cron is a no-op and can stay deployed.
 
 The transform sweep runs at :30 every hour. It enqueues at most `RECONCILE_LIMIT` per stage per run, and a schema-version bump leaves the whole corpus stale at once, so a daily sweep would turn a version bump into a week-long migration.
 

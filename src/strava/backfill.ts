@@ -5,12 +5,13 @@ import { sendBatched, type IngestMessage } from "../ingest";
 // queue and park the tail. The caller walks the gap by looping on nextCursor.
 export const PER_RUN = 100;
 
-function refreshMessages(
+function ingestMessages(
+  kind: "refresh" | "photos",
   rows: readonly { source_id: string }[],
 ): IngestMessage[] {
   return rows.map((row) => ({
     source: "strava",
-    kind: "refresh",
+    kind,
     objectId: Number(row.source_id),
   }));
 }
@@ -53,7 +54,7 @@ export async function backfillStravaStreams(
     .bind(cursor, perRun)
     .all<{ source_id: string }>();
 
-  const messages = refreshMessages(results);
+  const messages = ingestMessages("refresh", results);
   await sendBatched(env.INGEST_QUEUE, messages);
 
   const remaining = await countUnarchived(env.REGISTRY);
@@ -105,7 +106,7 @@ export async function backfillStravaPhotos(
     .bind(cursor, perRun)
     .all<{ source_id: string }>();
 
-  const messages = refreshMessages(results);
+  const messages = ingestMessages("refresh", results);
   await sendBatched(env.INGEST_QUEUE, messages);
 
   const remaining = await countUnphotographed(env.REGISTRY);
@@ -155,7 +156,7 @@ export async function backfillListedStravaPhotos(
     .bind(...named)
     .all<{ source_id: string }>();
 
-  const messages = refreshMessages(results);
+  const messages = ingestMessages("refresh", results);
   const [, remaining] = await Promise.all([
     sendBatched(env.INGEST_QUEUE, messages),
     countUnphotographed(env.REGISTRY),
@@ -171,4 +172,106 @@ export async function backfillListedStravaPhotos(
     // The caller's list is the whole run, so there is no next page to ask for.
     done: true,
   };
+}
+
+// Matches the fourth entry in wrangler.jsonc's crons. The scheduled handler
+// serves every trigger and tells them apart by this expression, so the two have
+// to stay in step.
+//
+// Ten activities an hour is 240 Strava reads a day against a 1,000/day budget,
+// and ten reads in an hour stay far under the binding window of 100 per fifteen
+// minutes, so a new ride's webhook is never stuck behind the backfill in the
+// ingest queue. At that rate the export-derived target list drains in about six
+// days. :15 keeps it clear of the :30 transform sweep and the :00 dailies.
+export const PHOTO_CRON = "15 * * * *";
+export const PHOTO_DRAIN = 10;
+
+export interface PhotoTargetSeed {
+  added: number;
+  alreadyPresent: number;
+  pending: number;
+}
+
+// The target list comes from the bulk export's Media column, which the worker
+// never sees, so it is handed over rather than derived. Seeding spends no
+// Strava read: the cost is entirely in the draining.
+export async function seedPhotoBackfillTargets(
+  env: Env,
+  ids: readonly string[],
+): Promise<PhotoTargetSeed> {
+  const named = [...new Set(ids)];
+  const now = new Date().toISOString();
+
+  const before = await countPhotoTargets(env.REGISTRY);
+  await env.REGISTRY.batch(
+    named.map((id) =>
+      env.REGISTRY.prepare(
+        "INSERT OR IGNORE INTO photo_backfill_targets (source_id, added_at) VALUES (?1, ?2)",
+      ).bind(id, now),
+    ),
+  );
+  const pending = await countPhotoTargets(env.REGISTRY);
+
+  const added = pending - before;
+  return { added, alreadyPresent: named.length - added, pending };
+}
+
+export interface PhotoDrainResult {
+  enqueued: number;
+  dropped: number;
+  pending: number;
+}
+
+// Progress is this table draining to zero rather than the UNPHOTOGRAPHED count.
+// An activity with no photos gains no key, so it never leaves that set.
+//
+// A target is spent on the way out of the table rather than on the way back
+// from a successful consume. The queue retries fifty times into a dead letter
+// queue and reseeding from the export costs nothing, so a target lost to a
+// failed consume is cheaper than tracking per-id completion.
+export async function drainPhotoBackfillTargets(
+  env: Env,
+): Promise<PhotoDrainResult> {
+  const { results: taken } = await env.REGISTRY.prepare(
+    "SELECT source_id FROM photo_backfill_targets ORDER BY source_id LIMIT ?1",
+  )
+    .bind(PHOTO_DRAIN)
+    .all<{ source_id: string }>();
+  if (taken.length === 0) {
+    return { enqueued: 0, dropped: 0, pending: 0 };
+  }
+
+  // An id that gained photos through the webhook path or an earlier manual page
+  // is dropped here, which costs a query rather than a Strava read.
+  const ids = taken.map((row) => row.source_id);
+  const placeholders = ids.map((_, index) => `?${index + 1}`).join(", ");
+  const { results } = await env.REGISTRY.prepare(
+    `SELECT source_id ${UNPHOTOGRAPHED} AND source_id IN (${placeholders}) ORDER BY source_id`,
+  )
+    .bind(...ids)
+    .all<{ source_id: string }>();
+
+  const messages = ingestMessages("photos", results);
+  await sendBatched(env.INGEST_QUEUE, messages);
+
+  // After the send, so a failed enqueue costs a repeated run rather than ten
+  // activities silently dropped from the job.
+  await env.REGISTRY.prepare(
+    `DELETE FROM photo_backfill_targets WHERE source_id IN (${placeholders})`,
+  )
+    .bind(...ids)
+    .run();
+
+  return {
+    enqueued: messages.length,
+    dropped: ids.length - messages.length,
+    pending: await countPhotoTargets(env.REGISTRY),
+  };
+}
+
+async function countPhotoTargets(db: D1Database): Promise<number> {
+  const row = await db
+    .prepare("SELECT COUNT(*) AS n FROM photo_backfill_targets")
+    .first<{ n: number }>();
+  return row?.n ?? 0;
 }

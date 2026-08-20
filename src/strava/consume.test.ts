@@ -6,6 +6,7 @@ import { SECRETS } from "../../test/secrets";
 import {
   RateLimitedError,
   type StravaIngestMessage,
+  type StravaPhotosMessage,
   type StravaRefreshMessage,
 } from "../ingest";
 import { tokenBroker } from "../tokens/broker";
@@ -54,6 +55,12 @@ const TWO_PHOTOS_JSON = JSON.stringify([
 const REFRESH_MESSAGE: StravaRefreshMessage = {
   source: "strava",
   kind: "refresh",
+  objectId: ACTIVITY_ID,
+};
+
+const PHOTOS_MESSAGE: StravaPhotosMessage = {
+  source: "strava",
+  kind: "photos",
   objectId: ACTIVITY_ID,
 };
 
@@ -583,5 +590,106 @@ describe("consumeStravaEvent on a refresh", () => {
     expect(row!.updated_at).toBe(SEEDED_UPDATED_AT);
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
+  });
+});
+
+describe("consumeStravaEvent on a photos message", () => {
+  // The read cost is the whole reason the kind exists: a refresh would spend
+  // two further reads on detail and streams that the backfill population
+  // already has archived.
+  it("downloads photos and spends one Strava read doing it", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await seedActivity();
+    const stub = stubFetch(
+      respondByPath({
+        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () =>
+          new Response(PHOTOS_JSON),
+      }),
+    );
+    const photoStub = stubFetch(() => new Response(new Uint8Array([1, 2, 3])));
+
+    const outcome = await consumeStravaEvent(PHOTOS_MESSAGE, testEnv, {
+      client: apiClient(stub),
+      fetch: photoStub.fetch,
+    });
+
+    expect(outcome).toBeUndefined();
+    expect(
+      stub.requests.map((request) => new URL(request.url).pathname),
+    ).toEqual([`/api/v3/activities/${ACTIVITY_ID}/photos`]);
+    expect(
+      await env.RAW.head(`${photosPrefix(ACTIVITY_ID)}photo-1.jpg`),
+    ).not.toBeNull();
+    expect(await detailSeal()).toBe("intact");
+
+    const row = await sourceRow(String(ACTIVITY_ID));
+    expect(JSON.parse(row!.raw_keys as string)).toEqual({
+      detail: detailKey(ACTIVITY_ID),
+      streams: streamsKey(ACTIVITY_ID),
+      photos: photosPrefix(ACTIVITY_ID),
+    });
+    expect(log).toHaveBeenCalledTimes(1);
+    log.mockRestore();
+  });
+
+  it("records no photos key for an activity that has none", async () => {
+    await seedActivity();
+    const stub = stubFetch(
+      respondByPath({
+        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () => new Response("[]"),
+      }),
+    );
+
+    const outcome = await consumeStravaEvent(PHOTOS_MESSAGE, testEnv, {
+      client: apiClient(stub),
+    });
+
+    expect(outcome).toBe("ok: no photos");
+    const row = await sourceRow(String(ACTIVITY_ID));
+    expect(row!.updated_at).toBe(SEEDED_UPDATED_AT);
+    expect(JSON.parse(row!.raw_keys as string)).not.toHaveProperty("photos");
+  });
+
+  it("writes nothing when the photo is already archived and keyed", async () => {
+    await seedActivity();
+    await env.RAW.put(
+      `${photosPrefix(ACTIVITY_ID)}photo-1.jpg`,
+      new Uint8Array([9]),
+    );
+    await env.REGISTRY.prepare(
+      "UPDATE activity_sources SET raw_keys = ?1 WHERE source = 'strava' AND source_id = ?2",
+    )
+      .bind(
+        JSON.stringify({
+          detail: detailKey(ACTIVITY_ID),
+          streams: streamsKey(ACTIVITY_ID),
+          photos: photosPrefix(ACTIVITY_ID),
+        }),
+        String(ACTIVITY_ID),
+      )
+      .run();
+    const stub = stubFetch(
+      respondByPath({
+        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () =>
+          new Response(PHOTOS_JSON),
+      }),
+    );
+
+    const outcome = await consumeStravaEvent(PHOTOS_MESSAGE, testEnv, {
+      client: apiClient(stub),
+    });
+
+    expect(outcome).toBe("ok: nothing changed");
+    const row = await sourceRow(String(ACTIVITY_ID));
+    expect(row!.updated_at).toBe(SEEDED_UPDATED_AT);
+  });
+
+  it("throws RateLimitedError on a 429 from the photo listing", async () => {
+    await seedActivity();
+    const stub = stubFetch(() => new Response("rate limited", { status: 429 }));
+
+    await expect(
+      consumeStravaEvent(PHOTOS_MESSAGE, testEnv, { client: apiClient(stub) }),
+    ).rejects.toThrow(RateLimitedError);
   });
 });

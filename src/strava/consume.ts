@@ -3,7 +3,11 @@ import {
   type StravaIngestMessage,
   retryAfterS,
 } from "../ingest";
-import { markSourceDeleted, upsertSourceRecord } from "../registry";
+import {
+  markSourceDeleted,
+  mergeRawKeys,
+  upsertSourceRecord,
+} from "../registry";
 import { sportFromStrava } from "../sport";
 import { enqueueActivity } from "../transform/enqueue";
 import { stravaClient, type StravaClient } from "./client";
@@ -267,11 +271,50 @@ async function refreshActivity(
   );
 }
 
+// One Strava read, the photo listing, and nothing else. The backfill population
+// came from the bulk export, so it already holds an `original`, and a refresh
+// would spend two further reads rewriting detail and streams that did not
+// change.
+//
+// The registry row is therefore updated through a raw-keys merge rather than an
+// upsert, which would need the detail this never fetches.
+async function archivePhotos(
+  activityId: number,
+  env: Env,
+  options: ConsumeOptions,
+): Promise<string | undefined> {
+  const client = options.client ?? stravaClient(env);
+  const photos = await syncPhotos(
+    client,
+    env,
+    activityId,
+    options.fetch ?? globalThis.fetch,
+  );
+  if (photos.stored + photos.added === 0) {
+    return "ok: no photos";
+  }
+
+  const keyed = await mergeRawKeys(env.REGISTRY, "strava", String(activityId), {
+    photos: photosPrefix(activityId),
+  });
+  if (photos.added === 0 && !keyed) {
+    return "ok: nothing changed";
+  }
+
+  console.log(
+    `Strava activity ${activityId} photos archived: ${photos.added} new, ${photos.stored} already held`,
+  );
+}
+
 export async function consumeStravaEvent(
   message: StravaIngestMessage,
   env: Env,
   options: ConsumeOptions = {},
 ): Promise<string | undefined> {
+  if (message.kind === "photos") {
+    return archivePhotos(message.objectId, env, options);
+  }
+
   if (message.kind === "refresh") {
     return refreshActivity(message.objectId, env, options);
   }
