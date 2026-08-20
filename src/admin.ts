@@ -9,8 +9,10 @@ import {
 import { RateLimitedError } from "./ingest";
 import { buildLake, type LakeBuildOptions } from "./lake/build";
 import {
+  backfillListedStravaPhotos,
   backfillStravaPhotos,
   backfillStravaStreams,
+  PER_RUN,
   type StravaBackfillOptions,
 } from "./strava/backfill";
 import {
@@ -226,6 +228,30 @@ export async function handleStravaBackfill(
   }
 }
 
+// A body of `{"ids": [...]}` aims the run at those activities. The list goes
+// in the body because a page of ids is a few kilobytes.
+function listedIds(body: unknown): string[] {
+  if (typeof body !== "object" || body === null || !("ids" in body)) {
+    throw new Error("body must be an object with an ids array");
+  }
+  const { ids } = body as { ids: unknown };
+  if (!Array.isArray(ids) || ids.length === 0) {
+    throw new Error("ids must be a non-empty array");
+  }
+  if (!ids.every((id) => typeof id === "string" && /^\d+$/.test(id))) {
+    throw new Error("ids must be Strava numeric ids, as strings");
+  }
+  // Refusing an over-long page: a caller that got a short enqueued count back
+  // would have no way to tell a trim from a page whose activities were already
+  // archived.
+  if (ids.length > PER_RUN) {
+    throw new Error(
+      `ids is limited to ${PER_RUN} per request, send the rest as further pages`,
+    );
+  }
+  return ids as string[];
+}
+
 // Deliberately manual. Every activity swept costs a call to an undocumented
 // Strava endpoint, and a run wide enough to cover the archive would spend a
 // day's read budget, so nothing schedules this.
@@ -241,13 +267,28 @@ export async function handlePhotoBackfill(
   const params = new URL(request.url).searchParams;
   const limit = params.get("limit");
 
+  const body = await request.text();
+  let ids: string[] | null = null;
+  if (body.trim() !== "") {
+    try {
+      ids = listedIds(JSON.parse(body));
+    } catch (error) {
+      return new Response(
+        error instanceof Error ? error.message : String(error),
+        { status: 400 },
+      );
+    }
+  }
+
   try {
     return Response.json(
-      await backfillStravaPhotos(env, {
-        cursor: params.get("cursor") ?? undefined,
-        ...(limit === null ? {} : { perRun: Number(limit) }),
-        ...options,
-      }),
+      ids === null
+        ? await backfillStravaPhotos(env, {
+            cursor: params.get("cursor") ?? undefined,
+            ...(limit === null ? {} : { perRun: Number(limit) }),
+            ...options,
+          })
+        : await backfillListedStravaPhotos(env, ids),
     );
   } catch (error) {
     return errorResponse(error);

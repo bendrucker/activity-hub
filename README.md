@@ -22,7 +22,8 @@ flowchart TB
         ingest[Ingest worker]
         iqueue[Ingest queue]
         registry[(D1 registry)]
-        cron[Daily reconcile]
+        cron[Daily Strava reconcile]
+        sweepcron[Hourly transform sweep]
         tqueue[Transform queue]
         consumer[Transform consumer]
         derived[(D1 derived)]
@@ -43,13 +44,14 @@ flowchart TB
     export --> raw
     iqueue --> raw[(R2 raw)]
 
-    registry --> cron --> tqueue --> consumer
+    registry --> cron --> iqueue
+    registry --> sweepcron --> tqueue --> consumer
     consumer -->|batch of work| decode
     raw --> decode
     decode --> parquet[(R2 per-activity Parquet)]
     decode -->|outcomes| consumer
     consumer --> derived
-    derived --> cron
+    derived --> sweepcron
 
     consumer -->|one activity| publish
     parquet --> publish
@@ -84,7 +86,7 @@ The unit of work is **one activity at one stage**, and the DAG is data-driven ra
 
 That one table carries every requirement. Reprocessing a single activity is a `POST /admin/transform?activityId=...`, because the stage is idempotent on `(activity_id, stage)`. An upstream edit changes the raw object's etag, so the recomputed fingerprint stops matching and every downstream stage is stale by definition. Nothing has to notice the edit explicitly.
 
-The fingerprint describes the input alone, and a stage's own output shape can change while every input sits still. That is what `artifact_version` records, from `ARTIFACT_VERSION` in `src/derived.ts`, which reads the decode stage's version off `DECODE_SCHEMA_VERSION` in `src/transform/protocol.ts`. Bumping that constant makes the whole archive stale and the nightly sweep re-decodes it. [docs/design.md](docs/design.md) covers why it is a column the sweep compares rather than another input to the hash.
+The fingerprint describes the input alone, and a stage's own output shape can change while every input sits still. That is what `artifact_version` records, from `ARTIFACT_VERSION` in `src/derived.ts`, which reads the decode stage's version off `DECODE_SCHEMA_VERSION` in `src/transform/protocol.ts`. Bumping that constant makes the whole archive stale and the hourly sweep re-decodes it. [docs/design.md](docs/design.md) covers why it is a column the sweep compares rather than another input to the hash.
 
 Monitoring is `GET /admin/pipeline`. It reports counts by stage and status, the lag on the oldest activity still waiting, and recent failures with their attempt counts. It also reports `parked` per stage, the failures that have spent every attempt. Those are invisible to the staleness query for the same reason they will never retry, so without that count a stage holding nothing but parked rows would read as caught up. A parked row is the record of an activity given up on, and the pipeline keeps running around it.
 
@@ -108,7 +110,7 @@ A deleted activity leaves the staleness query the moment it loses its last live 
 
 ```mermaid
 sequenceDiagram
-    participant Cron as Daily reconcile
+    participant Cron as Hourly transform sweep
     participant D1 as D1
     participant Q as Transform queue
     participant W as Consumer worker
@@ -211,7 +213,7 @@ A Wahoo workout whose summary carries no file has no equivalent recovery. Strava
 
 ## Running the Transform
 
-The daily cron sweeps for stale activities on its own. These are for when you need something to happen now.
+The hourly cron sweeps for stale activities on its own. These are for when you need something to happen now.
 
 ```sh
 # What the pipeline is doing, and what broke
@@ -239,9 +241,21 @@ curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
 # drive: pass the answer's `nextCursor` back to continue.
 curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
   "https://hub.bendrucker.me/admin/photo-backfill?limit=25"
+
+# Aim that sweep at named activities. Ids already carrying photos are skipped,
+# so resending a page costs one query rather than a read for each of those. An
+# id that turned out to have no photos gained no key and does cost another read.
+# A request takes at most `PER_RUN` ids, so a longer list goes as further pages.
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  --json '{"ids": ["19324502491", "19311006481"]}' \
+  "https://hub.bendrucker.me/admin/photo-backfill"
 ```
 
-The lake rebuilds nightly on its own cron at 08:00, two hours after the 06:00 sweep that enqueues decoding. The two crons stay separate because the sweep only enqueues. Decoding drains through the queue afterwards, so a rebuild in the same invocation would read the artifacts that sweep was about to replace.
+Prefer naming ids over walking. An activity with no photos never gains a `photos` key, so it never leaves the set the cursor walk selects from and gets re-read on every future run. The bulk export's `Media` column says which activities have photos, and against the 2026-07-16 export that ruled out 2,631 of 4,016 rows as never worth a call.
+
+The transform sweep runs at :30 every hour. It enqueues at most `RECONCILE_LIMIT` per stage per run, and a schema-version bump leaves the whole corpus stale at once, so a daily sweep would turn a version bump into a week-long migration.
+
+Strava reconciliation runs at 06:00 and the lake rebuild two hours later at 08:00. The lake keeps its own trigger because a sweep only enqueues. Decoding drains through the queue afterwards, so a rebuild in the same invocation would read the artifacts that sweep was about to replace.
 
 ## Status
 
