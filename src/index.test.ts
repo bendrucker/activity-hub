@@ -275,9 +275,8 @@ describe("the scheduled handler", () => {
     ]);
   });
 
-  // The photo trickle has to return before the Strava reconciliation for the
-  // same reason the sweep does, and it must enqueue photos rather than
-  // refreshes: a refresh spends two further reads per activity.
+  // It must enqueue photos rather than refreshes. A refresh spends two further
+  // reads per activity.
   it("drains only the photo backfill targets on the photo cron", async () => {
     const seeded = "2026-01-01T00:00:00.000Z";
     await env.REGISTRY.batch([

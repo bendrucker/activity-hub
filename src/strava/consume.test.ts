@@ -650,6 +650,49 @@ describe("consumeStravaEvent on a photos message", () => {
     expect(JSON.parse(row!.raw_keys as string)).not.toHaveProperty("photos");
   });
 
+  // The drain deletes a target when it enqueues it, so an activity whose
+  // downloads all failed has nothing left to bring it back. Acking would make
+  // that indistinguishable from an activity that has no photos at all.
+  it("throws when the listing named photos and none of them downloaded", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await seedActivity();
+    const stub = stubFetch(
+      respondByPath({
+        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () =>
+          new Response(PHOTOS_JSON),
+      }),
+    );
+    const photoStub = stubFetch(() => new Response("nope", { status: 503 }));
+
+    await expect(
+      consumeStravaEvent(PHOTOS_MESSAGE, testEnv, {
+        client: apiClient(stub),
+        fetch: photoStub.fetch,
+      }),
+    ).rejects.toThrow("photo sync incomplete");
+
+    const row = await sourceRow(String(ACTIVITY_ID));
+    expect(row!.updated_at).toBe(SEEDED_UPDATED_AT);
+    expect(JSON.parse(row!.raw_keys as string)).not.toHaveProperty("photos");
+    warn.mockRestore();
+  });
+
+  it("throws when the photo listing itself could not be read", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await seedActivity();
+    const stub = stubFetch(
+      respondByPath({
+        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () =>
+          new Response("boom", { status: 500 }),
+      }),
+    );
+
+    await expect(
+      consumeStravaEvent(PHOTOS_MESSAGE, testEnv, { client: apiClient(stub) }),
+    ).rejects.toThrow("photo sync incomplete");
+    warn.mockRestore();
+  });
+
   it("writes nothing when the photo is already archived and keyed", async () => {
     await seedActivity();
     await env.RAW.put(

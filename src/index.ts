@@ -259,10 +259,10 @@ export default {
     }
 
     if (controller.cron === PHOTO_CRON) {
-      const { enqueued, dropped, pending } =
+      const { enqueued, dropped, unknown, pending } =
         await drainPhotoBackfillTargets(env);
       console.log(
-        `photo backfill enqueued ${enqueued} and dropped ${dropped} already-archived targets, ${pending} left`,
+        `photo backfill enqueued ${enqueued}, dropped ${dropped} already-archived and ${unknown} unregistered targets, ${pending} left`,
       );
       return;
     }

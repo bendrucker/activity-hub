@@ -57,7 +57,7 @@ export async function backfillStravaStreams(
   const messages = ingestMessages("refresh", results);
   await sendBatched(env.INGEST_QUEUE, messages);
 
-  const remaining = await countUnarchived(env.REGISTRY);
+  const remaining = await count(env.REGISTRY, UNARCHIVED);
   const last = results.at(-1)?.source_id;
   const done = results.length < perRun;
 
@@ -69,11 +69,11 @@ export async function backfillStravaStreams(
   };
 }
 
-async function countUnarchived(db: D1Database): Promise<number> {
-  const row = await db
-    .prepare(`SELECT COUNT(*) AS n ${UNARCHIVED}`)
-    .first<{ n: number }>();
-  return row?.n ?? 0;
+function count(db: D1Database, from: string): Promise<number> {
+  return db
+    .prepare(`SELECT COUNT(*) AS n ${from}`)
+    .first<{ n: number }>()
+    .then((row) => row?.n ?? 0);
 }
 
 // Photos arrive under two key shapes: the webhook path records a single
@@ -109,7 +109,7 @@ export async function backfillStravaPhotos(
   const messages = ingestMessages("refresh", results);
   await sendBatched(env.INGEST_QUEUE, messages);
 
-  const remaining = await countUnphotographed(env.REGISTRY);
+  const remaining = await count(env.REGISTRY, UNPHOTOGRAPHED);
   const last = results.at(-1)?.source_id;
   const done = results.length < perRun;
 
@@ -121,11 +121,23 @@ export async function backfillStravaPhotos(
   };
 }
 
-async function countUnphotographed(db: D1Database): Promise<number> {
-  const row = await db
-    .prepare(`SELECT COUNT(*) AS n ${UNPHOTOGRAPHED}`)
-    .first<{ n: number }>();
-  return row?.n ?? 0;
+function placeholders(ids: readonly string[]): string {
+  return ids.map((_, index) => `?${index + 1}`).join(", ");
+}
+
+// The named ids filtered down to the ones still worth a Strava read. An id
+// already archived by an earlier page costs this query rather than a read.
+async function selectUnphotographed(
+  db: D1Database,
+  ids: readonly string[],
+): Promise<{ source_id: string }[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT source_id ${UNPHOTOGRAPHED} AND source_id IN (${placeholders(ids)}) ORDER BY source_id`,
+    )
+    .bind(...ids)
+    .all<{ source_id: string }>();
+  return results;
 }
 
 export interface ListedPhotoBackfillResult extends StravaBackfillResult {
@@ -149,17 +161,12 @@ export async function backfillListedStravaPhotos(
   // Deduped before the query because `IN` matches a repeated id once, which
   // would leave skipped counting a difference the caller never asked for.
   const named = [...new Set(ids)];
-  const placeholders = named.map((_, index) => `?${index + 1}`).join(", ");
-  const { results } = await env.REGISTRY.prepare(
-    `SELECT source_id ${UNPHOTOGRAPHED} AND source_id IN (${placeholders}) ORDER BY source_id`,
-  )
-    .bind(...named)
-    .all<{ source_id: string }>();
+  const results = await selectUnphotographed(env.REGISTRY, named);
 
   const messages = ingestMessages("refresh", results);
   const [, remaining] = await Promise.all([
     sendBatched(env.INGEST_QUEUE, messages),
-    countUnphotographed(env.REGISTRY),
+    count(env.REGISTRY, UNPHOTOGRAPHED),
   ]);
 
   return {
@@ -174,9 +181,9 @@ export async function backfillListedStravaPhotos(
   };
 }
 
-// Matches the fourth entry in wrangler.jsonc's crons. The scheduled handler
-// serves every trigger and tells them apart by this expression, so the two have
-// to stay in step.
+// The scheduled handler serves every trigger and tells them apart by this
+// expression, so it has to stay in step with the matching entry in
+// wrangler.jsonc's crons.
 //
 // Ten activities an hour is 240 Strava reads a day against a 1,000/day budget,
 // and ten reads in an hour stay far under the binding window of 100 per fifteen
@@ -193,8 +200,8 @@ export interface PhotoTargetSeed {
 }
 
 // The target list comes from the bulk export's Media column, which the worker
-// never sees, so it is handed over rather than derived. Seeding spends no
-// Strava read: the cost is entirely in the draining.
+// never sees, so it arrives as a parameter. Seeding spends no Strava read. The
+// cost is entirely in the draining.
 export async function seedPhotoBackfillTargets(
   env: Env,
   ids: readonly string[],
@@ -202,23 +209,29 @@ export async function seedPhotoBackfillTargets(
   const named = [...new Set(ids)];
   const now = new Date().toISOString();
 
-  const before = await countPhotoTargets(env.REGISTRY);
-  await env.REGISTRY.batch(
+  // RETURNING answers per statement which ids this request inserted. Counting
+  // the table before and after would attribute another caller's page to this
+  // one, and can report more added than were named.
+  const inserted = await env.REGISTRY.batch<{ source_id: string }>(
     named.map((id) =>
       env.REGISTRY.prepare(
-        "INSERT OR IGNORE INTO photo_backfill_targets (source_id, added_at) VALUES (?1, ?2)",
+        "INSERT OR IGNORE INTO photo_backfill_targets (source_id, added_at) VALUES (?1, ?2) RETURNING source_id",
       ).bind(id, now),
     ),
   );
-  const pending = await countPhotoTargets(env.REGISTRY);
 
-  const added = pending - before;
-  return { added, alreadyPresent: named.length - added, pending };
+  const added = inserted.filter((result) => result.results.length > 0).length;
+  return {
+    added,
+    alreadyPresent: named.length - added,
+    pending: await count(env.REGISTRY, "FROM photo_backfill_targets"),
+  };
 }
 
 export interface PhotoDrainResult {
   enqueued: number;
   dropped: number;
+  unknown: number;
   pending: number;
 }
 
@@ -238,15 +251,20 @@ export async function drainPhotoBackfillTargets(
     .bind(PHOTO_DRAIN)
     .all<{ source_id: string }>();
   if (taken.length === 0) {
-    return { enqueued: 0, dropped: 0, pending: 0 };
+    return { enqueued: 0, dropped: 0, unknown: 0, pending: 0 };
   }
 
   // An id that gained photos through the webhook path or an earlier manual page
   // is dropped here, which costs a query rather than a Strava read.
   const ids = taken.map((row) => row.source_id);
-  const placeholders = ids.map((_, index) => `?${index + 1}`).join(", ");
-  const { results } = await env.REGISTRY.prepare(
-    `SELECT source_id ${UNPHOTOGRAPHED} AND source_id IN (${placeholders}) ORDER BY source_id`,
+  const results = await selectUnphotographed(env.REGISTRY, ids);
+
+  // An id with no registry row fails that filter for the same reason an
+  // archived one does, so counting the two together would report a seed list
+  // the registry has never heard of as a job already finished. Draining cannot
+  // fix that disagreement, so it is worth its own number.
+  const { results: known } = await env.REGISTRY.prepare(
+    `SELECT source_id FROM activity_sources WHERE source = 'strava' AND source_id IN (${placeholders(ids)})`,
   )
     .bind(...ids)
     .all<{ source_id: string }>();
@@ -257,21 +275,15 @@ export async function drainPhotoBackfillTargets(
   // After the send, so a failed enqueue costs a repeated run rather than ten
   // activities silently dropped from the job.
   await env.REGISTRY.prepare(
-    `DELETE FROM photo_backfill_targets WHERE source_id IN (${placeholders})`,
+    `DELETE FROM photo_backfill_targets WHERE source_id IN (${placeholders(ids)})`,
   )
     .bind(...ids)
     .run();
 
   return {
     enqueued: messages.length,
-    dropped: ids.length - messages.length,
-    pending: await countPhotoTargets(env.REGISTRY),
+    dropped: known.length - messages.length,
+    unknown: ids.length - known.length,
+    pending: await count(env.REGISTRY, "FROM photo_backfill_targets"),
   };
-}
-
-async function countPhotoTargets(db: D1Database): Promise<number> {
-  const row = await db
-    .prepare("SELECT COUNT(*) AS n FROM photo_backfill_targets")
-    .first<{ n: number }>();
-  return row?.n ?? 0;
 }

@@ -51,6 +51,14 @@ function errorResponse(error: unknown): Response {
   );
 }
 
+// The body validators reject by throwing, and the message they throw is the
+// whole explanation of what the caller got wrong.
+function badRequest(error: unknown): Response {
+  return new Response(error instanceof Error ? error.message : String(error), {
+    status: 400,
+  });
+}
+
 export async function handleReconcile(
   request: Request,
   env: Env,
@@ -274,10 +282,7 @@ export async function handlePhotoBackfill(
     try {
       ids = listedIds(JSON.parse(body));
     } catch (error) {
-      return new Response(
-        error instanceof Error ? error.message : String(error),
-        { status: 400 },
-      );
+      return badRequest(error);
     }
   }
 
@@ -310,12 +315,7 @@ export async function handlePhotoBackfillTargets(
   try {
     ids = listedIds(await request.json());
   } catch (error) {
-    return new Response(
-      error instanceof Error ? error.message : String(error),
-      {
-        status: 400,
-      },
-    );
+    return badRequest(error);
   }
 
   try {

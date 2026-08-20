@@ -112,6 +112,15 @@ function largestPhotoUrl(photo: StravaPhoto): string | undefined {
 interface PhotoSync {
   stored: number;
   added: number;
+  // False when the listing could not be read or a download failed. The webhook
+  // and refresh paths tolerate that, because both re-list the activity on a
+  // later pass. A backfill target gets one pass and is spent on enqueue, so it
+  // has nothing to come back on.
+  complete: boolean;
+}
+
+function hasPhotos(photos: PhotoSync): boolean {
+  return photos.stored + photos.added > 0;
 }
 
 async function storedPhotoIds(
@@ -177,7 +186,7 @@ async function syncPhotos(
     console.warn(
       `Strava photos ${activityId} fetch failed: ${response.status}`,
     );
-    return { stored: stored.size, added: 0 };
+    return { stored: stored.size, added: 0, complete: false };
   }
 
   let photos: StravaPhoto[];
@@ -185,7 +194,7 @@ async function syncPhotos(
     photos = (await response.json()) as StravaPhoto[];
   } catch {
     console.warn(`Strava photos ${activityId} returned invalid JSON`);
-    return { stored: stored.size, added: 0 };
+    return { stored: stored.size, added: 0, complete: false };
   }
 
   // CDN downloads don't count against the API read budget, so they can
@@ -195,7 +204,11 @@ async function syncPhotos(
       .filter((photo) => !stored.has(photo.unique_id))
       .map((photo) => downloadPhoto(env, activityId, photo, fetch)),
   );
-  return { stored: stored.size, added: wrote.filter(Boolean).length };
+  return {
+    stored: stored.size,
+    added: wrote.filter(Boolean).length,
+    complete: wrote.every(Boolean),
+  };
 }
 
 async function upsertDetail(
@@ -252,7 +265,7 @@ async function refreshActivity(
     activityId,
     options.fetch ?? globalThis.fetch,
   );
-  if (photos.stored + photos.added > 0) {
+  if (hasPhotos(photos)) {
     rawKeys.photos = photosPrefix(activityId);
   }
 
@@ -290,7 +303,15 @@ async function archivePhotos(
     activityId,
     options.fetch ?? globalThis.fetch,
   );
-  if (photos.stored + photos.added === 0) {
+  // A download that failed leaves the activity unarchived and still
+  // unphotographed, which is indistinguishable from an activity that has no
+  // photos at all. Throwing hands the id to the queue's retries and then the
+  // dead letter queue, where the drain has already spent its target.
+  if (!photos.complete) {
+    throw new Error(`Strava activity ${activityId} photo sync incomplete`);
+  }
+
+  if (!hasPhotos(photos)) {
     return "ok: no photos";
   }
 
@@ -359,7 +380,7 @@ export async function consumeStravaEvent(
       activityId,
       options.fetch ?? globalThis.fetch,
     );
-    if (photos.stored + photos.added > 0) {
+    if (hasPhotos(photos)) {
       rawKeys.photos = photosPrefix(activityId);
     }
   }

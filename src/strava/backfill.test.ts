@@ -243,7 +243,7 @@ describe("drainPhotoBackfillTargets", () => {
       { source: "strava", kind: "photos", objectId: 101 },
       { source: "strava", kind: "photos", objectId: 102 },
     ]);
-    expect(result).toEqual({ enqueued: 2, dropped: 0, pending: 0 });
+    expect(result).toEqual({ enqueued: 2, dropped: 0, unknown: 0, pending: 0 });
     expect(await targetIds()).toEqual([]);
   });
 
@@ -259,7 +259,12 @@ describe("drainPhotoBackfillTargets", () => {
 
     const result = await drainPhotoBackfillTargets(testEnv(queue));
 
-    expect(result).toEqual({ enqueued: PHOTO_DRAIN, dropped: 0, pending: 2 });
+    expect(result).toEqual({
+      enqueued: PHOTO_DRAIN,
+      dropped: 0,
+      unknown: 0,
+      pending: 2,
+    });
     expect(await targetIds()).toEqual(ids.slice(PHOTO_DRAIN));
   });
 
@@ -276,7 +281,28 @@ describe("drainPhotoBackfillTargets", () => {
     expect(queue.messages).toEqual([
       { source: "strava", kind: "photos", objectId: 102 },
     ]);
-    expect(result).toEqual({ enqueued: 1, dropped: 1, pending: 0 });
+    expect(result).toEqual({ enqueued: 1, dropped: 1, unknown: 0, pending: 0 });
+    expect(await targetIds()).toEqual([]);
+  });
+
+  // Seeding takes ids from the export with no check against the registry, and
+  // an id the registry never held fails the same filter an archived one does.
+  // Counting them together would report a seed list that disagrees with the
+  // registry as a job that finished.
+  it("counts a target with no registry row apart from an archived one", async () => {
+    await seed("101", '{"photos":"raw/strava/activities/101/photos/"}');
+    await seedPhotoBackfillTargets(testEnv(stubQueue()), ["101", "999"]);
+    const queue = stubQueue<StravaIngestMessage>();
+
+    const result = await drainPhotoBackfillTargets(testEnv(queue));
+
+    expect(queue.messages).toEqual([]);
+    expect(result).toEqual({
+      enqueued: 0,
+      dropped: 1,
+      unknown: 1,
+      pending: 0,
+    });
     expect(await targetIds()).toEqual([]);
   });
 
@@ -286,6 +312,6 @@ describe("drainPhotoBackfillTargets", () => {
     const result = await drainPhotoBackfillTargets(testEnv(queue));
 
     expect(queue.messages).toEqual([]);
-    expect(result).toEqual({ enqueued: 0, dropped: 0, pending: 0 });
+    expect(result).toEqual({ enqueued: 0, dropped: 0, unknown: 0, pending: 0 });
   });
 });

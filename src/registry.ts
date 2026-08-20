@@ -96,33 +96,21 @@ export async function mergeRawKeys(
   sourceId: string,
   keys: Record<string, string>,
 ): Promise<boolean> {
-  const existing = await db
+  // Both the merge and the did-anything-change test run in SQL. Reading the row
+  // first and writing back a merged copy would drop a key another writer added
+  // in between, costing a re-fetch of bytes already in R2. The WHERE clause
+  // matches no row when the source is absent and none when every key is already
+  // recorded, which is the same answer the caller wants in both cases.
+  const row = await db
     .prepare(
-      "SELECT raw_keys FROM activity_sources WHERE source = ?1 AND source_id = ?2",
+      `UPDATE activity_sources SET raw_keys = json_patch(raw_keys, ?1), updated_at = ?2
+       WHERE source = ?3 AND source_id = ?4
+         AND raw_keys != json_patch(raw_keys, ?1)
+       RETURNING source_id`,
     )
-    .bind(source, sourceId)
-    .first<{ raw_keys: string }>();
-  if (existing === null) {
-    return false;
-  }
-
-  const rawKeys = JSON.parse(existing.raw_keys) as Record<string, string>;
-  if (Object.entries(keys).every(([key, value]) => rawKeys[key] === value)) {
-    return false;
-  }
-
-  await db
-    .prepare(
-      "UPDATE activity_sources SET raw_keys = ?1, updated_at = ?2 WHERE source = ?3 AND source_id = ?4",
-    )
-    .bind(
-      JSON.stringify({ ...rawKeys, ...keys }),
-      new Date().toISOString(),
-      source,
-      sourceId,
-    )
-    .run();
-  return true;
+    .bind(JSON.stringify(keys), new Date().toISOString(), source, sourceId)
+    .first<{ source_id: string }>();
+  return row !== null;
 }
 
 // Answers with the activity the source belonged to, or null when the source
