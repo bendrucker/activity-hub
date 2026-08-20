@@ -9,8 +9,10 @@ import {
 import { RateLimitedError } from "./ingest";
 import { buildLake, type LakeBuildOptions } from "./lake/build";
 import {
+  backfillListedStravaPhotos,
   backfillStravaPhotos,
   backfillStravaStreams,
+  PER_RUN,
   type StravaBackfillOptions,
 } from "./strava/backfill";
 import {
@@ -229,6 +231,31 @@ export async function handleStravaBackfill(
 // Deliberately manual. Every activity swept costs a call to an undocumented
 // Strava endpoint, and a run wide enough to cover the archive would spend a
 // day's read budget, so nothing schedules this.
+// A body of `{"ids": [...]}` aims the run at those activities instead of
+// walking the whole gap. The list goes in the body rather than the query string
+// because a page of ids is a few kilobytes.
+function listedIds(body: unknown): string[] {
+  if (typeof body !== "object" || body === null || !("ids" in body)) {
+    throw new Error("body must be an object with an ids array");
+  }
+  const { ids } = body as { ids: unknown };
+  if (!Array.isArray(ids) || ids.length === 0) {
+    throw new Error("ids must be a non-empty array");
+  }
+  if (!ids.every((id) => typeof id === "string" && /^\d+$/.test(id))) {
+    throw new Error("ids must be Strava numeric ids, as strings");
+  }
+  // Refusing an over-long page rather than trimming it: a caller that got a
+  // short enqueued count back would have no way to tell a trim from a page
+  // whose activities were already archived.
+  if (ids.length > PER_RUN) {
+    throw new Error(
+      `ids is limited to ${PER_RUN} per request, send the rest as further pages`,
+    );
+  }
+  return ids as string[];
+}
+
 export async function handlePhotoBackfill(
   request: Request,
   env: Env,
@@ -240,6 +267,21 @@ export async function handlePhotoBackfill(
 
   const params = new URL(request.url).searchParams;
   const limit = params.get("limit");
+
+  const body = await request.text();
+  if (body.trim() !== "") {
+    let ids: string[];
+    try {
+      ids = listedIds(JSON.parse(body));
+    } catch (error) {
+      return new Response(String(error), { status: 400 });
+    }
+    try {
+      return Response.json(await backfillListedStravaPhotos(env, ids));
+    } catch (error) {
+      return errorResponse(error);
+    }
+  }
 
   try {
     return Response.json(

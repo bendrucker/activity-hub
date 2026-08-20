@@ -21,6 +21,7 @@ import {
   type Stage,
 } from "./derived";
 import type { StravaIngestMessage, WahooIngestMessage } from "./ingest";
+import { PER_RUN } from "./strava/backfill";
 import { StravaClient } from "./strava/client";
 import { tokenBroker } from "./tokens/broker";
 import { WahooClient } from "./wahoo/client";
@@ -181,7 +182,11 @@ describe("handleStravaBackfill", () => {
   });
 });
 
-function photoBackfillRequest(authorization?: string, limit?: string): Request {
+function photoBackfillRequest(
+  authorization?: string,
+  limit?: string,
+  body?: unknown,
+): Request {
   const url = new URL("https://hub.example/admin/photo-backfill");
   if (limit !== undefined) {
     url.searchParams.set("limit", limit);
@@ -189,6 +194,7 @@ function photoBackfillRequest(authorization?: string, limit?: string): Request {
   return new Request(url, {
     method: "POST",
     headers: authorization ? { Authorization: authorization } : {},
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 }
 
@@ -257,6 +263,81 @@ describe("handlePhotoBackfill", () => {
       done: false,
       nextCursor: "101",
     });
+  });
+
+  // The bulk export names which activities carry photos. Sweeping the ones it
+  // says carry none spends a Strava read to learn nothing, and learns it again
+  // on every future run, because a photoless activity never leaves the gap.
+  it("enqueues only the activities the caller named", async () => {
+    const now = new Date().toISOString();
+    await env.REGISTRY.batch([
+      env.REGISTRY.prepare(
+        "INSERT INTO activities (activity_id, started_at, timezone, sport, duration_s, created_at, updated_at) VALUES ('activity-102', '2018-07-01T14:00:00.000Z', 'America/Los_Angeles', 'ride', 3600, ?1, ?1)",
+      ).bind(now),
+      env.REGISTRY.prepare(
+        "INSERT INTO activity_sources (source, source_id, activity_id, raw_keys, created_at, updated_at) VALUES ('strava', '102', 'activity-102', '{}', ?1, ?1)",
+      ).bind(now),
+    ]);
+    const queue = stubQueue<StravaIngestMessage>();
+
+    const response = await handlePhotoBackfill(
+      photoBackfillRequest("Bearer admin-secret", undefined, { ids: ["102"] }),
+      testEnv({ INGEST_QUEUE: queue }),
+    );
+
+    expect(await response.json()).toEqual({
+      enqueued: 1,
+      skipped: 0,
+      remaining: 2,
+    });
+    expect(queue.messages).toEqual([
+      { source: "strava", kind: "refresh", objectId: 102 },
+    ]);
+  });
+
+  // Re-sending a page that already landed has to cost one query rather than a
+  // Strava read per activity, or a resumed walk re-spends the budget it just
+  // spent.
+  it("skips a named activity that already has photos", async () => {
+    await env.REGISTRY.prepare(
+      `UPDATE activity_sources SET raw_keys = '{"photos":"raw/strava/activities/101/photos/"}' WHERE source_id = '101'`,
+    ).run();
+    const queue = stubQueue<StravaIngestMessage>();
+
+    const response = await handlePhotoBackfill(
+      photoBackfillRequest("Bearer admin-secret", undefined, { ids: ["101"] }),
+      testEnv({ INGEST_QUEUE: queue }),
+    );
+
+    expect(await response.json()).toEqual({
+      enqueued: 0,
+      skipped: 1,
+      remaining: 0,
+    });
+    expect(queue.messages).toEqual([]);
+  });
+
+  it("rejects a page longer than the per-run limit", async () => {
+    const ids = Array.from({ length: PER_RUN + 1 }, (_, i) => String(i + 1));
+
+    const response = await handlePhotoBackfill(
+      photoBackfillRequest("Bearer admin-secret", undefined, { ids }),
+      testEnv(),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("further pages");
+  });
+
+  it("rejects ids that are not Strava numeric ids", async () => {
+    const response = await handlePhotoBackfill(
+      photoBackfillRequest("Bearer admin-secret", undefined, {
+        ids: ["101; DROP TABLE activities"],
+      }),
+      testEnv(),
+    );
+
+    expect(response.status).toBe(400);
   });
 });
 

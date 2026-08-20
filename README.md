@@ -239,9 +239,17 @@ curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
 # drive: pass the answer's `nextCursor` back to continue.
 curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
   "https://hub.bendrucker.me/admin/photo-backfill?limit=25"
+
+# Aim the same sweep at named activities instead of walking. An activity with
+# no photos never gains a `photos` key, so the walk above re-reads it forever;
+# the bulk export's `Media` column says which activities are worth the call.
+# Ids already carrying photos are skipped, so a resent page costs one query.
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  --json '{"ids": ["19324502491", "19311006481"]}' \
+  "https://hub.bendrucker.me/admin/photo-backfill"
 ```
 
-The lake rebuilds nightly on its own cron at 08:00, two hours after the 06:00 sweep that enqueues decoding. The two crons stay separate because the sweep only enqueues. Decoding drains through the queue afterwards, so a rebuild in the same invocation would read the artifacts that sweep was about to replace.
+Three crons run: Strava reconciliation at 06:00, the lake rebuild at 08:00, and the transform sweep at :30 every hour. The sweep runs hourly because it enqueues at most `RECONCILE_LIMIT` per stage per run, and a schema-version bump leaves the whole corpus stale at once. Daily, that is a week-long migration. The lake stays on its own trigger because a sweep only enqueues. Decoding drains through the queue afterwards, so a rebuild in the same invocation would read the artifacts that sweep was about to replace.
 
 ## Status
 

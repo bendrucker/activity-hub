@@ -124,3 +124,45 @@ async function countUnphotographed(db: D1Database): Promise<number> {
     .first<{ n: number }>();
   return row?.n ?? 0;
 }
+
+export interface ListedPhotoBackfillResult {
+  enqueued: number;
+  skipped: number;
+  remaining: number;
+}
+
+// An activity with no photos never gains a `photos` key, so it never leaves the
+// population above and the cursor walk re-reads it on every future run. The
+// bulk export's Media column says which activities have photos, so a caller
+// holding it can name them and skip the rest: against the 2026-07-16 export
+// that was 2,631 of 4,016 rows never worth a Strava read.
+//
+// The named ids are still filtered through UNPHOTOGRAPHED, so re-sending a page
+// that already landed costs one query rather than a Strava read per activity.
+export async function backfillListedStravaPhotos(
+  env: Env,
+  ids: readonly string[],
+): Promise<ListedPhotoBackfillResult> {
+  const placeholders = ids.map((_, index) => `?${index + 1}`).join(", ");
+  const { results } = await env.REGISTRY.prepare(
+    `SELECT source_id ${UNPHOTOGRAPHED} AND source_id IN (${placeholders}) ORDER BY source_id`,
+  )
+    .bind(...ids)
+    .all<{ source_id: string }>();
+
+  const messages: IngestMessage[] = results.map((row) => ({
+    source: "strava",
+    kind: "refresh",
+    objectId: Number(row.source_id),
+  }));
+  await sendBatched(env.INGEST_QUEUE, messages);
+
+  return {
+    enqueued: messages.length,
+    // Anything the caller named that this did not enqueue: already archived,
+    // soft-deleted, or not a Strava row at all. A page that is entirely skipped
+    // is how a re-run reports itself.
+    skipped: ids.length - messages.length,
+    remaining: await countUnphotographed(env.REGISTRY),
+  };
+}
