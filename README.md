@@ -22,7 +22,9 @@ flowchart TB
         ingest[Ingest worker]
         iqueue[Ingest queue]
         registry[(D1 registry)]
+        targets[(D1 photo targets)]
         cron[Daily Strava reconcile]
+        photocron[Hourly photo backfill]
         sweepcron[Hourly transform sweep]
         tqueue[Transform queue]
         consumer[Transform consumer]
@@ -45,6 +47,7 @@ flowchart TB
     iqueue --> raw[(R2 raw)]
 
     registry --> cron --> iqueue
+    targets --> photocron --> iqueue
     registry --> sweepcron --> tqueue --> consumer
     consumer -->|batch of work| decode
     raw --> decode
@@ -260,8 +263,9 @@ curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
   "https://hub.bendrucker.me/admin/photo-backfill"
 
 # Hand the same list to the hourly drain instead of archiving it now. Ids land
-# in a work table the cron takes ten at a time, and the answer reports how many
-# are still waiting.
+# in a work table the cron takes `PHOTO_DRAIN` at a time, and the answer reports
+# how many are still waiting. The `PER_RUN` cap applies here too, so the whole
+# export-derived list goes as fourteen pages.
 curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
   --json '{"ids": ["19324502491", "19311006481"]}' \
   "https://hub.bendrucker.me/admin/photo-backfill/targets"
@@ -270,9 +274,9 @@ curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
 
 Prefer naming ids over walking. An activity with no photos never gains a `photos` key, so it never leaves the set the cursor walk selects from and gets re-read on every future run. The bulk export's `Media` column says which activities have photos, and against the 2026-07-16 export that ruled out 2,631 of 4,016 rows as never worth a call.
 
-Historical photos are worth little and the read budget is worth a lot, so seeded targets drain on their own rather than under supervision. The cron at :15 sends ten per run as `photos` messages, a kind that fetches only the photo listing.
+Historical photos are worth little and the read budget is worth a lot, so seeded targets drain on their own rather than under supervision. The cron at :15 sends `PHOTO_DRAIN` per run as `photos` messages, a kind that fetches only the photo listing. At that rate the export-derived list finishes in about six days.
 
-A `refresh` would spend two further reads on detail and streams that these activities already have archived from the bulk export. Ten an hour is 240 reads a day against a budget of 1,000, and never enough in one window to crowd a new ride's webhook out of Strava's 100-per-15-minutes cap.
+A `refresh` would spend two further reads on detail and streams that these activities already have archived from the bulk export. Ten an hour is 240 reads a day against a budget of 1,000. No single window comes near enough to Strava's cap of 100 per 15 minutes to crowd out a new ride's webhook.
 
 The cron deletes each target as it takes it, whether or not that id earned a message. An id that gained photos elsewhere costs a query to skip rather than a read to rediscover. An id the registry has never held is counted apart from it, because draining reconciles a seed list against archived photos and says nothing about activities that were never ingested.
 
