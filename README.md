@@ -236,13 +236,22 @@ curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
 curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
   "https://hub.bendrucker.me/admin/lake"
 
+```
+
+The transform sweep runs at :30 every hour. It enqueues at most `RECONCILE_LIMIT` per stage per run, and a schema-version bump leaves the whole corpus stale at once, so a daily sweep would turn a version bump into a week-long migration.
+
+Strava reconciliation runs at 06:00 and the lake rebuild two hours later at 08:00. The lake keeps its own trigger because a sweep only enqueues. Decoding drains through the queue afterwards, so a rebuild in the same invocation would read the artifacts that sweep was about to replace.
+
+#### Photo Backfill
+
+```sh
 # Archive photos for activities that have none. Every activity swept costs a
 # call to Strava's undocumented photo endpoint, so this walks in pages you
 # drive: pass the answer's `nextCursor` back to continue.
 curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
   "https://hub.bendrucker.me/admin/photo-backfill?limit=25"
 
-# Aim that sweep at named activities. Ids already carrying photos are skipped,
+# Aim that walk at named activities. Ids already carrying photos are skipped,
 # so resending a page costs one query rather than a read for each of those. An
 # id that turned out to have no photos gained no key and does cost another read.
 # A request takes at most `PER_RUN` ids, so a longer list goes as further pages.
@@ -250,9 +259,9 @@ curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
   --json '{"ids": ["19324502491", "19311006481"]}' \
   "https://hub.bendrucker.me/admin/photo-backfill"
 
-# Hand the same list to the hourly trickle instead of archiving it now. Ids
-# land in a work table the cron drains ten at a time, and the answer reports
-# how many are still waiting.
+# Hand the same list to the hourly drain instead of archiving it now. Ids land
+# in a work table the cron takes ten at a time, and the answer reports how many
+# are still waiting.
 curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
   --json '{"ids": ["19324502491", "19311006481"]}' \
   "https://hub.bendrucker.me/admin/photo-backfill/targets"
@@ -261,13 +270,13 @@ curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
 
 Prefer naming ids over walking. An activity with no photos never gains a `photos` key, so it never leaves the set the cursor walk selects from and gets re-read on every future run. The bulk export's `Media` column says which activities have photos, and against the 2026-07-16 export that ruled out 2,631 of 4,016 rows as never worth a call.
 
-Historical photos are worth little and the read budget is worth a lot, so seeded targets drain on their own rather than under supervision. The cron at :15 sends ten per run as `photos` messages, a kind that fetches the photo listing and nothing else. A `refresh` would spend two further reads on detail and streams that these activities already have archived from the bulk export. Ten an hour is 240 reads a day against a budget of 1,000, and never enough in one window to crowd a new ride's webhook out of Strava's 100-per-15-minutes cap.
+Historical photos are worth little and the read budget is worth a lot, so seeded targets drain on their own rather than under supervision. The cron at :15 sends ten per run as `photos` messages, a kind that fetches only the photo listing.
 
-Targets are deleted as the cron takes them, whether or not they earned a message. An id that gained photos elsewhere costs a query to skip rather than a read to rediscover. An id the registry has never held is counted apart from it, because draining reconciles a seed list against archived photos and says nothing about activities that were never ingested. The table emptying is the measure of progress. The unphotographed count stalls above zero instead, because an activity that turns out to have no photos gains no key and stays in that set forever. Once the table is empty the cron is a no-op and can stay deployed.
+A `refresh` would spend two further reads on detail and streams that these activities already have archived from the bulk export. Ten an hour is 240 reads a day against a budget of 1,000, and never enough in one window to crowd a new ride's webhook out of Strava's 100-per-15-minutes cap.
 
-The transform sweep runs at :30 every hour. It enqueues at most `RECONCILE_LIMIT` per stage per run, and a schema-version bump leaves the whole corpus stale at once, so a daily sweep would turn a version bump into a week-long migration.
+The cron deletes each target as it takes it, whether or not that id earned a message. An id that gained photos elsewhere costs a query to skip rather than a read to rediscover. An id the registry has never held is counted apart from it, because draining reconciles a seed list against archived photos and says nothing about activities that were never ingested.
 
-Strava reconciliation runs at 06:00 and the lake rebuild two hours later at 08:00. The lake keeps its own trigger because a sweep only enqueues. Decoding drains through the queue afterwards, so a rebuild in the same invocation would read the artifacts that sweep was about to replace.
+The table emptying is the measure of progress. The unphotographed count stalls above zero instead, because an activity that turns out to have no photos gains no key and stays in that set forever. Once the table is empty the cron is a no-op and can stay deployed.
 
 ## Status
 
