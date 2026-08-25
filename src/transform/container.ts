@@ -11,8 +11,14 @@ import type {
 export class DecodeContainer extends Container<Env> {
   defaultPort = 8080;
   // Reprocessing arrives as a burst of batches. Holding the instance between
-  // them turns a cold start per batch into one for the whole run.
-  sleepAfter = "10m";
+  // them turns a cold start per batch into one for the whole run, and a batch
+  // times out after 30 seconds, so two minutes covers the gap.
+  //
+  // Idle time is the whole cost of this container: memory and disk bill on
+  // wall clock and only vCPU bills on work. The free allowance is 25 GiB-hours
+  // a month, which at 6 GiB is four hours of uptime, so every minute held past
+  // the burst is paid for.
+  sleepAfter = "2m";
 
   // Bindings do not cross into a container, so R2 reaches it as credentials.
   // These are Worker secrets, forwarded rather than baked into the image.
