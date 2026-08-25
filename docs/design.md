@@ -87,6 +87,8 @@ A `derived` table in D1 carries one row per `(activity_id, stage)` with an `inpu
 
 Decoding runs in a container rather than in Workers, on a `activity-hub-transform` queue with its own dead letter queue. The container takes a batch of work descriptors over HTTP, writes Parquet to R2, and returns outcomes. It never writes D1 and never reads the queue, so every state transition stays in the Worker and a container crash costs time rather than data. Cloudflare bindings do not cross into a container, so it reaches both buckets over the S3 API using two scoped tokens: read on `activity-hub-raw`, write on `activity-hub-lake`.
 
+The container is billed on how long it is up, not on what it does: memory and disk accrue against wall clock and only vCPU accrues against work. An idle instance therefore costs the same as a busy one, and 25 GiB-hours of free memory is four hours of uptime a month at 6 GiB. Sleeping is a SIGTERM with no SIGKILL behind it, so the process handles the signal and exits. One that ignored it would run until the platform reaped it, and the first evidence would be the bill.
+
 Bun decodes rather than DuckDB's `fit` community extension, which rejects `.fit.gz` (3,245 of 3,246 corpus files) and exposes no developer fields. The deciding factor is duplication: the sport mapping, timezone inference, and track extraction in `src/import/` would otherwise exist twice, in TypeScript and in SQL, and drift. Decoding the entire history takes 113 seconds single-threaded, so this is not a performance call.
 
 Replay is the point of this layer. Rebuilding the lake is rerunning the stages against `raw/`, so schema changes and new feature engineering never require touching a source API.

@@ -20,4 +20,14 @@ const server = Bun.serve({
   }),
 });
 
+// Sleeping the container is a SIGTERM and nothing else: @cloudflare/containers
+// never follows it with a SIGKILL. Bun runs as PID 1 here, and the kernel
+// applies no default disposition to PID 1, so an unhandled SIGTERM is
+// discarded and the instance runs until the platform reaps it. Memory and disk
+// bill on wall clock, so that idle instance costs ~$1.37 a day.
+process.on("SIGTERM", () => {
+  server.stop(true);
+  process.exit(0);
+});
+
 console.log(`transform container listening on ${server.url}`);
