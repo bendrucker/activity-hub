@@ -89,7 +89,7 @@ Decoding runs in a container rather than in Workers, on a `activity-hub-transfor
 
 The container is billed on how long it is up, not on what it does: memory and disk accrue against wall clock and only vCPU accrues against work. An idle instance therefore costs the same as a busy one, and 25 GiB-hours of free memory is four hours of uptime a month at 6 GiB. Sleeping is a SIGTERM with no SIGKILL behind it, so the process handles the signal and exits. One that ignored it would run until the platform reaped it, and the first evidence would be the bill.
 
-Bun decodes rather than DuckDB's `fit` community extension, which rejects `.fit.gz` (3,245 of 3,246 corpus files) and exposes no developer fields. The deciding factor is duplication: the sport mapping, timezone inference, and track extraction in `src/import/` would otherwise exist twice, in TypeScript and in SQL, and drift. Decoding the entire history takes 113 seconds single-threaded, so this is not a performance call.
+Bun decodes rather than DuckDB's `fit` community extension, which reads no GPX (574 corpus files) and exposes no developer fields. Its 1.0.2 release reads `.fit.gz`, which it could not when this was decided. The deciding factor is duplication: the sport mapping, timezone inference, and track extraction in `src/import/` would otherwise exist twice, in TypeScript and in SQL, and drift. Decoding the entire history takes 113 seconds single-threaded, so this is not a performance call.
 
 Replay is the point of this layer. Rebuilding the lake is rerunning the stages against `raw/`, so schema changes and new feature engineering never require touching a source API.
 

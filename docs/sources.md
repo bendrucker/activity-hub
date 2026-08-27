@@ -59,7 +59,7 @@ Facts about the source APIs that shaped the design, current as of July 2026. Re-
 
 - Official Garmin SDKs: `@garmin/fitsdk` (pure JavaScript, runs in Workers) and `garmin-fit-sdk` (Python). Both actively released.
 - `fitdecode` is the recommended community Python parser. `python-fitparse` is unmaintained.
-- A DuckDB community extension `fit` exists (`INSTALL fit FROM community`) with `fit_records()`, `fit_sessions()`, `fit_laps()` table functions. Single maintainer. Vet developer-field coverage and note that gzipped `.fit.gz` from exports likely needs pre-decompression.
+- A DuckDB community extension `fit` exists (`INSTALL fit FROM community`) with `fit_records()`, `fit_sessions()`, `fit_laps()` table functions. Single maintainer. It reads `.fit.gz` as of 1.0.2. Developer-field coverage is still unvetted, and it reads no GPX.
 - GPX drops power. Power analysis must read from FIT (or TCX) files.
 
 ## Cloudflare
