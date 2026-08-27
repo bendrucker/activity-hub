@@ -1067,8 +1067,8 @@ describe("the publish stage", () => {
     expect(summary).toEqual({ ...EMPTY_SUMMARY, failed: 1 });
   });
 
-  // Decode not having run yet is not decode having nothing to give, and
-  // publishing a thin row now means republishing the full one later.
+  // Decode may still run and produce telemetry, so publishing a thin row now
+  // would mean republishing the full one later.
   it("waits when an original is archived and decode has not run", async () => {
     await seedActivity("a1");
     await env.RAW.put("raw/test/original.fit", "bytes");

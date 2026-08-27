@@ -177,14 +177,14 @@ export interface StageRow {
 }
 
 // What an upstream stage last recorded. A stage that reads another's output
-// learns the location from the row that recorded it rather than rebuilding the
-// key, so the two cannot drift apart, and takes its own fingerprint from the
-// same row because that artifact is its input.
+// learns the location from the row that recorded it, so the two cannot drift
+// apart, and takes its own fingerprint from the same row because that
+// artifact is its input.
 //
-// The status and attempt count come back with it because a missing artifact has
-// two meanings. A stage that ran and gave up will never produce one, and a stage
-// that has not run yet still might. A reader that saw only the `ok` rows would
-// have to ask a second time to tell them apart.
+// The status and attempt count come back with it because a missing artifact
+// has two meanings. A stage that ran and gave up will never produce one, and a
+// stage that has not run yet still might. A reader that saw only the `ok` rows
+// would have to ask a second time to tell them apart.
 export async function stageRow(
   db: D1Database,
   activityId: string,

@@ -223,9 +223,8 @@ async function publishFromDetail(
     photos(env.RAW, registry.sources),
   ]);
   // `inputFingerprint` just read this key's etag, so a miss here is the bucket
-  // misbehaving rather than an activity with nothing to publish. Recording it
-  // as failed keeps the row in the staleness query, which retries it. A skip
-  // would leave the row settled and unreachable forever.
+  // misbehaving. Recording it as failed keeps the row in the staleness query,
+  // which retries it.
   if (detail === null) {
     return {
       fingerprint,
@@ -262,10 +261,10 @@ async function publishFromDetail(
 // off the site. The registry keeps them because the workout is real even where
 // the ride is not.
 //
-// `minutes` rather than the `durationS` helper beside it, which prefers
-// `duration_total_accum`. That field is elapsed time including pauses, so it
-// reads 61,419 on a workout left running overnight and disagrees with `movingS`
-// by design. Swapping it in here would publish 47 of these as day-long rides.
+// The `durationS` helper beside this reads `duration_total_accum`, which is
+// elapsed time including pauses: it reads 61,419 on a workout left running
+// overnight and disagrees with `movingS` by design. Using it here would
+// publish 47 of these as day-long rides.
 async function publishFromWahooSummary(
   env: Env,
   activityId: string,
@@ -278,9 +277,8 @@ async function publishFromWahooSummary(
     return { fingerprint, status: "current" };
   }
 
-  // Failed rather than skipped for the same reason as the detail read above:
-  // the fingerprint's etag lookup already found this key, so a miss is the
-  // bucket misbehaving, and only a failed row gets retried.
+  // The fingerprint's etag lookup already found this key, so a miss here is
+  // the bucket misbehaving. Only a failed row gets retried.
   const object = await env.RAW.get(summaryKey);
   if (object === null) {
     return {
