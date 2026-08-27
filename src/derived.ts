@@ -204,6 +204,22 @@ export async function stageArtifact(
       };
 }
 
+// Whether a stage settled, and how. `stageArtifact` answers for `ok` alone, so
+// a caller reading it cannot tell a decode that ran and produced nothing from
+// one that has not run yet. Publish needs that difference: the first will never
+// yield telemetry and the second still might.
+export async function stageStatus(
+  db: D1Database,
+  activityId: string,
+  stage: Stage,
+): Promise<DerivedStatus | null> {
+  const row = await db
+    .prepare(`SELECT status FROM derived WHERE activity_id = ?1 AND stage = ?2`)
+    .bind(activityId, stage)
+    .first<{ status: DerivedStatus }>();
+  return row?.status ?? null;
+}
+
 export interface DerivedOutcome {
   activityId: string;
   stage: Stage;
