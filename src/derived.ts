@@ -271,6 +271,26 @@ export async function recordOutcome(
     .run();
 }
 
+// A stage that re-runs and finds itself current writes nothing, so whatever
+// made STALE select it is still true on the next sweep, which selects it again.
+// 281 decode rows sat in that loop, re-enqueued hourly and waking the decode
+// container every time. Stamping the row records that the stage checked its
+// inputs and found them unchanged, which is the question STALE's updated_at
+// comparison is asking.
+export async function touchDerived(
+  db: D1Database,
+  activityId: string,
+  stage: Stage,
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE derived SET updated_at = ?3
+       WHERE activity_id = ?1 AND stage = ?2`,
+    )
+    .bind(activityId, stage, new Date().toISOString())
+    .run();
+}
+
 export async function clearDerived(
   db: D1Database,
   activityId: string,
