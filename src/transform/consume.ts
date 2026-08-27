@@ -3,6 +3,7 @@ import {
   inputFingerprint,
   isCurrent,
   recordOutcome,
+  touchDerived,
   type DerivedOutcome,
   type Stage,
 } from "../derived";
@@ -91,6 +92,7 @@ export async function consumeTransformBatch(
       const fingerprint = await inputFingerprint(env.RAW, rawKeys);
 
       if (await isCurrent(env.REGISTRY, activityId, stage, fingerprint)) {
+        await touchDerived(env.REGISTRY, activityId, stage);
         summary.current += 1;
         message.ack();
         continue;
@@ -213,6 +215,7 @@ async function consumePublish(
   }
 
   if (result.status === "current") {
+    await touchDerived(env.REGISTRY, activityId, "publish");
     summary.current += 1;
     message.ack();
     return;

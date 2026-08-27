@@ -238,10 +238,12 @@ describe("consumeTransformBatch", () => {
     });
 
     expect(decode).not.toHaveBeenCalled();
-    expect(await derivedRow("a1")).toMatchObject({
-      output_key: "decode/v1/a1/",
-      updated_at: OLD,
-    });
+    const row = await derivedRow("a1");
+    expect(row).toMatchObject({ output_key: "decode/v1/a1/" });
+    // Whatever made the staleness query select this row is still true, so
+    // leaving updated_at alone means the next sweep selects it again, and every
+    // sweep after that. Stamping it is the only thing that ends the loop.
+    expect(row?.updated_at).not.toEqual(OLD);
     expect(message.ack).toHaveBeenCalled();
     expect(summary).toEqual({ ...EMPTY_SUMMARY, current: 1 });
   });
@@ -1156,6 +1158,7 @@ describe("the publish stage", () => {
 
     expect(summarize).not.toHaveBeenCalled();
     expect(site.publishActivity).not.toHaveBeenCalled();
+    expect((await publishRow("a1"))?.updated_at).not.toEqual(OLD);
     expect(summary).toEqual({ ...EMPTY_SUMMARY, current: 1 });
   });
 });
