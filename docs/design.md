@@ -164,7 +164,7 @@ Photos serve from the raw bucket through a route on the website that matches the
 
 The registry answers when and what sport. The container answers everything only the telemetry knows, including the device's own distance, elevation, and moving time. Strava's archived `detail.json` supplies the title, and stands in for the totals when a file carries records but no session summary.
 
-With no decode artifact, publish falls back to whatever the provider archived beside the file: `detail.json` first, then a Wahoo `summary`, which carries the recorded minutes and nothing else. What opens the fallback is decode having settled, which covers an activity that never had an original and one whose original decode ran against and could not read. Waiting instead for a decode that already gave up strands the activity permanently, which is what happened to the single TCX in the archive.
+With no decode artifact, publish falls back to whatever the provider archived beside the file: `detail.json` first, then a Wahoo `summary`, which carries the recorded minutes and nothing else. The fallback opens once decode has settled, which covers an activity that never had an original and one whose original decode read and could not parse. Waiting on a decode that already gave up strands the activity permanently, which is what happened to the single TCX in the archive.
 
 A Wahoo summary reporting zero minutes is an aborted or never-stopped recording. Elapsed time accrued while the head unit captured nothing, so it stays off the site and keeps its registry row.
 
