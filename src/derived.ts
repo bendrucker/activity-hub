@@ -271,24 +271,39 @@ export async function recordOutcome(
     .run();
 }
 
-// A stage that re-runs and finds itself current writes nothing, so whatever
-// made STALE select it is still true on the next sweep, which selects it again.
-// 281 decode rows sat in that loop, re-enqueued hourly and waking the decode
-// container every time. Stamping the row records that the stage checked its
-// inputs and found them unchanged, which is the question STALE's updated_at
-// comparison is asking.
+// A stage that re-runs and finds itself current writes nothing otherwise, so
+// whatever made STALE select it is still true on the next sweep, which selects
+// it again, without end. Stamping records that the stage checked its inputs and
+// found them unchanged, which is what STALE's updated_at comparison asks.
+//
+// Stamping decode leaves publish stale against its upstream, so a pair settles
+// in two sweeps rather than one. It does settle: a stamped row is selected again
+// only when its inputs actually move, and a stamp moves no stage's inputs.
+//
+// Only an `ok` row is stamped. That is the only status `isCurrent` returns true
+// for, so the predicate never declines a stamp this code meant to make. It does
+// decline one racing a duplicate message that just recorded a failure, whose
+// timestamp orders the recent-failure list.
+//
+// A stamp that fails is not worth retrying a message over. The row keeps the
+// timestamp it had, which is where every row sat before this existed, and the
+// next sweep asks again.
 export async function touchDerived(
   db: D1Database,
   activityId: string,
   stage: Stage,
 ): Promise<void> {
-  await db
-    .prepare(
-      `UPDATE derived SET updated_at = ?3
-       WHERE activity_id = ?1 AND stage = ?2`,
-    )
-    .bind(activityId, stage, new Date().toISOString())
-    .run();
+  try {
+    await db
+      .prepare(
+        `UPDATE derived SET updated_at = ?3
+         WHERE activity_id = ?1 AND stage = ?2 AND status = 'ok'`,
+      )
+      .bind(activityId, stage, new Date().toISOString())
+      .run();
+  } catch (error) {
+    console.warn(`failed to stamp ${stage} ${activityId}: ${String(error)}`);
+  }
 }
 
 export async function clearDerived(
