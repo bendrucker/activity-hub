@@ -6,8 +6,9 @@
 import {
   inputFingerprint,
   isCurrent,
-  stageArtifact,
-  stageStatus,
+  MAX_ATTEMPTS,
+  stageRow,
+  type StageRow,
 } from "../derived";
 import { lakeUri } from "../lake/location";
 import { isWorkoutSummary } from "../wahoo/summary";
@@ -114,12 +115,23 @@ export async function publishToSite(
     return { fingerprint: DELETED, status: "ok" };
   }
 
-  const decode = await stageArtifact(env.REGISTRY, activityId, "decode");
-  if (decode === null || decode.outputKey === null) {
-    if (await decodeSettled(env.REGISTRY, activityId, registry)) {
-      return publishWithoutTelemetry(env, activityId, registry, site);
+  const hasOriginal = registry.sources.some(
+    (source) => source.rawKeys.original !== undefined,
+  );
+  const decode = await stageRow(env.REGISTRY, activityId, "decode");
+  if (decode?.status !== "ok" || decode.outputKey === null) {
+    if (!decodeSettled(decode, hasOriginal)) {
+      return notDecoded();
     }
-    return notDecoded();
+    if (hasOriginal) {
+      // An archived file decode read and gave up on. The row that follows
+      // carries no telemetry, so an activity that once published a full one is
+      // quietly downgraded, and nothing else in the pipeline reports that.
+      console.warn(
+        `publishing ${activityId} without telemetry: decode ${decode?.status ?? "never ran"}`,
+      );
+    }
+    return publishWithoutTelemetry(env, activityId, registry, site);
   }
 
   const fingerprint = `${decode.inputFingerprint}:${decode.artifactVersion}`;
@@ -150,21 +162,21 @@ export async function publishToSite(
 }
 
 // Whether decode has said everything it is going to say. No archived original
-// means it will never run at all, and a `skipped` row means it ran and found
-// nothing among the raw keys it could read. Either way no Parquet is coming,
-// and waiting for one strands the activity.
-async function decodeSettled(
-  db: D1Database,
-  activityId: string,
-  registry: ActivityRow,
-): Promise<boolean> {
-  const hasOriginal = registry.sources.some(
-    (source) => source.rawKeys.original !== undefined,
-  );
+// means it will never run at all. A `skipped` row means it ran and found nothing
+// among the raw keys it could read. A `failed` row at the attempt ceiling is
+// invisible to the staleness query, so nothing will ever run it again either.
+// In each case no Parquet is coming, and waiting for one strands the activity.
+function decodeSettled(decode: StageRow | null, hasOriginal: boolean): boolean {
   if (!hasOriginal) {
     return true;
   }
-  return (await stageStatus(db, activityId, "decode")) === "skipped";
+  if (decode === null) {
+    return false;
+  }
+  return (
+    decode.status === "skipped" ||
+    (decode.status === "failed" && decode.attempts >= MAX_ATTEMPTS)
+  );
 }
 
 // With no telemetry to summarize, the row carries whatever the provider
@@ -210,8 +222,16 @@ async function publishFromDetail(
     stravaDetail(env.RAW, registry.sources),
     photos(env.RAW, registry.sources),
   ]);
+  // `inputFingerprint` just read this key's etag, so a miss here is the bucket
+  // misbehaving rather than an activity with nothing to publish. Recording it
+  // as failed keeps the row in the staleness query, which retries it. A skip
+  // would leave the row settled and unreachable forever.
   if (detail === null) {
-    return notDecoded();
+    return {
+      fingerprint,
+      status: "failed",
+      error: `archived Strava detail ${detailKey} could not be read`,
+    };
   }
 
   await site.publishActivity({
@@ -241,6 +261,11 @@ async function publishFromDetail(
 // the head unit accumulated elapsed time while capturing nothing. Those stay
 // off the site. The registry keeps them because the workout is real even where
 // the ride is not.
+//
+// `minutes` rather than the `durationS` helper beside it, which prefers
+// `duration_total_accum`. That field is elapsed time including pauses, so it
+// reads 61,419 on a workout left running overnight and disagrees with `movingS`
+// by design. Swapping it in here would publish 47 of these as day-long rides.
 async function publishFromWahooSummary(
   env: Env,
   activityId: string,
@@ -253,13 +278,24 @@ async function publishFromWahooSummary(
     return { fingerprint, status: "current" };
   }
 
+  // Failed rather than skipped for the same reason as the detail read above:
+  // the fingerprint's etag lookup already found this key, so a miss is the
+  // bucket misbehaving, and only a failed row gets retried.
   const object = await env.RAW.get(summaryKey);
   if (object === null) {
-    return notDecoded(`archived Wahoo summary ${summaryKey} is missing`);
+    return {
+      fingerprint,
+      status: "failed",
+      error: `archived Wahoo summary ${summaryKey} is missing`,
+    };
   }
   const parsed: unknown = await object.json();
   if (!isWorkoutSummary(parsed)) {
-    return notDecoded(`archived Wahoo summary ${summaryKey} is unreadable`);
+    return {
+      fingerprint,
+      status: "failed",
+      error: `archived Wahoo summary ${summaryKey} is unreadable`,
+    };
   }
 
   const { minutes } = parsed.workout;
