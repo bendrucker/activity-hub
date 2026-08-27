@@ -168,39 +168,50 @@ export async function isCurrent(
   return row !== null;
 }
 
-export interface StageArtifact {
+export interface StageRow {
+  status: DerivedStatus;
   outputKey: string | null;
   inputFingerprint: string;
   artifactVersion: number;
+  attempts: number;
 }
 
-// What an upstream stage last produced. A stage that reads another's output
-// learns the location from the row that recorded it rather than rebuilding the
-// key, so the two cannot drift apart, and takes its own fingerprint from the
-// same row because that artifact is its input.
-export async function stageArtifact(
+// What an upstream stage last recorded. A stage that reads another's output
+// learns the location from the row that recorded it, so the two cannot drift
+// apart, and takes its own fingerprint from the same row because that
+// artifact is its input.
+//
+// The status and attempt count come back with it because a missing artifact
+// has two meanings. A stage that ran and gave up will never produce one, and a
+// stage that has not run yet still might. A reader that saw only the `ok` rows
+// would have to ask a second time to tell them apart.
+export async function stageRow(
   db: D1Database,
   activityId: string,
   stage: Stage,
-): Promise<StageArtifact | null> {
+): Promise<StageRow | null> {
   const row = await db
     .prepare(
-      `SELECT output_key, input_fingerprint, artifact_version
+      `SELECT status, output_key, input_fingerprint, artifact_version, attempts
        FROM derived
-       WHERE activity_id = ?1 AND stage = ?2 AND status = 'ok'`,
+       WHERE activity_id = ?1 AND stage = ?2`,
     )
     .bind(activityId, stage)
     .first<{
+      status: DerivedStatus;
       output_key: string | null;
       input_fingerprint: string;
       artifact_version: number;
+      attempts: number;
     }>();
   return row === null
     ? null
     : {
+        status: row.status,
         outputKey: row.output_key,
         inputFingerprint: row.input_fingerprint,
         artifactVersion: row.artifact_version,
+        attempts: row.attempts,
       };
 }
 

@@ -3,8 +3,15 @@
 // Strava's archived detail supplies the title and the numbers a device without
 // sessions never recorded.
 
-import { inputFingerprint, isCurrent, stageArtifact } from "../derived";
+import {
+  inputFingerprint,
+  isCurrent,
+  MAX_ATTEMPTS,
+  stageRow,
+  type StageRow,
+} from "../derived";
 import { lakeUri } from "../lake/location";
+import { isWorkoutSummary } from "../wahoo/summary";
 import { publishClient, type PublishClient } from "./container";
 import type { PowerBest, PowerSource, PublishArtifact } from "./protocol";
 
@@ -76,6 +83,12 @@ function stravaSource(
   return sources.find((source) => source.source === "strava");
 }
 
+function wahooSource(
+  sources: readonly ActivitySource[],
+): ActivitySource | undefined {
+  return sources.find((source) => source.source === "wahoo");
+}
+
 export async function publishToSite(
   env: Env,
   activityId: string,
@@ -102,18 +115,23 @@ export async function publishToSite(
     return { fingerprint: DELETED, status: "ok" };
   }
 
-  const decode = await stageArtifact(env.REGISTRY, activityId, "decode");
-  if (decode === null || decode.outputKey === null) {
-    // No archived original means decode will never run, so this is the only
-    // route this activity can reach the site by. Strava's detail carries
-    // totals but no telemetry, so the row publishes with no power or map.
-    const hasOriginal = registry.sources.some(
-      (source) => source.rawKeys.original !== undefined,
-    );
-    if (!hasOriginal) {
-      return publishFromDetailOnly(env, activityId, registry, site);
+  const hasOriginal = registry.sources.some(
+    (source) => source.rawKeys.original !== undefined,
+  );
+  const decode = await stageRow(env.REGISTRY, activityId, "decode");
+  if (decode?.status !== "ok" || decode.outputKey === null) {
+    if (!decodeSettled(decode, hasOriginal)) {
+      return notDecoded();
     }
-    return notDecoded();
+    if (hasOriginal) {
+      // An archived file decode read and gave up on. The row that follows
+      // carries no telemetry, so an activity that once published a full one is
+      // quietly downgraded, and nothing else in the pipeline reports that.
+      console.warn(
+        `publishing ${activityId} without telemetry: decode ${decode?.status ?? "never ran"}`,
+      );
+    }
+    return publishWithoutTelemetry(env, activityId, registry, site);
   }
 
   const fingerprint = `${decode.inputFingerprint}:${decode.artifactVersion}`;
@@ -143,22 +161,58 @@ export async function publishToSite(
   return { fingerprint, status: "ok" };
 }
 
-// Reached only when there is no archived original, so decode never ran and
-// there is no Parquet to summarize. The fingerprint is the detail file's
-// etag, since there is no decode row.
-async function publishFromDetailOnly(
+// Whether decode has said everything it is going to say. No archived original
+// means it will never run at all. A `skipped` row means it ran and found nothing
+// among the raw keys it could read. A `failed` row at the attempt ceiling is
+// invisible to the staleness query, so nothing will ever run it again either.
+// In each case no Parquet is coming, and waiting for one strands the activity.
+function decodeSettled(decode: StageRow | null, hasOriginal: boolean): boolean {
+  if (!hasOriginal) {
+    return true;
+  }
+  if (decode === null) {
+    return false;
+  }
+  return (
+    decode.status === "skipped" ||
+    (decode.status === "failed" && decode.attempts >= MAX_ATTEMPTS)
+  );
+}
+
+// With no telemetry to summarize, the row carries whatever the provider
+// archived beside the file. Strava's detail holds the totals, and a Wahoo
+// workout old enough that the cloud kept no file has only its summary.
+async function publishWithoutTelemetry(
   env: Env,
   activityId: string,
   registry: ActivityRow,
   site: SitePublisher,
 ): Promise<PublishResult> {
   const detailKey = stravaSource(registry.sources)?.rawKeys.detail;
-  if (detailKey === undefined) {
-    return notDecoded(
-      "activity has no archived original and no Strava detail to publish from",
-    );
+  if (detailKey !== undefined) {
+    return publishFromDetail(env, activityId, registry, site, detailKey);
   }
 
+  const summaryKey = wahooSource(registry.sources)?.rawKeys.summary;
+  if (summaryKey !== undefined) {
+    return publishFromWahooSummary(env, activityId, registry, site, summaryKey);
+  }
+
+  return notDecoded(
+    "activity has no decoded telemetry and no provider record to publish from",
+  );
+}
+
+// Strava's detail carries totals but no telemetry, so the row publishes with
+// no power and no map. The fingerprint is the detail file's etag, since there
+// is no decode row to take one from.
+async function publishFromDetail(
+  env: Env,
+  activityId: string,
+  registry: ActivityRow,
+  site: SitePublisher,
+  detailKey: string,
+): Promise<PublishResult> {
   const fingerprint = await inputFingerprint(env.RAW, [detailKey]);
   if (await isCurrent(env.REGISTRY, activityId, "publish", fingerprint)) {
     return { fingerprint, status: "current" };
@@ -168,8 +222,15 @@ async function publishFromDetailOnly(
     stravaDetail(env.RAW, registry.sources),
     photos(env.RAW, registry.sources),
   ]);
+  // `inputFingerprint` just read this key's etag, so a miss here is the bucket
+  // misbehaving. Recording it as failed keeps the row in the staleness query,
+  // which retries it.
   if (detail === null) {
-    return notDecoded();
+    return {
+      fingerprint,
+      status: "failed",
+      error: `archived Strava detail ${detailKey} could not be read`,
+    };
   }
 
   await site.publishActivity({
@@ -187,6 +248,78 @@ async function publishFromDetailOnly(
     polyline: null,
     elevationProfile: null,
     photoKeys,
+  });
+  return { fingerprint, status: "ok" };
+}
+
+// A Wahoo summary is start time, sport, and recorded minutes. It has no
+// distance, elevation, or power, so those publish null and the site shows that
+// the ride happened without claiming anything about it.
+//
+// Minutes at zero is the signature of an aborted or never-stopped recording:
+// the head unit accumulated elapsed time while capturing nothing. Those stay
+// off the site. The registry keeps them because the workout is real even where
+// the ride is not.
+//
+// The `durationS` helper beside this reads `duration_total_accum`, which is
+// elapsed time including pauses: it reads 61,419 on a workout left running
+// overnight and disagrees with `movingS` by design. Using it here would
+// publish 47 of these as day-long rides.
+async function publishFromWahooSummary(
+  env: Env,
+  activityId: string,
+  registry: ActivityRow,
+  site: SitePublisher,
+  summaryKey: string,
+): Promise<PublishResult> {
+  const fingerprint = await inputFingerprint(env.RAW, [summaryKey]);
+  if (await isCurrent(env.REGISTRY, activityId, "publish", fingerprint)) {
+    return { fingerprint, status: "current" };
+  }
+
+  // The fingerprint's etag lookup already found this key, so a miss here is
+  // the bucket misbehaving. Only a failed row gets retried.
+  const object = await env.RAW.get(summaryKey);
+  if (object === null) {
+    return {
+      fingerprint,
+      status: "failed",
+      error: `archived Wahoo summary ${summaryKey} is missing`,
+    };
+  }
+  const parsed: unknown = await object.json();
+  if (!isWorkoutSummary(parsed)) {
+    return {
+      fingerprint,
+      status: "failed",
+      error: `archived Wahoo summary ${summaryKey} is unreadable`,
+    };
+  }
+
+  const { minutes } = parsed.workout;
+  if (minutes <= 0) {
+    return {
+      fingerprint,
+      status: "skipped",
+      reason: "Wahoo recorded no minutes for this workout",
+    };
+  }
+
+  await site.publishActivity({
+    activityId,
+    stravaId: null,
+    name: registry.name,
+    sport: registry.sport,
+    startedAt: registry.startedAt,
+    timezone: registry.timezone,
+    distanceM: null,
+    movingS: minutes * 60,
+    elevationM: null,
+    averageWatts: null,
+    powerSource: "none",
+    polyline: null,
+    elevationProfile: null,
+    photoKeys: await photos(env.RAW, registry.sources),
   });
   return { fingerprint, status: "ok" };
 }

@@ -5,6 +5,7 @@ import {
   ARTIFACT_VERSION,
   EMPTY_FINGERPRINT,
   inputFingerprint,
+  MAX_ATTEMPTS,
   type DerivedStatus,
   type Stage,
 } from "../derived";
@@ -468,6 +469,57 @@ function publishRow(activityId: string): Promise<DerivedRow | null> {
     .first<DerivedRow>();
 }
 
+// A Strava activity whose archived original decode cannot read, with the detail
+// body that stands in for the telemetry it will never produce.
+async function seedUndecodable(activityId: string): Promise<void> {
+  await seedActivity(activityId);
+  await env.RAW.put("raw/test/original.tcx.gz", "bytes");
+  await env.RAW.put(
+    "raw/test/detail.json",
+    JSON.stringify({
+      name: "Camino repeats",
+      distance: 41000,
+      moving_time: 5000,
+      total_elevation_gain: 480,
+    }),
+  );
+  await seedSource({
+    source: "strava",
+    sourceId: "9001",
+    activityId,
+    rawKeys: {
+      original: "raw/test/original.tcx.gz",
+      detail: "raw/test/detail.json",
+    },
+  });
+}
+
+// A Wahoo workout the cloud kept no file for: the summary is the only archived
+// record, and `minutes` is the one number it carries about the ride.
+async function seedWahooSummary(
+  activityId: string,
+  minutes: number,
+): Promise<void> {
+  await env.RAW.put(
+    "raw/test/summary.json",
+    JSON.stringify({
+      id: 1,
+      workout: {
+        id: 1,
+        starts: "2026-01-01T14:00:00.000Z",
+        minutes,
+        workout_type_id: 0,
+      },
+    }),
+  );
+  await seedSource({
+    source: "wahoo",
+    sourceId: "1",
+    activityId,
+    rawKeys: { summary: "raw/test/summary.json" },
+  });
+}
+
 // A Strava activity with an archived detail body and two photos, decoded.
 async function seedPublishable(activityId: string): Promise<void> {
   await seedActivity(activityId);
@@ -791,7 +843,7 @@ describe("the publish stage", () => {
     expect(summary).toEqual({ ...EMPTY_SUMMARY, published: 1 });
   });
 
-  it("skips when neither an archived original nor a Strava detail exists", async () => {
+  it("skips when no provider archived anything to publish from", async () => {
     await seedActivity("a1");
     await seedSource({ source: "wahoo", sourceId: "1", activityId: "a1" });
     const summarize = summarizeReturning({
@@ -808,7 +860,250 @@ describe("the publish stage", () => {
     expect(await publishRow("a1")).toMatchObject({
       status: "skipped",
       error:
-        "activity has no archived original and no Strava detail to publish from",
+        "activity has no decoded telemetry and no provider record to publish from",
+    });
+    expect(summary).toEqual({ ...EMPTY_SUMMARY, skipped: 1 });
+  });
+
+  // Wahoo kept no file for pre-2018 ELEMNT workouts, so the summary is the
+  // whole record and carries only how long the ride ran.
+  it("publishes from a Wahoo summary when there is no archived original", async () => {
+    await seedActivity("a1");
+    await seedWahooSummary("a1", 96);
+    const site = siteStub();
+
+    const summary = await consumeTransformBatch(
+      batchOf([publishMessage("a1")]),
+      testEnv,
+      {
+        container: {
+          summarize: summarizeReturning({
+            outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+          }),
+        },
+        site,
+      },
+    );
+
+    expect(site.publishActivity).toHaveBeenCalledWith({
+      activityId: "a1",
+      stravaId: null,
+      name: null,
+      sport: "ride",
+      startedAt: "2026-01-01T14:00:00.000Z",
+      timezone: "America/Los_Angeles",
+      distanceM: null,
+      movingS: 5760,
+      elevationM: null,
+      averageWatts: null,
+      powerSource: "none",
+      polyline: null,
+      elevationProfile: null,
+      photoKeys: [],
+    });
+    expect(site.publishPowerCurve).not.toHaveBeenCalled();
+    expect(await publishRow("a1")).toMatchObject({ status: "ok" });
+    expect(summary).toEqual({ ...EMPTY_SUMMARY, published: 1 });
+  });
+
+  // A head unit left running accumulates elapsed time while recording nothing,
+  // which Wahoo reports as zero minutes.
+  it("keeps a Wahoo workout that recorded no minutes off the site", async () => {
+    await seedActivity("a1");
+    await seedWahooSummary("a1", 0);
+    const site = siteStub();
+
+    const summary = await consumeTransformBatch(
+      batchOf([publishMessage("a1")]),
+      testEnv,
+      {
+        container: {
+          summarize: summarizeReturning({
+            outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+          }),
+        },
+        site,
+      },
+    );
+
+    expect(site.publishActivity).not.toHaveBeenCalled();
+    expect(await publishRow("a1")).toMatchObject({
+      status: "skipped",
+      error: "Wahoo recorded no minutes for this workout",
+    });
+    expect(summary).toEqual({ ...EMPTY_SUMMARY, skipped: 1 });
+  });
+
+  // An original decode cannot read leaves the activity with an archived file
+  // and no telemetry forever. Waiting for a decode that already gave up is
+  // what stranded the one TCX file in the archive.
+  it("falls back for an original decode has already skipped", async () => {
+    await seedUndecodable("a1");
+    await seedDerived({ activityId: "a1", stage: "decode", status: "skipped" });
+    const site = siteStub();
+
+    const summary = await consumeTransformBatch(
+      batchOf([publishMessage("a1")]),
+      testEnv,
+      {
+        container: {
+          summarize: summarizeReturning({
+            outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+          }),
+        },
+        site,
+      },
+    );
+
+    expect(site.publishActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activityId: "a1",
+        name: "Camino repeats",
+        distanceM: 41000,
+        movingS: 5000,
+        elevationM: 480,
+      }),
+    );
+    expect(await publishRow("a1")).toMatchObject({ status: "ok" });
+    expect(summary).toEqual({ ...EMPTY_SUMMARY, published: 1 });
+  });
+
+  // A decode row at the attempt ceiling is invisible to the staleness query, so
+  // nothing will run it again. Waiting on it strands the activity as surely as
+  // waiting on one that skipped.
+  it("falls back for a decode parked at the attempt ceiling", async () => {
+    await seedUndecodable("a1");
+    await seedDerived({
+      activityId: "a1",
+      stage: "decode",
+      status: "failed",
+      attempts: MAX_ATTEMPTS,
+    });
+    const site = siteStub();
+
+    const summary = await consumeTransformBatch(
+      batchOf([publishMessage("a1")]),
+      testEnv,
+      {
+        container: {
+          summarize: summarizeReturning({
+            outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+          }),
+        },
+        site,
+      },
+    );
+
+    expect(site.publishActivity).toHaveBeenCalledWith(
+      expect.objectContaining({ activityId: "a1", distanceM: 41000 }),
+    );
+    expect(await publishRow("a1")).toMatchObject({ status: "ok" });
+    expect(summary).toEqual({ ...EMPTY_SUMMARY, published: 1 });
+  });
+
+  // Below the ceiling the sweep still retries decode, so the telemetry may yet
+  // arrive and a thin row now would be republished later.
+  it("waits for a decode still under the attempt ceiling", async () => {
+    await seedUndecodable("a1");
+    await seedDerived({
+      activityId: "a1",
+      stage: "decode",
+      status: "failed",
+      attempts: MAX_ATTEMPTS - 1,
+    });
+    const site = siteStub();
+
+    const summary = await consumeTransformBatch(
+      batchOf([publishMessage("a1")]),
+      testEnv,
+      {
+        container: {
+          summarize: summarizeReturning({
+            outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+          }),
+        },
+        site,
+      },
+    );
+
+    expect(site.publishActivity).not.toHaveBeenCalled();
+    expect(await publishRow("a1")).toMatchObject({
+      status: "skipped",
+      error: "activity has not been decoded",
+    });
+    expect(summary).toEqual({ ...EMPTY_SUMMARY, skipped: 1 });
+  });
+
+  // A skipped row settles and leaves the staleness query, so an R2 hiccup that
+  // recorded one would strand the activity for good. Failed rows are retried.
+  it("records a failure when the archived detail cannot be read", async () => {
+    await seedActivity("a1");
+    await seedSource({
+      source: "strava",
+      sourceId: "9001",
+      activityId: "a1",
+      rawKeys: { detail: "raw/test/absent.json" },
+    });
+    const site = siteStub();
+
+    const summary = await consumeTransformBatch(
+      batchOf([publishMessage("a1")]),
+      testEnv,
+      {
+        container: {
+          summarize: summarizeReturning({
+            outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+          }),
+        },
+        site,
+      },
+    );
+
+    expect(site.publishActivity).not.toHaveBeenCalled();
+    expect(await publishRow("a1")).toMatchObject({
+      status: "failed",
+      error: "archived Strava detail raw/test/absent.json could not be read",
+    });
+    expect(summary).toEqual({ ...EMPTY_SUMMARY, failed: 1 });
+  });
+
+  // Decode may still run and produce telemetry, so publishing a thin row now
+  // would mean republishing the full one later.
+  it("waits when an original is archived and decode has not run", async () => {
+    await seedActivity("a1");
+    await env.RAW.put("raw/test/original.fit", "bytes");
+    await env.RAW.put(
+      "raw/test/detail.json",
+      JSON.stringify({ name: "Kings Mountain", distance: 41000 }),
+    );
+    await seedSource({
+      source: "strava",
+      sourceId: "9001",
+      activityId: "a1",
+      rawKeys: {
+        original: "raw/test/original.fit",
+        detail: "raw/test/detail.json",
+      },
+    });
+    const site = siteStub();
+
+    const summary = await consumeTransformBatch(
+      batchOf([publishMessage("a1")]),
+      testEnv,
+      {
+        container: {
+          summarize: summarizeReturning({
+            outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+          }),
+        },
+        site,
+      },
+    );
+
+    expect(site.publishActivity).not.toHaveBeenCalled();
+    expect(await publishRow("a1")).toMatchObject({
+      status: "skipped",
+      error: "activity has not been decoded",
     });
     expect(summary).toEqual({ ...EMPTY_SUMMARY, skipped: 1 });
   });
