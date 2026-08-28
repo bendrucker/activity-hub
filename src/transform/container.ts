@@ -30,6 +30,26 @@ export class DecodeContainer extends Container<Env> {
     R2_LAKE_ACCESS_KEY_ID: this.env.R2_LAKE_ACCESS_KEY_ID,
     R2_LAKE_SECRET_ACCESS_KEY: this.env.R2_LAKE_SECRET_ACCESS_KEY,
   };
+
+  // The lake build defers SIGTERM until it settles, so a build that hangs
+  // would hold the instance indefinitely. This timer caps any pin of the
+  // instance at three hours, triple the ~55-minute build. The schedule
+  // persists in the Durable Object's storage and deletes after firing. A
+  // stale timer firing while the container sleeps no-ops below. One landing
+  // during a later wake can kill a 30-second decode batch, which the queue
+  // retries.
+  override async onStart(): Promise<void> {
+    await this.schedule(3 * 3600, "watchdogStop");
+  }
+
+  async watchdogStop(): Promise<void> {
+    if (!this.ctx.container?.running) {
+      return;
+    }
+    // destroy() sends SIGKILL. The drain path ignores SIGTERM while a build
+    // runs, so a signal the container may defer cannot serve as a backstop.
+    await this.destroy();
+  }
 }
 
 export interface DecodeClient {
