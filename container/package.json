@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@duckdb/node-api": "1.5.5-r.4",
-    "@garmin/fitsdk": "21.208.0",
+    "@garmin/fitsdk": "21.213.0",
     "@mapbox/polyline": "1.2.1"
   },
   "devDependencies": {
