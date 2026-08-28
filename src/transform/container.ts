@@ -56,9 +56,9 @@ export function decodeClient(env: Env): DecodeClient {
   };
 }
 
-// The container only accepts the build (it runs long past any caller's wall
-// clock), so busy is an answer rather than an error: a 409 means the tables
-// are already being rebuilt, which is what the caller wanted.
+// The container only accepts the build, which runs long past any caller's
+// wall clock, so a 409 means the tables are already being rebuilt — which is
+// what the caller wanted.
 export function lakeClient(env: Env): LakeClient {
   return {
     async build(request) {

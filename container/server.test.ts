@@ -58,9 +58,9 @@ test("POST /decode rejects a body that is not JSON", async () => {
   expect(response.status).toBe(400);
 });
 
-// The route answers before the build settles, so a build parked on a promise
-// only this test can resolve proves the 202 is an accept rather than a result,
-// and holds the runner busy for the 409 alongside it.
+// The route answers before the build settles: parking the build on a promise
+// only this test can resolve proves the 202 is an accept, and holds the
+// runner busy for the 409 alongside it.
 test("POST /lake accepts before the build settles and refuses a second", async () => {
   const settled = Promise.withResolvers<{ tables: [] }>();
   const runner = lakeRunner({

@@ -79,8 +79,9 @@ export interface LakeAccepted {
   startedAt: string;
 }
 
-// One build at a time. A second request while one runs is refused, not queued:
-// the tables it would write are the same tables the running build is writing.
+// One build at a time: a second request while one runs is refused, because
+// the tables it would write are the same tables the running build is
+// writing.
 export interface LakeBusy {
   accepted: false;
 }

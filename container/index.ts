@@ -42,11 +42,11 @@ function shutdown(): void {
 // discarded and the instance runs until the platform reaps it. Memory and disk
 // bill on wall clock, so that idle instance costs ~$1.37 a day.
 //
-// A running lake build defers the exit instead of dying mid-write: the library
-// re-sends SIGTERM every couple of minutes, so the drain has to be idempotent,
-// and the runner exits the process itself once the build settles. A platform
-// stop (a deploy) escalates to SIGKILL after 15 minutes and kills a mid-build;
-// the next nightly heals it.
+// A running lake build defers the exit: the library re-sends SIGTERM every
+// couple of minutes, so the drain has to be idempotent, and the runner exits
+// the process itself once the build settles. A platform stop (a deploy)
+// escalates to SIGKILL after 15 minutes and kills a mid-build; the next
+// nightly heals it.
 process.on("SIGTERM", () => {
   if (runner.drain()) {
     return;
