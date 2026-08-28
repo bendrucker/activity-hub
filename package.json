@@ -21,7 +21,7 @@
     "ulid": "^3.0.2"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.18.0",
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
     "@types/bun": "^1.4.0",
     "@types/mapbox__polyline": "^1.0.5",
     "@types/tz-lookup": "^6.1.2",
