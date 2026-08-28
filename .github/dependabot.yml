@@ -7,6 +7,13 @@ updates:
     directories: ["/", "/container"]
     schedule: { interval: weekly }
     # Let a release sit for a week before Dependabot proposes it. GitHub
-    # Actions has no cooldown support, so it only applies to bun.
+    # Actions has no cooldown support, so it only applies to bun and docker.
+    cooldown:
+      default-days: 7
+  # The decode image pins its bun base image, which the bun ecosystem above
+  # does not see: it reads container/package.json, not the Dockerfile.
+  - package-ecosystem: docker
+    directory: /container
+    schedule: { interval: weekly }
     cooldown:
       default-days: 7
