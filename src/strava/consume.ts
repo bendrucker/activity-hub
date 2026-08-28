@@ -1,5 +1,5 @@
 import { RateLimitedError, type StravaIngestMessage, parseRetryAfter } from "../ingest";
-import { markSourceDeleted, mergeRawKeys, upsertSourceRecord } from "../registry";
+import { markSourceDeleted, mergeRawKeys, touchSource, upsertSourceRecord } from "../registry";
 import { sportFromStrava } from "../sport";
 import { enqueueActivity } from "../transform/enqueue";
 import { stravaClient, type StravaClient } from "./client";
@@ -276,6 +276,12 @@ async function archivePhotos(
   });
   if (photos.added === 0 && !keyed) {
     return "ok: nothing changed";
+  }
+  // The prefix is already recorded on every activity but the first, so new
+  // bytes usually leave `raw_keys` alone. Without this the activity never goes
+  // stale and publish never reads the photo it just archived.
+  if (!keyed) {
+    await touchSource(env.REGISTRY, "strava", String(activityId));
   }
 
   console.log(

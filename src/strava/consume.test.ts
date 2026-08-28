@@ -683,6 +683,43 @@ describe("consumeStravaEvent on a photos message", () => {
     expect(row!.updated_at).toBe(SEEDED_UPDATED_AT);
   });
 
+  // The `photos` raw key holds a prefix, so it is already recorded once the
+  // first photo lands and every photo after that leaves `raw_keys` identical.
+  // Nothing then moved `updated_at`, the staleness query never selected the
+  // activity, and the site kept a photo list one short.
+  it("marks the source stale when a photo lands under a recorded prefix", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await seedActivity();
+    await env.REGISTRY.prepare(
+      "UPDATE activity_sources SET raw_keys = ?1 WHERE source = 'strava' AND source_id = ?2",
+    )
+      .bind(
+        JSON.stringify({
+          detail: detailKey(ACTIVITY_ID),
+          streams: streamsKey(ACTIVITY_ID),
+          photos: photosPrefix(ACTIVITY_ID),
+        }),
+        String(ACTIVITY_ID),
+      )
+      .run();
+    const stub = stubFetch(
+      respondByPath({
+        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () => new Response(PHOTOS_JSON),
+      }),
+    );
+    const photoStub = stubFetch(() => new Response(new Uint8Array([7])));
+
+    await consumeStravaEvent(PHOTOS_MESSAGE, testEnv, {
+      client: apiClient(stub),
+      fetch: photoStub.fetch,
+    });
+
+    const row = await sourceRow(String(ACTIVITY_ID));
+    expect(row!.updated_at).not.toBe(SEEDED_UPDATED_AT);
+    expect(JSON.parse(row!.raw_keys as string).photos).toBe(photosPrefix(ACTIVITY_ID));
+    log.mockRestore();
+  });
+
   it("throws RateLimitedError on a 429 from the photo listing", async () => {
     await seedActivity();
     const stub = stubFetch(() => new Response("rate limited", { status: 429 }));

@@ -104,6 +104,28 @@ export async function mergeRawKeys(
   return row !== null;
 }
 
+// Moves a source's `updated_at` when what a raw key points at changed but the
+// key itself did not. The Strava photo archive records one `photos` entry
+// holding a prefix, so a second photo under that prefix leaves `raw_keys`
+// byte-identical and `mergeRawKeys` writes nothing. Publish reads the objects
+// behind the prefix rather than the key, so the staleness query has to learn
+// about the archive some other way.
+export async function touchSource(
+  db: D1Database,
+  source: Source,
+  sourceId: string,
+): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `UPDATE activity_sources SET updated_at = ?1
+       WHERE source = ?2 AND source_id = ?3
+       RETURNING source_id`,
+    )
+    .bind(new Date().toISOString(), source, sourceId)
+    .first<{ source_id: string }>();
+  return row !== null;
+}
+
 // Answers with the activity the source belonged to, or null when the source
 // was never recorded. A deleted activity drops out of every staleness query,
 // so the deletion has to be carried downstream by whoever performed it.
