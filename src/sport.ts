@@ -1,5 +1,11 @@
 export type Sport =
-  "ride" | "run" | "walk" | "hike" | "swim" | "strength" | "other";
+  | "ride"
+  | "run"
+  | "walk"
+  | "hike"
+  | "swim"
+  | "strength"
+  | "other";
 
 const STRAVA_SPORTS: Record<string, Sport> = {
   Ride: "ride",

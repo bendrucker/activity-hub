@@ -10,7 +10,7 @@ Cloudflare Workers (TypeScript), Bun, Wrangler. Storage: D1 (`REGISTRY`), R2 (`R
 
 - `bun run typecheck`: checks `src/` and `scripts/`
 - `bun run test`: runs `vitest run` (uses `@cloudflare/vitest-pool-workers`, config in `vitest.config.ts`)
-- `bun run format` / `bun run format:check`: Prettier
+- `bun run format` / `bun run format:check`: oxfmt
 - `bun run dev`: runs `wrangler dev` for local iteration
 - `bun run wrangler <cmd>`: pinned Wrangler binary. Use this over a global `wrangler` install
 - `bun run types`: regenerates `worker-configuration.d.ts` from `wrangler.jsonc`
