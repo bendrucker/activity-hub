@@ -158,8 +158,8 @@ export async function publishToSite(
     return publishWithoutTelemetry(env, activityId, registry, site, published);
   }
 
-  // Resolved before the fingerprint rather than after it, because the keys are
-  // an input to the row and not just a field on it.
+  // Resolved before the fingerprint because the keys are an input to the row,
+    // not just a field on it.
   const photoKeys = await photos(env.RAW, registry.sources);
   const fingerprint = await publishFingerprint(env.RAW, registry, photoKeys, decode);
   if (published === fingerprint) {

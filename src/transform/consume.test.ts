@@ -633,9 +633,8 @@ async function seedPublishable(activityId: string, sourceId = "9001"): Promise<v
 
 // The publish fingerprint covers the decode artifact, the archived objects the
 // row reads and the registry fields it copies, so a test that wants an
-// already-published activity takes the value from a real publish rather than
-// restating that composition. The row is then aged so a `current` outcome is
-// visible as a stamp.
+// already-published activity takes the value from a real publish. The row is
+// then aged so a `current` outcome is visible as a stamp.
 async function seedPublished(activityId: string): Promise<void> {
   await consumeTransformBatch(batchOf([publishMessage(activityId)]), testEnv, {
     container: {
