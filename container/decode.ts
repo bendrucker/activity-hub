@@ -93,9 +93,11 @@ async function publish(
       activity,
     );
     const prefix = outputKey(activityId);
-    for (const file of files) {
-      await deps.lake.put(`${prefix}${file.name}`, file.path);
-    }
+    // Four distinct keys under one prefix, none derived from another's
+    // response, and nothing downstream reads them in order: the lake globs
+    // each table separately and there is no completion marker to write last.
+    // Serializing them only paid four round trips per activity.
+    await Promise.all(files.map((file) => deps.lake.put(`${prefix}${file.name}`, file.path)));
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

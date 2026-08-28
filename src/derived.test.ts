@@ -12,6 +12,7 @@ import {
   currentFingerprints,
   recordOutcome,
   staleActivities,
+  staleActivitiesByStage,
   type DerivedStatus,
   type Stage,
 } from "./derived";
@@ -546,6 +547,36 @@ describe("staleActivities", () => {
     }
 
     expect(await staleActivities(env.REGISTRY, "decode", 2)).toEqual(["a2", "a3"]);
+  });
+});
+
+describe("staleActivitiesByStage", () => {
+  // The sweep asks about every stage on one tick, and the answers have to come
+  // back keyed to the stage that produced them rather than concatenated.
+  it("answers for several stages in one round trip", async () => {
+    await seedActivity("a1");
+    await seedSource({ source: "wahoo", sourceId: "1", activityId: "a1" });
+    await seedActivity("a2");
+    await seedSource({ source: "wahoo", sourceId: "2", activityId: "a2" });
+    await seedDerived({
+      activityId: "a2",
+      stage: "decode",
+      status: "ok",
+      updatedAt: NEWER,
+    });
+
+    expect(await staleActivitiesByStage(env.REGISTRY, ["decode", "publish"], 10)).toEqual(
+      new Map([
+        ["decode", ["a1"]],
+        ["publish", ["a1", "a2"]],
+      ]),
+    );
+  });
+
+  it("keys a stage with nothing stale to an empty list", async () => {
+    expect(await staleActivitiesByStage(env.REGISTRY, ["decode"], 10)).toEqual(
+      new Map([["decode", []]]),
+    );
   });
 });
 

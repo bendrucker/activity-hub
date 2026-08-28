@@ -1,4 +1,4 @@
-import { clearDerived, staleActivities, SWEPT_STAGES, type Stage } from "../derived";
+import { clearDerived, staleActivitiesByStage, SWEPT_STAGES, type Stage } from "../derived";
 import type { TransformMessage } from "./consume";
 
 // Cloudflare caps a batch send at 100 messages.
@@ -36,15 +36,14 @@ export async function enqueueTransform(
 // because its stage output is missing or older than its input, never because
 // of when it arrived.
 export async function reconcileTransform(env: Env, limit = RECONCILE_LIMIT): Promise<number> {
-  let enqueued = 0;
-  for (const stage of SWEPT_STAGES) {
-    const ids = await staleActivities(env.REGISTRY, stage, limit);
-    enqueued += await enqueueTransform(
-      env.TRANSFORM_QUEUE,
-      ids.map((activityId) => ({ activityId, stage })),
-    );
-  }
-  return enqueued;
+  const stale = await staleActivitiesByStage(env.REGISTRY, SWEPT_STAGES, limit);
+  // Sending both stages together also merges their trailing partial chunks,
+  // which the per-stage loop paid a second send for whenever neither stage
+  // landed on a multiple of SEND_BATCH.
+  const messages = SWEPT_STAGES.flatMap((stage) =>
+    (stale.get(stage) ?? []).map((activityId) => ({ activityId, stage })),
+  );
+  return enqueueTransform(env.TRANSFORM_QUEUE, messages);
 }
 
 // An upstream edit that leaves the raw bytes untouched still changes what the
