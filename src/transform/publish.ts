@@ -5,6 +5,7 @@
 
 import {
   currentFingerprints,
+  digest,
   inputFingerprint,
   MAX_ATTEMPTS,
   stageRows,
@@ -63,10 +64,8 @@ export type PublishResult = { fingerprint: string } & (
   | { status: "failed"; error: string }
 );
 
-// Publish reads the decode artifact, so its fingerprint is the decode row's.
-// Raw bytes that changed already changed that fingerprint, and a decoder that
-// changed already changed the version. Neither sentinel can collide with a
-// SHA-256 digest.
+// Every fingerprint below is a SHA-256 digest, so neither sentinel can collide
+// with one.
 const DELETED = "deleted";
 const UNDECODED = "undecoded";
 
@@ -159,7 +158,7 @@ export async function publishToSite(
     return publishWithoutTelemetry(env, activityId, registry, site, published);
   }
 
-  const fingerprint = `${decode.inputFingerprint}:${decode.artifactVersion}`;
+  const { photoKeys, fingerprint } = await publishInputs(env.RAW, registry, decode);
   if (published === fingerprint) {
     return { fingerprint, status: "current" };
   }
@@ -175,13 +174,57 @@ export async function publishToSite(
     return { fingerprint, status: "skipped", reason: outcome.reason };
   }
 
-  const [detail, photoKeys] = await Promise.all([
-    stravaDetail(env.RAW, registry.sources),
-    photos(env.RAW, registry.sources),
-  ]);
+  const detail = await stravaDetail(env.RAW, registry.sources);
   await site.publishActivity(row(activityId, registry, outcome.artifact, detail, photoKeys));
   await site.publishPowerCurve(activityId, outcome.artifact.bests);
   return { fingerprint, status: "ok" };
+}
+
+// Everything the published row is built from. Decode's fingerprint alone is
+// not enough, because the row also carries the archived photo keys, Strava's
+// archived title and totals, and the registry's own sport, start and timezone.
+// An activity that gains a photo moves none of decode's inputs, so publish
+// reports it current with the site still holding no photo.
+//
+// Photo objects never change once archived, so their keys are the whole input.
+// Heading each one would spend a request to learn an etag that cannot have
+// moved. That leaves one list per photo prefix and one head for the provider
+// record, and neither waits on the other.
+//
+// The registry fields are free, since the query that loaded the row already
+// read them. They only reach here when a source's `updated_at` moved with
+// them, which a re-ingest does: `activities.updated_at` alone is not what
+// STALE compares.
+async function publishInputs(
+  bucket: R2Bucket,
+  registry: ActivityRow,
+  decode: StageRow | null,
+  extraKeys: readonly string[] = [],
+): Promise<{ photoKeys: string[]; fingerprint: string }> {
+  const detailKey = stravaSource(registry.sources)?.rawKeys.detail;
+  const keys = detailKey === undefined ? extraKeys : [...extraKeys, detailKey];
+  const [photoKeys, archived] = await Promise.all([
+    photos(bucket, registry.sources),
+    inputFingerprint(bucket, keys),
+  ]);
+
+  const fingerprint = await digest(
+    // JSON rather than a delimiter, so a name carrying the delimiter cannot
+    // shift the field boundaries and hash as some other set of inputs.
+    JSON.stringify([
+      decode === null ? null : [decode.inputFingerprint, decode.artifactVersion],
+      archived,
+      photoKeys,
+      registry.name,
+      registry.sport,
+      registry.startedAt,
+      registry.timezone,
+      // Ordered by the registry query, so two sources hash the same way every
+      // time.
+      registry.sources.map((source) => [source.source, source.sourceId]),
+    ]),
+  );
+  return { photoKeys, fingerprint };
 }
 
 // Whether decode has said everything it is going to say. No archived original
@@ -225,8 +268,8 @@ async function publishWithoutTelemetry(
 }
 
 // Strava's detail carries totals but no telemetry, so the row publishes with
-// no power and no map. The fingerprint is the detail file's etag, since there
-// is no decode row to take one from.
+// no power and no map. The fingerprint covers the same archive the row is
+// built from, minus the decode artifact there is no row for.
 async function publishFromDetail(
   env: Env,
   activityId: string,
@@ -235,18 +278,15 @@ async function publishFromDetail(
   published: string | undefined,
   detailKey: string,
 ): Promise<PublishResult> {
-  const fingerprint = await inputFingerprint(env.RAW, [detailKey]);
+  const { photoKeys, fingerprint } = await publishInputs(env.RAW, registry, null);
   if (published === fingerprint) {
     return { fingerprint, status: "current" };
   }
 
-  const [detail, photoKeys] = await Promise.all([
-    stravaDetail(env.RAW, registry.sources),
-    photos(env.RAW, registry.sources),
-  ]);
-  // `inputFingerprint` just read this key's etag, so a miss here is the bucket
-  // misbehaving. Recording it as failed keeps the row in the staleness query,
-  // which retries it.
+  const detail = await stravaDetail(env.RAW, registry.sources);
+  // `publishInputs` just read this key's etag, so a miss here is the
+  // bucket misbehaving. Recording it as failed keeps the row in the staleness
+  // query, which retries it.
   if (detail === null) {
     return {
       fingerprint,
@@ -295,7 +335,7 @@ async function publishFromWahooSummary(
   published: string | undefined,
   summaryKey: string,
 ): Promise<PublishResult> {
-  const fingerprint = await inputFingerprint(env.RAW, [summaryKey]);
+  const { photoKeys, fingerprint } = await publishInputs(env.RAW, registry, null, [summaryKey]);
   if (published === fingerprint) {
     return { fingerprint, status: "current" };
   }
@@ -342,7 +382,7 @@ async function publishFromWahooSummary(
     powerSource: "none",
     polyline: null,
     elevationProfile: null,
-    photoKeys: await photos(env.RAW, registry.sources),
+    photoKeys,
   });
   return { fingerprint, status: "ok" };
 }

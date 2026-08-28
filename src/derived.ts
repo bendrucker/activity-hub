@@ -109,8 +109,15 @@ export async function inputFingerprint(bucket: R2Bucket, keys: readonly string[]
     .map((key, index) => `${key}:${objects[index]?.etag ?? MISSING_OBJECT}`)
     .join("\n");
 
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(payload));
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return digest(payload);
+}
+
+// The one hash every fingerprint in the pipeline is expressed in, so a stage
+// that fingerprints something other than R2 etags still produces a value the
+// same width and the same alphabet as one that does.
+export async function digest(payload: string): Promise<string> {
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(payload));
+  return [...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 // Candidate selection cannot afford a fingerprint, which costs an R2 head per
