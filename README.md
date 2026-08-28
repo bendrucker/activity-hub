@@ -143,17 +143,17 @@ The consumer re-reads raw keys from the registry rather than trusting the messag
 
 Inventory of every credential the system needs and where it lives.
 
-| Secret                                            | Location                                                         | Consumer                                                                                    |
-| ------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `ADMIN_TOKEN`                                     | Worker secret (`wrangler secret put`)                            | Every `/admin/*` route                                                                      |
-| `CLOUDFLARE_API_TOKEN`                            | GitHub Actions repo secret, and a Terraform output for local use | `deploy.yml` (migrations + `wrangler deploy`), and `wrangler` from a laptop                 |
-| `STRAVA_CLIENT_SECRET`                            | Worker secret (`wrangler secret put`)                            | Strava OAuth token refresh and webhook subscription management                              |
-| `STRAVA_VERIFY_TOKEN`                             | Worker secret (`wrangler secret put`)                            | Webhook subscription validation ([#8](https://github.com/bendrucker/activity-hub/issues/8)) |
-| `WAHOO_CLIENT_ID` / `WAHOO_CLIENT_SECRET`         | Worker secrets (`wrangler secret put`)                           | Wahoo OAuth + webhooks ([#11](https://github.com/bendrucker/activity-hub/issues/11))        |
-| `WAHOO_WEBHOOK_TOKEN`                             | Worker secret (`wrangler secret put`)                            | Wahoo webhook receiver ([#11](https://github.com/bendrucker/activity-hub/issues/11))        |
-| `R2_ACCOUNT_ID`                                   | Worker secret (`wrangler secret put`)                            | Decode container's S3 endpoint                                                              |
-| `R2_RAW_ACCESS_KEY_ID` / `..._SECRET_ACCESS_KEY`  | Worker secrets (`wrangler secret put`)                           | Decode container reading `activity-hub-raw`                                                 |
-| `R2_LAKE_ACCESS_KEY_ID` / `..._SECRET_ACCESS_KEY` | Worker secrets (`wrangler secret put`)                           | Decode container writing `activity-hub-lake`                                                |
+| Secret                                            | Location                                         | Consumer                                                                                    |
+| ------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| `ADMIN_TOKEN`                                     | Worker secret, generated in `terraform/`         | Every `/admin/*` route                                                                      |
+| `CLOUDFLARE_API_TOKEN`                            | GitHub Actions repo secret, written by Terraform | `deploy.yml` (migrations + `wrangler deploy`), and `wrangler` from a laptop                 |
+| `STRAVA_CLIENT_SECRET`                            | Worker secret (`wrangler secret put`)            | Strava OAuth token refresh and webhook subscription management                              |
+| `STRAVA_VERIFY_TOKEN`                             | Worker secret (`wrangler secret put`)            | Webhook subscription validation ([#8](https://github.com/bendrucker/activity-hub/issues/8)) |
+| `WAHOO_CLIENT_ID` / `WAHOO_CLIENT_SECRET`         | Worker secrets (`wrangler secret put`)           | Wahoo OAuth + webhooks ([#11](https://github.com/bendrucker/activity-hub/issues/11))        |
+| `WAHOO_WEBHOOK_TOKEN`                             | Worker secret (`wrangler secret put`)            | Wahoo webhook receiver ([#11](https://github.com/bendrucker/activity-hub/issues/11))        |
+| `R2_ACCOUNT_ID`                                   | Worker secret (`wrangler secret put`)            | Decode container's S3 endpoint                                                              |
+| `R2_RAW_ACCESS_KEY_ID` / `..._SECRET_ACCESS_KEY`  | Worker secrets (`wrangler secret put`)           | Decode container reading `activity-hub-raw`                                                 |
+| `R2_LAKE_ACCESS_KEY_ID` / `..._SECRET_ACCESS_KEY` | Worker secrets (`wrangler secret put`)           | Decode container writing `activity-hub-lake`                                                |
 
 `STRAVA_CLIENT_ID` and `STRAVA_ATHLETE_ID` are public identifiers, committed as
 vars in `wrangler.jsonc`. `STRAVA_SUBSCRIPTION_ID` is also a committed var,
@@ -184,19 +184,34 @@ provider's own terms instead: Strava against `STRAVA_SUBSCRIPTION_ID`, Wahoo
 against `WAHOO_WEBHOOK_TOKEN`.
 
 Reaching `/admin/*` from a script means a service token rather than a browser
-login. Its two header values come from Terraform outputs in
-[bendrucker/infrastructure](https://github.com/bendrucker/infrastructure):
+login. The client id is a Terraform output:
 
 ```sh
-curl -H "CF-Access-Client-Id: $(terraform output -raw activity_hub_access_client_id)" \
-     -H "CF-Access-Client-Secret: $(terraform output -raw activity_hub_access_client_secret)" \
+curl -H "CF-Access-Client-Id: $(terraform -chdir=terraform output -raw access_client_id)" \
+     -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
      -H "Authorization: Bearer $ADMIN_TOKEN" \
      https://hub.bendrucker.me/admin/consume-log
 ```
 
+Cloudflare returns a service token's secret once, at creation, so the secret has
+no output to read it back from. Incrementing `client_secret_version` on the
+resource issues a new one, and the previous secret keeps working until
+`previous_client_secret_expires_at`.
+
+`ADMIN_TOKEN` is generated in `terraform/` but not deployed from there. Terraform
+cannot write Worker secrets, so pushing the value is a separate step:
+
+```sh
+terraform -chdir=terraform output -raw admin_token | bun run wrangler secret put ADMIN_TOKEN
+```
+
+The worker authenticates against whatever it was last given, so an apply that
+generates a new value locks nothing out until that command runs.
+
 The DNS record, the worker route, the Access applications, and the service token
-are all Terraform-managed in that repository. That workspace is VCS-connected, so
-applies run from a merge rather than from a local `terraform apply`.
+are Terraform-managed in [`terraform/`](terraform). Its HCP Terraform workspace is
+VCS-connected, so applies run from a merge to `main` rather than from a local
+`terraform apply`.
 
 ## Archive Coverage
 
@@ -286,6 +301,22 @@ A `refresh` would spend two further reads on detail and streams that these activ
 The cron deletes each target as it takes it, whether or not that id earned a message. An id that gained photos elsewhere costs a query to skip rather than a read to rediscover. An id the registry has never held is counted apart from it, because draining reconciles a seed list against archived photos and says nothing about activities that were never ingested.
 
 The table emptying is the measure of progress. The unphotographed count stalls above zero instead, because an activity that turns out to have no photos gains no key and stays in that set forever. Once the table is empty the cron is a no-op and can stay deployed.
+
+## Infrastructure
+
+`terraform/` holds the Terraform for everything the worker is reached through: the
+`hub` DNS record, the Workers route that binds the hostname to the script, the
+two Access applications guarding `/admin` and `/auth`, and the policies and
+service token they match on. It also generates `ADMIN_TOKEN`, which needs no
+Cloudflare API call at all. An HCP Terraform workspace named `activity-hub`
+applies it on merge to `main`, triggered by changes under `terraform/`. There is no
+local apply path.
+
+Credentials stay in [bendrucker/infrastructure](https://github.com/bendrucker/infrastructure),
+along with the zone: the two R2 tokens the decode container uses, and the
+account token CI deploys with. The Cloudflare token this workspace runs as
+covers Access plus DNS and Workers routes on one zone, so managing anything
+account-scoped here means widening that token there first.
 
 ## Development
 
