@@ -153,11 +153,38 @@ export async function staleActivities(
   stage: Stage,
   limit: number,
 ): Promise<string[]> {
-  const { results } = await db
-    .prepare(STALE)
-    .bind(stage, MAX_ATTEMPTS, limit, ARTIFACT_VERSION[stage], upstreamStage(stage))
-    .all<{ activity_id: string; source_updated_at: string }>();
+  const { results } = await staleStatement(db, stage, limit).all<{ activity_id: string }>();
   return results.map((row) => row.activity_id);
+}
+
+// One round trip for every stage the sweep asks about, which is all of them on
+// the same tick. The selections are independent: enqueueing writes nothing to
+// `derived`, so no stage's query can see another's, and the cross-stage
+// ordering that keeps publish stale after decode reruns lives in STALE's own
+// upstream join rather than in the order these run.
+export async function staleActivitiesByStage(
+  db: D1Database,
+  stages: readonly Stage[],
+  limit: number,
+): Promise<Map<Stage, string[]>> {
+  if (stages.length === 0) {
+    return new Map();
+  }
+  const batched = await db.batch<{ activity_id: string }>(
+    stages.map((stage) => staleStatement(db, stage, limit)),
+  );
+  return new Map(
+    stages.map((stage, index) => [
+      stage,
+      (batched[index]?.results ?? []).map((row) => row.activity_id),
+    ]),
+  );
+}
+
+function staleStatement(db: D1Database, stage: Stage, limit: number): D1PreparedStatement {
+  return db
+    .prepare(STALE)
+    .bind(stage, MAX_ATTEMPTS, limit, ARTIFACT_VERSION[stage], upstreamStage(stage));
 }
 
 // The fingerprint a stage last recorded as ok, per activity, for the artifact

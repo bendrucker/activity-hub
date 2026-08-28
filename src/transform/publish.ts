@@ -516,15 +516,23 @@ function number(value: unknown): number | null {
 // file. Only the prefix costs a list.
 async function photos(bucket: R2Bucket, sources: readonly ActivitySource[]): Promise<string[]> {
   const keys = new Set<string>();
+  const prefixes: string[] = [];
   for (const source of sources) {
     for (const [name, key] of Object.entries(source.rawKeys)) {
       if (name === "photos") {
-        for (const listed of await listPrefix(bucket, key)) {
-          keys.add(listed);
-        }
+        prefixes.push(key);
       } else if (name.startsWith("photos/")) {
         keys.add(key);
       }
+    }
+  }
+
+  // One prefix per source, each independent of the others. Collecting them
+  // first is what lets the listings go out together, and the Set still dedupes
+  // whatever two overlapping prefixes both return.
+  for (const listed of await Promise.all(prefixes.map((prefix) => listPrefix(bucket, prefix)))) {
+    for (const key of listed) {
+      keys.add(key);
     }
   }
   return [...keys].sort();
