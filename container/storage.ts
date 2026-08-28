@@ -61,7 +61,9 @@ export function lakeStore(client: S3Client): LakeStore {
     },
     async putJson(key, value) {
       try {
-        await client.write(key, JSON.stringify(value));
+        await client.write(key, JSON.stringify(value), {
+          type: "application/json",
+        });
       } catch (error) {
         throw s3Error(error);
       }
