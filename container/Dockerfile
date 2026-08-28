@@ -4,12 +4,12 @@
 # Debian rather than Alpine, because @duckdb/node-bindings publishes prebuilt
 # glibc addons and no musl build. amd64 because that is what Cloudflare
 # containers run, and the prebuilt addon is chosen at install time.
-FROM --platform=linux/amd64 oven/bun:1.3.14-slim AS dependencies
+FROM --platform=linux/amd64 oven/bun:1.4.0-slim AS dependencies
 WORKDIR /app
 COPY container/package.json container/bun.lock ./
 RUN bun install --frozen-lockfile --production
 
-FROM --platform=linux/amd64 oven/bun:1.3.14-slim
+FROM --platform=linux/amd64 oven/bun:1.4.0-slim
 WORKDIR /app
 
 # The slim image ships no CA bundle. Bun's own fetch carries its roots, so the
