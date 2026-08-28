@@ -3,12 +3,13 @@ import {
   inputFingerprint,
   isCurrent,
   recordOutcome,
+  recordOutcomes,
   touchDerived,
   type DerivedOutcome,
   type Stage,
 } from "../derived";
 import { decodeClient, type DecodeClient } from "./container";
-import { enqueueActivity } from "./enqueue";
+import { enqueueTransform } from "./enqueue";
 import type { DecodeOutcome, DecodeWork } from "./protocol";
 import {
   publishToSite,
@@ -152,6 +153,7 @@ export async function consumeTransformBatch(
     return summary;
   }
 
+  const decoded: { item: Pending; outcome: DecodeOutcome }[] = [];
   for (const item of pending.values()) {
     const outcome = outcomes.get(item.activityId);
     if (outcome === undefined) {
@@ -161,22 +163,39 @@ export async function consumeTransformBatch(
       retryAll(item, summary);
       continue;
     }
+    decoded.push({ item, outcome });
+  }
 
-    try {
-      await recordOutcome(env.REGISTRY, derivedOutcome(item, outcome));
-      // The staleness query would pick this up on the next sweep anyway. The
-      // chain is what makes a new ride reach the site in minutes rather than
-      // by tomorrow morning.
-      if (outcome.status === "ok") {
-        await enqueueActivity(env, item.activityId, "publish");
-      }
+  if (decoded.length === 0) {
+    return summary;
+  }
+
+  try {
+    await recordOutcomes(
+      env.REGISTRY,
+      decoded.map(({ item, outcome }) => derivedOutcome(item, outcome)),
+    );
+    // The staleness query would pick these up on the next sweep anyway. The
+    // chain is what makes a new ride reach the site in minutes rather than by
+    // tomorrow morning.
+    await enqueueTransform(
+      env.TRANSFORM_QUEUE,
+      decoded
+        .filter(({ outcome }) => outcome.status === "ok")
+        .map(({ item }) => ({ activityId: item.activityId, stage: "publish" })),
+    );
+    for (const { item, outcome } of decoded) {
       count(summary, outcome);
       ackAll(item);
-    } catch (error) {
-      // The Parquet is already written. Failing to record that is a lost
-      // update, and the retry is idempotent because the container overwrites
-      // the same keys.
-      console.error(`failed to record ${item.activityId}: ${String(error)}`);
+    }
+  } catch (error) {
+    // The Parquet is already written. Failing to record that is a lost update,
+    // and the retry is idempotent because the container overwrites the same
+    // keys. Recording the whole batch as one D1 transaction means one failure
+    // takes every activity in it back to the queue, which is the same
+    // granularity the decode call above already retries at.
+    console.error(`failed to record decode batch: ${String(error)}`);
+    for (const { item } of decoded) {
       retryAll(item, summary);
     }
   }

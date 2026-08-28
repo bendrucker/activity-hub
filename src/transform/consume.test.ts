@@ -410,16 +410,48 @@ describe("consumeTransformBatch", () => {
 
   it("enqueues publish once an activity decodes", async () => {
     await seedArchived("a1", "raw/test/a1.fit");
-    const send = vi.spyOn(testEnv.TRANSFORM_QUEUE, "send");
+    const sendBatch = vi.spyOn(testEnv.TRANSFORM_QUEUE, "sendBatch");
 
     await consumeTransformBatch(batchOf([decodeMessage("a1")]), testEnv, {
       client: { decode: decodeReturning(decoded("a1")) },
     });
 
-    expect(send).toHaveBeenCalledWith({
-      activityId: "a1",
-      stage: "publish",
+    expect(sendBatch).toHaveBeenCalledWith([
+      { body: { activityId: "a1", stage: "publish" } },
+    ]);
+    sendBatch.mockRestore();
+  });
+
+  it("records and enqueues the batch in one call each", async () => {
+    await seedArchived("a1", "raw/test/a1.fit");
+    await seedArchived("a2", "raw/test/a2.fit");
+    await seedArchived("a3", "raw/test/a3.fit");
+    const sendBatch = vi.spyOn(testEnv.TRANSFORM_QUEUE, "sendBatch");
+    const send = vi.spyOn(testEnv.TRANSFORM_QUEUE, "send");
+    const decode = decodeReturning(decoded("a1"), decoded("a2"), {
+      activityId: "a3",
+      status: "failed",
+      error: "unsupported FIT profile",
     });
+
+    const summary = await consumeTransformBatch(
+      batchOf([decodeMessage("a1"), decodeMessage("a2"), decodeMessage("a3")]),
+      testEnv,
+      { client: { decode } },
+    );
+
+    expect(sendBatch).toHaveBeenCalledTimes(1);
+    expect(send).not.toHaveBeenCalled();
+    // The failed activity has nothing to publish, so it is recorded without
+    // being chained.
+    expect(sendBatch).toHaveBeenCalledWith([
+      { body: { activityId: "a1", stage: "publish" } },
+      { body: { activityId: "a2", stage: "publish" } },
+    ]);
+    expect(await derivedRow("a3")).toMatchObject({ status: "failed" });
+    expect(await derivedCount()).toBe(3);
+    expect(summary).toEqual({ ...EMPTY_SUMMARY, decoded: 2, failed: 1 });
+    sendBatch.mockRestore();
     send.mockRestore();
   });
 });
