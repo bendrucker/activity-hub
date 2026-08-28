@@ -3,7 +3,15 @@
 // saw: a rebuild from the same snapshot produces the same tables even after
 // the registry has moved on.
 
-export const REGISTRY_KEY = "lake/registry/v1/activities.ndjson";
+const REGISTRY_PREFIX = "lake/registry/v1/";
+
+// One object per run rather than a fixed key: a trigger landing while a build
+// is running would otherwise overwrite the snapshot that build is still
+// reading, since the container re-reads the URI for every table. Colons and
+// dots leave the timestamp so the key stays plain for DuckDB's S3 reader.
+export function registryRunKey(startedAt: Date): string {
+  return `${REGISTRY_PREFIX}${startedAt.toISOString().replace(/[:.]/g, "-")}.ndjson`;
+}
 
 // D1 caps a response at 1,000 rows well before it caps bytes, so the export
 // pages. The order is stable so a snapshot diffs cleanly against the previous
@@ -51,7 +59,7 @@ export interface RegistrySnapshot {
 export async function exportRegistry(
   db: D1Database,
   bucket: R2Bucket,
-  key = REGISTRY_KEY,
+  key: string,
 ): Promise<RegistrySnapshot> {
   const lines: string[] = [];
 

@@ -57,7 +57,7 @@ export function decodeClient(env: Env): DecodeClient {
 }
 
 // The container only accepts the build, which runs long past any caller's
-// wall clock, so a 409 means the tables are already being rebuilt — which is
+// wall clock, so a 409 means the tables are already being rebuilt. That is
 // what the caller wanted.
 export function lakeClient(env: Env): LakeClient {
   return {
