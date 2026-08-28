@@ -11,17 +11,12 @@ import {
 } from "../src/import/delta";
 import { placeActivity, toSourceRecord } from "../src/import/placement";
 import { inferTimezones, trackTimezone } from "../src/import/timezone";
-import {
-  extractTrack,
-  polylineDocument,
-  type PolylineDocument,
-} from "../src/import/track";
+import { extractTrack, polylineDocument, type PolylineDocument } from "../src/import/track";
 import type { SourceRecord } from "../src/record";
 
 const BUCKET = "activity-hub-raw";
 const DATABASE = "activity-hub-registry";
-const S3_ENDPOINT =
-  "https://72bdc77341dc52a3cf4a94097f9ad96f.r2.cloudflarestorage.com";
+const S3_ENDPOINT = "https://72bdc77341dc52a3cf4a94097f9ad96f.r2.cloudflarestorage.com";
 // The Cloudflare API allows 1,200 requests per 5 minutes. Eight workers
 // putting small objects exceed it and draw 429s, so the fallback stays
 // under ~3 puts/second.
@@ -46,9 +41,7 @@ const { values: flags, positionals } = parseArgs({
 
 const exportDir = positionals[0];
 if (!exportDir) {
-  console.error(
-    "usage: bun run import -- <export-dir> [--dry-run] [--staging <dir>]",
-  );
+  console.error("usage: bun run import -- <export-dir> [--dry-run] [--staging <dir>]");
   process.exit(1);
 }
 
@@ -58,9 +51,7 @@ const activities = parseActivitiesCsv(
 console.log(`${activities.length} activities in activities.csv`);
 
 const mediaAvailable = new Set<string>(
-  (await readdir(path.join(exportDir, "media")).catch(() => [])).map(
-    (name) => `media/${name}`,
-  ),
+  (await readdir(path.join(exportDir, "media")).catch(() => [])).map((name) => `media/${name}`),
 );
 
 const polylines = new Map<string, PolylineDocument>();
@@ -70,10 +61,7 @@ const resolvedTimezones = new Map<string, string>();
 
 let processed = 0;
 for (let activity of activities) {
-  if (
-    activity.filename &&
-    !(await Bun.file(path.join(exportDir, activity.filename)).exists())
-  ) {
+  if (activity.filename && !(await Bun.file(path.join(exportDir, activity.filename)).exists())) {
     // A CSV row can reference a file absent from the archive. Treat the
     // activity as file-less so staging and raw_keys stay consistent with
     // what actually exists.
@@ -90,9 +78,7 @@ for (let activity of activities) {
 
   if (activity.filename) {
     try {
-      const bytes = await Bun.file(
-        path.join(exportDir, activity.filename),
-      ).bytes();
+      const bytes = await Bun.file(path.join(exportDir, activity.filename)).bytes();
       const points = await extractTrack(bytes, activity.filename);
       if (points.length > 0) {
         polylines.set(activity.sourceId, polylineDocument(points));
@@ -167,10 +153,7 @@ for (const activity of activities) {
   }
   const polyline = polylines.get(activity.sourceId);
   if (polyline) {
-    await Bun.write(
-      path.join(objectsDir, placement.polylineKey),
-      JSON.stringify(polyline),
-    );
+    await Bun.write(path.join(objectsDir, placement.polylineKey), JSON.stringify(polyline));
     objectCount += 1;
   }
 }
@@ -242,14 +225,14 @@ function report(
 }
 
 function readRegistryState(): RegistryState {
-  const activities = query(
-    "SELECT activity_id, started_at, sport, duration_s FROM activities",
-  ).map((row): RegistryActivity => ({
-    activityId: row["activity_id"] as string,
-    startedAt: row["started_at"] as string,
-    sport: row["sport"] as RegistryActivity["sport"],
-    durationS: row["duration_s"] as number,
-  }));
+  const activities = query("SELECT activity_id, started_at, sport, duration_s FROM activities").map(
+    (row): RegistryActivity => ({
+      activityId: row["activity_id"] as string,
+      startedAt: row["started_at"] as string,
+      sport: row["sport"] as RegistryActivity["sport"],
+      durationS: row["duration_s"] as number,
+    }),
+  );
   const sources = query(
     "SELECT source, source_id, activity_id, raw_keys FROM activity_sources",
   ).map((row): RegistrySourceRow => ({
@@ -262,15 +245,7 @@ function readRegistryState(): RegistryState {
 }
 
 function query(sql: string): Record<string, unknown>[] {
-  const stdout = run([
-    "d1",
-    "execute",
-    DATABASE,
-    "--remote",
-    "--json",
-    "--command",
-    sql,
-  ]);
+  const stdout = run(["d1", "execute", DATABASE, "--remote", "--json", "--command", sql]);
   const parsed = JSON.parse(stdout) as { results: Record<string, unknown>[] }[];
   const first = parsed[0];
   if (!first) {
@@ -280,10 +255,9 @@ function query(sql: string): Record<string, unknown>[] {
 }
 
 function run(args: string[]): string {
-  const result = Bun.spawnSync(
-    ["bun", "run", "--silent", "wrangler", "--", ...args],
-    { stdio: ["ignore", "pipe", "inherit"] },
-  );
+  const result = Bun.spawnSync(["bun", "run", "--silent", "wrangler", "--", ...args], {
+    stdio: ["ignore", "pipe", "inherit"],
+  });
   if (result.exitCode !== 0) {
     throw new Error(`wrangler ${args.join(" ")} failed (${result.exitCode})`);
   }
@@ -291,10 +265,7 @@ function run(args: string[]): string {
 }
 
 async function upload(objectsDir: string): Promise<void> {
-  if (
-    process.env["AWS_ACCESS_KEY_ID"] &&
-    process.env["AWS_SECRET_ACCESS_KEY"]
-  ) {
+  if (process.env["AWS_ACCESS_KEY_ID"] && process.env["AWS_SECRET_ACCESS_KEY"]) {
     console.log("uploading with aws s3 sync");
     const result = Bun.spawnSync(
       [
@@ -316,9 +287,7 @@ async function upload(objectsDir: string): Promise<void> {
     return;
   }
 
-  console.log(
-    "no R2 S3 token in env: falling back to wrangler r2 object put (slow)",
-  );
+  console.log("no R2 S3 token in env: falling back to wrangler r2 object put (slow)");
   // Uploads are logged next to the objects dir as key + content hash so an
   // interrupted run resumes where it left off, while a re-run that staged
   // different bytes for a key uploads it again. Failures are collected, not
@@ -334,13 +303,9 @@ async function upload(objectsDir: string): Promise<void> {
       .split("\n")
       .filter(Boolean),
   );
-  const staged = (
-    await readdir(objectsDir, { recursive: true, withFileTypes: true })
-  )
+  const staged = (await readdir(objectsDir, { recursive: true, withFileTypes: true }))
     .filter((entry) => entry.isFile())
-    .map((entry) =>
-      path.relative(objectsDir, path.join(entry.parentPath, entry.name)),
-    );
+    .map((entry) => path.relative(objectsDir, path.join(entry.parentPath, entry.name)));
   const files: { entry: string; stamp: string }[] = [];
   for (const entry of staged) {
     const bytes = await Bun.file(path.join(objectsDir, entry)).bytes();
@@ -352,53 +317,48 @@ async function upload(objectsDir: string): Promise<void> {
   let uploaded = 0;
   const failures: string[] = [];
   const queue = [...files];
-  const workers = Array.from(
-    { length: UPLOAD_CONCURRENCY },
-    async (): Promise<void> => {
-      for (;;) {
-        const item = queue.shift();
-        if (!item) {
-          return;
-        }
-        const key = item.entry.split(path.sep).join("/");
-        const started = Date.now();
-        const proc = Bun.spawn(
-          [
-            "bun",
-            "run",
-            "--silent",
-            "wrangler",
-            "--",
-            "r2",
-            "object",
-            "put",
-            `${BUCKET}/${key}`,
-            "--file",
-            path.join(objectsDir, item.entry),
-            "--remote",
-          ],
-          { stdio: ["ignore", "ignore", "inherit"] },
-        );
-        const code = await proc.exited;
-        const elapsed = Date.now() - started;
-        if (elapsed < 1400) {
-          await Bun.sleep(1400 - elapsed);
-        }
-        if (code === 0) {
-          appendFileSync(doneLog, item.stamp + "\n");
-          uploaded += 1;
-        } else {
-          failures.push(key);
-          console.error(`failed: ${key} (${code})`);
-        }
-        if ((uploaded + failures.length) % 100 === 0) {
-          console.log(
-            `uploaded ${uploaded}/${files.length} (${failures.length} failed)`,
-          );
-        }
+  const workers = Array.from({ length: UPLOAD_CONCURRENCY }, async (): Promise<void> => {
+    for (;;) {
+      const item = queue.shift();
+      if (!item) {
+        return;
       }
-    },
-  );
+      const key = item.entry.split(path.sep).join("/");
+      const started = Date.now();
+      const proc = Bun.spawn(
+        [
+          "bun",
+          "run",
+          "--silent",
+          "wrangler",
+          "--",
+          "r2",
+          "object",
+          "put",
+          `${BUCKET}/${key}`,
+          "--file",
+          path.join(objectsDir, item.entry),
+          "--remote",
+        ],
+        { stdio: ["ignore", "ignore", "inherit"] },
+      );
+      const code = await proc.exited;
+      const elapsed = Date.now() - started;
+      if (elapsed < 1400) {
+        await Bun.sleep(1400 - elapsed);
+      }
+      if (code === 0) {
+        appendFileSync(doneLog, item.stamp + "\n");
+        uploaded += 1;
+      } else {
+        failures.push(key);
+        console.error(`failed: ${key} (${code})`);
+      }
+      if ((uploaded + failures.length) % 100 === 0) {
+        console.log(`uploaded ${uploaded}/${files.length} (${failures.length} failed)`);
+      }
+    }
+  });
   await Promise.all(workers);
   console.log(`uploaded ${uploaded}/${files.length}`);
   if (failures.length > 0) {

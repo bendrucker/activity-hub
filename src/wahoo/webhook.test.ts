@@ -143,10 +143,7 @@ describe("handleWebhookEvent", () => {
   });
 
   it("rejects a non-JSON body", async () => {
-    const response = await handleWebhookEvent(
-      eventRequest("not json"),
-      testEnv(),
-    );
+    const response = await handleWebhookEvent(eventRequest("not json"), testEnv());
     expect(response.status).toBe(400);
   });
 });

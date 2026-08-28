@@ -112,9 +112,7 @@ describe("decodeGpx", () => {
   it("parses altitude and timestamp, leaving timestamp null when absent", () => {
     const activity = decodeGpx(BARE);
     expect(activity.records[0]?.altitude).toBe(5.2);
-    expect(activity.records[0]?.timestamp).toEqual(
-      new Date("2017-05-23T12:50:43Z"),
-    );
+    expect(activity.records[0]?.timestamp).toEqual(new Date("2017-05-23T12:50:43Z"));
     expect(activity.records[1]?.altitude).toBe(5.4);
     expect(activity.records[1]?.timestamp).toBeNull();
   });
@@ -210,9 +208,7 @@ describe("decodeGpx", () => {
   });
 
   it("throws when the document has no trackpoints", () => {
-    expect(() => decodeGpx(gpx(`  <trkseg></trkseg>`))).toThrow(
-      "no trackpoints",
-    );
+    expect(() => decodeGpx(gpx(`  <trkseg></trkseg>`))).toThrow("no trackpoints");
   });
 
   it("reads trackpoints a writer put straight under trk with no trkseg", () => {
@@ -266,9 +262,7 @@ describe("decodeGpx truncation", () => {
 
     expect(activity.records).toHaveLength(1);
     expect(activity.records[0]?.position_lat).toBe(40.72596);
-    expect(activity.errors).toEqual([
-      "1 unterminated trackpoint(s), document is truncated",
-    ]);
+    expect(activity.errors).toEqual(["1 unterminated trackpoint(s), document is truncated"]);
   });
 
   it("reports the points lost with a segment cut after a complete one", () => {
@@ -284,11 +278,7 @@ describe("decodeGpx truncation", () => {
 
     // The complete segment matched, so the unterminated one is skipped whole:
     // the point inside it that was written in full is lost with the cut one.
-    expect(activity.records.map((record) => record.position_lat)).toEqual([
-      40.72596, 40.725897,
-    ]);
-    expect(activity.errors).toEqual([
-      "2 unterminated trackpoint(s), document is truncated",
-    ]);
+    expect(activity.records.map((record) => record.position_lat)).toEqual([40.72596, 40.725897]);
+    expect(activity.errors).toEqual(["2 unterminated trackpoint(s), document is truncated"]);
   });
 });

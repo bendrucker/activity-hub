@@ -1,10 +1,5 @@
 import type { DuckDBConnection } from "@duckdb/node-api";
-import {
-  LAKE_BUCKET,
-  RAW_BUCKET,
-  type ContainerConfig,
-  type Credentials,
-} from "./env";
+import { LAKE_BUCKET, RAW_BUCKET, type ContainerConfig, type Credentials } from "./env";
 import { literal } from "./sql";
 
 // The lake build reads thousands of Parquet files and writes a partitioned
@@ -36,24 +31,14 @@ export function configureS3(
   };
 }
 
-async function defineSecrets(
-  connection: DuckDBConnection,
-  config: ContainerConfig,
-): Promise<void> {
+async function defineSecrets(connection: DuckDBConnection, config: ContainerConfig): Promise<void> {
   // The two buckets carry different credentials, and the raw one is
   // deliberately read-only.
   await connection.run(secret("raw", RAW_BUCKET, config.accountId, config.raw));
-  await connection.run(
-    secret("lake", LAKE_BUCKET, config.accountId, config.lake),
-  );
+  await connection.run(secret("lake", LAKE_BUCKET, config.accountId, config.lake));
 }
 
-function secret(
-  name: string,
-  bucket: string,
-  accountId: string,
-  credentials: Credentials,
-): string {
+function secret(name: string, bucket: string, accountId: string, credentials: Credentials): string {
   // R2 has no per-bucket subdomains, so path style is the only addressing that
   // resolves, and the endpoint carries no scheme.
   return `CREATE OR REPLACE SECRET ${name} (

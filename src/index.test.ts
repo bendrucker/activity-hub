@@ -142,9 +142,7 @@ describe("consumeBatch", () => {
 
     await consumeBatch(batchOf([failed, succeeded]), testEnv, {
       consume: (message) =>
-        message.source === "wahoo"
-          ? Promise.reject(new Error("boom"))
-          : Promise.resolve(undefined),
+        message.source === "wahoo" ? Promise.reject(new Error("boom")) : Promise.resolve(undefined),
     });
 
     expect(failed.retry).toHaveBeenCalled();
@@ -158,9 +156,7 @@ describe("consumeBatch", () => {
       stubMessage(wahooMessage),
       stubMessage(wahooMessage),
     ];
-    const consume = vi.fn(() =>
-      Promise.reject(new RateLimitedError("slow down")),
-    );
+    const consume = vi.fn(() => Promise.reject(new RateLimitedError("slow down")));
 
     await consumeBatch(batchOf(messages), testEnv, { consume });
 
@@ -204,9 +200,7 @@ describe("consumeBatch", () => {
 
     await consumeBatch(batchOf([failed, succeeded]), testEnv, {
       consume: (message) =>
-        message.source === "wahoo"
-          ? Promise.reject(new Error("boom"))
-          : Promise.resolve(undefined),
+        message.source === "wahoo" ? Promise.reject(new Error("boom")) : Promise.resolve(undefined),
     });
 
     const entries = await readConsumeLog(env.TOKENS);
@@ -226,9 +220,7 @@ describe("consumeBatch", () => {
 
     expect(message.ack).toHaveBeenCalled();
     const entries = await readConsumeLog(env.TOKENS);
-    expect(entries.map((entry) => entry.outcome)).toEqual([
-      "skipped: third-party sync stub",
-    ]);
+    expect(entries.map((entry) => entry.outcome)).toEqual(["skipped: third-party sync stub"]);
   });
 });
 
@@ -310,9 +302,7 @@ describe("the scheduled handler", () => {
       { ...testEnv, INGEST_QUEUE: ingest, TRANSFORM_QUEUE: transform },
     );
 
-    expect(ingest.messages).toEqual([
-      { source: "strava", kind: "photos", objectId: 9001 },
-    ]);
+    expect(ingest.messages).toEqual([{ source: "strava", kind: "photos", objectId: 9001 }]);
     expect(transform.messages).toEqual([]);
   });
 });

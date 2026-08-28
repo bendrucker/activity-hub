@@ -1,11 +1,7 @@
 import { lakeClient, type LakeClient } from "../transform/container";
 import type { LakeStart } from "../transform/protocol";
 import { DECODE_PREFIX, lakeUri, OUTPUT_PREFIX, rawUri } from "./location";
-import {
-  exportRegistry,
-  registryRunKey,
-  type RegistrySnapshot,
-} from "./registry";
+import { exportRegistry, registryRunKey, type RegistrySnapshot } from "./registry";
 
 // Matches the second entry in wrangler.jsonc's crons. The scheduled handler
 // serves both triggers and tells them apart by this expression, so the two
@@ -53,9 +49,7 @@ export async function buildLake(
 // so the newest is the only one whose numbers should reach the lake. Listing
 // delimited by prefix returns the dates without walking thousands of activity
 // files.
-export async function latestExportCsv(
-  bucket: R2Bucket,
-): Promise<string | null> {
+export async function latestExportCsv(bucket: R2Bucket): Promise<string | null> {
   const listed = await bucket.list({
     prefix: EXPORT_PREFIX,
     delimiter: "/",

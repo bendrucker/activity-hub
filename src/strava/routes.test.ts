@@ -34,19 +34,12 @@ beforeEach(async () => {
 
 describe("handleAuthorize", () => {
   it("redirects to Strava with the callback and scope", () => {
-    const response = handleAuthorize(
-      new URL("https://hub.example/auth/strava"),
-      testEnv,
-    );
+    const response = handleAuthorize(new URL("https://hub.example/auth/strava"), testEnv);
 
     expect(response.status).toBe(302);
     const location = new URL(response.headers.get("Location") ?? "");
-    expect(location.origin + location.pathname).toBe(
-      `${testEnv.STRAVA_OAUTH_BASE}/authorize`,
-    );
-    expect(location.searchParams.get("client_id")).toBe(
-      testEnv.STRAVA_CLIENT_ID,
-    );
+    expect(location.origin + location.pathname).toBe(`${testEnv.STRAVA_OAUTH_BASE}/authorize`);
+    expect(location.searchParams.get("client_id")).toBe(testEnv.STRAVA_CLIENT_ID);
     expect(location.searchParams.get("redirect_uri")).toBe(
       "https://hub.example/auth/strava/callback",
     );
@@ -56,10 +49,7 @@ describe("handleAuthorize", () => {
 
 describe("handleCallback", () => {
   it("reports an authorization denial", async () => {
-    const response = await handleCallback(
-      callbackUrl({ error: "access_denied" }),
-      testEnv,
-    );
+    const response = await handleCallback(callbackUrl({ error: "access_denied" }), testEnv);
     expect(response.status).toBe(400);
     expect(await response.text()).toContain("access_denied");
   });
@@ -70,10 +60,7 @@ describe("handleCallback", () => {
   });
 
   it("rejects a grant without activity:read_all", async () => {
-    const response = await handleCallback(
-      callbackUrl({ code: "abc", scope: "read" }),
-      testEnv,
-    );
+    const response = await handleCallback(callbackUrl({ code: "abc", scope: "read" }), testEnv);
     expect(response.status).toBe(400);
     expect(await response.text()).toContain("activity:read_all");
   });

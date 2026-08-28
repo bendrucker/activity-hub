@@ -25,9 +25,7 @@ const { values: flags, positionals } = parseArgs({
 
 const exportDir = positionals[0];
 if (!exportDir) {
-  console.error(
-    "usage: bun scripts/backfill-timezone-inferred.ts <export-dir> [--dry-run]",
-  );
+  console.error("usage: bun scripts/backfill-timezone-inferred.ts <export-dir> [--dry-run]");
   process.exit(1);
 }
 
@@ -39,14 +37,9 @@ console.log(`${activities.length} activities in activities.csv`);
 const resolved = new Set<string>();
 let processed = 0;
 for (const activity of activities) {
-  if (
-    activity.filename &&
-    (await Bun.file(path.join(exportDir, activity.filename)).exists())
-  ) {
+  if (activity.filename && (await Bun.file(path.join(exportDir, activity.filename)).exists())) {
     try {
-      const bytes = await Bun.file(
-        path.join(exportDir, activity.filename),
-      ).bytes();
+      const bytes = await Bun.file(path.join(exportDir, activity.filename)).bytes();
       const points = await extractTrack(bytes, activity.filename);
       if (trackTimezone(points, activity.sportType) !== null) {
         resolved.add(activity.sourceId);
@@ -63,9 +56,7 @@ for (const activity of activities) {
 }
 console.log(`zones resolved from GPS: ${resolved.size}`);
 
-const rows = query(
-  "SELECT source_id, activity_id FROM activity_sources WHERE source = 'strava'",
-);
+const rows = query("SELECT source_id, activity_id FROM activity_sources WHERE source = 'strava'");
 const activityIds = new Map(
   rows.map((row) => [row["source_id"] as string, row["activity_id"] as string]),
 );
@@ -75,9 +66,7 @@ const statements = activities.flatMap((activity) => {
   if (!activityId || resolved.has(activity.sourceId)) {
     return [];
   }
-  return [
-    `UPDATE activities SET timezone_inferred = 1 WHERE activity_id = '${activityId}';`,
-  ];
+  return [`UPDATE activities SET timezone_inferred = 1 WHERE activity_id = '${activityId}';`];
 });
 console.log(`inferred rows to flag: ${statements.length}`);
 
@@ -95,21 +84,11 @@ const sqlPath = "tmp/backfill-timezone-inferred.sql";
 await Bun.write(sqlPath, statements.join("\n") + "\n");
 run(["d1", "execute", DATABASE, "--remote", "--yes", "--file", sqlPath]);
 
-const counts = query(
-  "SELECT COUNT(*) AS flagged FROM activities WHERE timezone_inferred = 1",
-);
+const counts = query("SELECT COUNT(*) AS flagged FROM activities WHERE timezone_inferred = 1");
 console.log("flagged now:", JSON.stringify(counts[0]));
 
 function query(sql: string): Record<string, unknown>[] {
-  const stdout = run([
-    "d1",
-    "execute",
-    DATABASE,
-    "--remote",
-    "--json",
-    "--command",
-    sql,
-  ]);
+  const stdout = run(["d1", "execute", DATABASE, "--remote", "--json", "--command", sql]);
   const parsed = JSON.parse(stdout) as { results: Record<string, unknown>[] }[];
   const first = parsed[0];
   if (!first) {
@@ -119,10 +98,9 @@ function query(sql: string): Record<string, unknown>[] {
 }
 
 function run(args: string[]): string {
-  const result = Bun.spawnSync(
-    ["bun", "run", "--silent", "wrangler", "--", ...args],
-    { stdio: ["ignore", "pipe", "inherit"] },
-  );
+  const result = Bun.spawnSync(["bun", "run", "--silent", "wrangler", "--", ...args], {
+    stdio: ["ignore", "pipe", "inherit"],
+  });
   if (result.exitCode !== 0) {
     throw new Error(`wrangler ${args.join(" ")} failed (${result.exitCode})`);
   }

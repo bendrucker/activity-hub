@@ -27,17 +27,13 @@ export function matchActivity(
       continue;
     }
 
-    const deltaS =
-      Math.abs(Date.parse(activity.startedAt) - candidateStart) / 1000;
+    const deltaS = Math.abs(Date.parse(activity.startedAt) - candidateStart) / 1000;
     if (deltaS > MAX_START_DELTA_S) {
       continue;
     }
 
     const longest = Math.max(candidate.durationS, activity.durationS);
-    const ratio =
-      longest === 0
-        ? 0
-        : Math.abs(candidate.durationS - activity.durationS) / longest;
+    const ratio = longest === 0 ? 0 : Math.abs(candidate.durationS - activity.durationS) / longest;
     if (ratio > MAX_DURATION_RATIO) {
       continue;
     }

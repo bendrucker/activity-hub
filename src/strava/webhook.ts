@@ -6,9 +6,7 @@ type ObjectType = (typeof OBJECT_TYPES)[number];
 const ASPECT_TYPES = ["create", "update", "delete"] as const;
 type AspectType = (typeof ASPECT_TYPES)[number];
 
-function isOneOf<T extends string>(
-  values: readonly T[],
-): (value: unknown) => value is T {
+function isOneOf<T extends string>(values: readonly T[]): (value: unknown) => value is T {
   return (value): value is T =>
     typeof value === "string" && (values as readonly string[]).includes(value);
 }
@@ -41,10 +39,7 @@ function toUpdates(value: unknown): Record<string, string> {
   return updates;
 }
 
-export async function handleWebhookEvent(
-  request: Request,
-  env: Env,
-): Promise<Response> {
+export async function handleWebhookEvent(request: Request, env: Env): Promise<Response> {
   let body: Record<string, unknown>;
   try {
     body = (await request.json()) as Record<string, unknown>;
@@ -53,10 +48,7 @@ export async function handleWebhookEvent(
   }
 
   const subscriptionId = body.subscription_id;
-  if (
-    !env.STRAVA_SUBSCRIPTION_ID ||
-    String(subscriptionId) !== env.STRAVA_SUBSCRIPTION_ID
-  ) {
+  if (!env.STRAVA_SUBSCRIPTION_ID || String(subscriptionId) !== env.STRAVA_SUBSCRIPTION_ID) {
     console.warn(
       `rejected Strava webhook event for unknown subscription ${String(subscriptionId)}`,
     );
@@ -66,11 +58,7 @@ export async function handleWebhookEvent(
   const aspectType = body.aspect_type;
   const objectType = body.object_type;
   const objectId = Number(body.object_id);
-  if (
-    !isAspectType(aspectType) ||
-    !isObjectType(objectType) ||
-    !Number.isInteger(objectId)
-  ) {
+  if (!isAspectType(aspectType) || !isObjectType(objectType) || !Number.isInteger(objectId)) {
     // A 4xx here would make Strava retry an event we'll never accept, and a
     // NaN objectId would serialize to null in the queue message.
     console.warn(

@@ -1,10 +1,6 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import {
-  appendConsumeLog,
-  consumeLogEntry,
-  readConsumeLog,
-} from "./consumelog";
+import { appendConsumeLog, consumeLogEntry, readConsumeLog } from "./consumelog";
 import type { IngestMessage } from "./ingest";
 
 const KEY = "debug:consume-log";
@@ -48,9 +44,7 @@ describe("consumeLogEntry", () => {
 describe("appendConsumeLog", () => {
   it("appends entries in order across writes", async () => {
     await appendConsumeLog(env.TOKENS, [consumeLogEntry(wahooMessage, "ok")]);
-    await appendConsumeLog(env.TOKENS, [
-      consumeLogEntry(stravaMessage, "error: boom"),
-    ]);
+    await appendConsumeLog(env.TOKENS, [consumeLogEntry(stravaMessage, "error: boom")]);
 
     const entries = await readConsumeLog(env.TOKENS);
     expect(entries.map((entry) => entry.id)).toEqual([101, 202]);

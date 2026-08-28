@@ -1,12 +1,7 @@
 import { MAX_START_DELTA_S } from "../match";
 import type { Source, SourceRecord } from "../record";
 import type { Sport } from "../sport";
-import {
-  parseStartedAt,
-  planMatchOrMint,
-  planSourceUpdate,
-  type Statement,
-} from "../upsert";
+import { parseStartedAt, planMatchOrMint, planSourceUpdate, type Statement } from "../upsert";
 
 export interface RegistryActivity {
   activityId: string;
@@ -51,9 +46,7 @@ export function buildDelta(
   records: readonly SourceRecord[],
   now: string,
 ): Delta {
-  const sources = new Map(
-    state.sources.map((row) => [`${row.source}:${row.sourceId}`, row]),
-  );
+  const sources = new Map(state.sources.map((row) => [`${row.source}:${row.sourceId}`, row]));
   const sourced = new Map<string, Set<Source>>();
   const markSourced = (activityId: string, source: Source): void => {
     let set = sourced.get(activityId);
@@ -68,10 +61,7 @@ export function buildDelta(
   }
   const activities = [...state.activities];
   const startTimes = new Map(
-    activities.map((activity) => [
-      activity.activityId,
-      Date.parse(activity.startedAt),
-    ]),
+    activities.map((activity) => [activity.activityId, Date.parse(activity.startedAt)]),
   );
 
   const statements: string[] = [];
@@ -108,8 +98,7 @@ export function buildDelta(
     const candidates = activities.filter(
       (activity) =>
         Math.abs((startTimes.get(activity.activityId) ?? NaN) - startedAtMs) <=
-          MAX_START_DELTA_S * 1000 &&
-        !sourced.get(activity.activityId)?.has(record.source),
+          MAX_START_DELTA_S * 1000 && !sourced.get(activity.activityId)?.has(record.source),
     );
     const plan = planMatchOrMint(record, candidates, now);
 
@@ -122,15 +111,10 @@ export function buildDelta(
       // A Wahoo attach overwrites the matched activity's telemetry, so the
       // in-memory row must follow for later records to match against.
       activities[
-        activities.findIndex(
-          (activity) => activity.activityId === plan.activity.activityId,
-        )
+        activities.findIndex((activity) => activity.activityId === plan.activity.activityId)
       ] = plan.activity;
     }
-    startTimes.set(
-      plan.activity.activityId,
-      Date.parse(plan.activity.startedAt),
-    );
+    startTimes.set(plan.activity.activityId, Date.parse(plan.activity.startedAt));
 
     markSourced(plan.activity.activityId, record.source);
     sources.set(`${record.source}:${record.sourceId}`, {

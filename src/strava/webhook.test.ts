@@ -83,10 +83,7 @@ describe("handleWebhookVerify", () => {
   });
 
   it("rejects a missing challenge", () => {
-    const response = handleWebhookVerify(
-      verifyUrl({ "hub.verify_token": "verify-me" }),
-      testEnv(),
-    );
+    const response = handleWebhookVerify(verifyUrl({ "hub.verify_token": "verify-me" }), testEnv());
     expect(response.status).toBe(400);
   });
 });
@@ -111,20 +108,15 @@ describe("handleWebhookEvent", () => {
     ]);
   });
 
-  it.each(["update", "delete"] as const)(
-    "maps aspect_type %s to kind",
-    async (aspectType) => {
-      const queue = stubQueue();
-      await handleWebhookEvent(
-        eventRequest({ ...CREATE_EVENT, aspect_type: aspectType }),
-        testEnv({ INGEST_QUEUE: queue }),
-      );
+  it.each(["update", "delete"] as const)("maps aspect_type %s to kind", async (aspectType) => {
+    const queue = stubQueue();
+    await handleWebhookEvent(
+      eventRequest({ ...CREATE_EVENT, aspect_type: aspectType }),
+      testEnv({ INGEST_QUEUE: queue }),
+    );
 
-      expect(queue.messages).toEqual([
-        expect.objectContaining({ kind: aspectType }),
-      ]);
-    },
-  );
+    expect(queue.messages).toEqual([expect.objectContaining({ kind: aspectType })]);
+  });
 
   it("rejects an unknown subscription id without enqueueing", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -174,10 +166,7 @@ describe("handleWebhookEvent", () => {
   });
 
   it("rejects a non-JSON body", async () => {
-    const response = await handleWebhookEvent(
-      eventRequest("not json"),
-      testEnv(),
-    );
+    const response = await handleWebhookEvent(eventRequest("not json"), testEnv());
     expect(response.status).toBe(400);
   });
 });

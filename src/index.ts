@@ -12,11 +12,7 @@ import {
   handleWahooProbe,
 } from "./admin";
 import { buildLake, LAKE_CRON } from "./lake/build";
-import {
-  appendConsumeLog,
-  consumeLogEntry,
-  type ConsumeLogEntry,
-} from "./consumelog";
+import { appendConsumeLog, consumeLogEntry, type ConsumeLogEntry } from "./consumelog";
 import { RateLimitedError, type IngestMessage } from "./ingest";
 import { drainPhotoBackfillTargets, PHOTO_CRON } from "./strava/backfill";
 import { consumeStravaEvent } from "./strava/consume";
@@ -29,17 +25,10 @@ import {
   handleWebhookEvent as stravaWebhookEvent,
   handleWebhookVerify as stravaWebhookVerify,
 } from "./strava/webhook";
-import {
-  consumeTransformBatch,
-  TRANSFORM_QUEUE,
-  type TransformMessage,
-} from "./transform/consume";
+import { consumeTransformBatch, TRANSFORM_QUEUE, type TransformMessage } from "./transform/consume";
 import { reconcileTransform, SWEEP_CRON } from "./transform/enqueue";
 import { consumeWahooEvent } from "./wahoo/consume";
-import {
-  handleAuthorize as wahooAuthorize,
-  handleCallback as wahooCallback,
-} from "./wahoo/routes";
+import { handleAuthorize as wahooAuthorize, handleCallback as wahooCallback } from "./wahoo/routes";
 import { handleWebhookEvent as wahooWebhookEvent } from "./wahoo/webhook";
 
 // The runtime resolves the durable_objects binding against the entry point's
@@ -69,19 +58,13 @@ const RATE_LIMIT_BACKOFF_S: Record<IngestMessage["source"], number[]> = {
 const RETRY_DELAY_S = 60;
 
 // `attempts` counts the delivery in progress, so it starts at 1.
-function rateLimitDelayS(
-  source: IngestMessage["source"],
-  attempts: number,
-): number {
+function rateLimitDelayS(source: IngestMessage["source"], attempts: number): number {
   const ladder = RATE_LIMIT_BACKOFF_S[source];
   const step = Math.min(Math.max(attempts, 1), ladder.length);
   return ladder[step - 1]!;
 }
 
-function consumeEvent(
-  message: IngestMessage,
-  env: Env,
-): Promise<string | undefined> {
+function consumeEvent(message: IngestMessage, env: Env): Promise<string | undefined> {
   return message.source === "wahoo"
     ? consumeWahooEvent(message, env)
     : consumeStravaEvent(message, env);
@@ -117,16 +100,13 @@ export async function consumeBatch(
       trail.push(consumeLogEntry(message.body, outcome ?? "ok"));
     } catch (error) {
       if (error instanceof RateLimitedError) {
-        const delaySeconds =
-          error.retryAfterS ?? rateLimitDelayS(source, message.attempts);
+        const delaySeconds = error.retryAfterS ?? rateLimitDelayS(source, message.attempts);
         exhausted.set(source, delaySeconds);
         message.retry({ delaySeconds });
         trail.push(consumeLogEntry(message.body, "rate-limited"));
         continue;
       }
-      console.error(
-        `failed to consume ${message.body.source} event: ${String(error)}`,
-      );
+      console.error(`failed to consume ${message.body.source} event: ${String(error)}`);
       message.retry({ delaySeconds: RETRY_DELAY_S });
       trail.push(consumeLogEntry(message.body, `error: ${String(error)}`));
     }
@@ -261,8 +241,7 @@ export default {
     }
 
     if (controller.cron === PHOTO_CRON) {
-      const { enqueued, dropped, unknown, pending } =
-        await drainPhotoBackfillTargets(env);
+      const { enqueued, dropped, unknown, pending } = await drainPhotoBackfillTargets(env);
       console.log(
         `photo backfill enqueued ${enqueued}, dropped ${dropped} already-archived and ${unknown} unregistered targets, ${pending} left`,
       );
@@ -286,10 +265,7 @@ export default {
 
   async queue(batch, env): Promise<void> {
     if (batch.queue === TRANSFORM_QUEUE) {
-      const summary = await consumeTransformBatch(
-        batch as MessageBatch<TransformMessage>,
-        env,
-      );
+      const summary = await consumeTransformBatch(batch as MessageBatch<TransformMessage>, env);
       console.log(`transform batch: ${JSON.stringify(summary)}`);
       return;
     }

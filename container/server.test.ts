@@ -3,11 +3,7 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import type { TelemetryActivity } from "../src/import/telemetry";
 import type { DecodeDeps } from "./decode";
 import { lakeRunner, type LakeRunner } from "./lake-runner";
-import type {
-  DecodeResponse,
-  LakeRequest,
-  LakeStart,
-} from "../src/transform/protocol";
+import type { DecodeResponse, LakeRequest, LakeStart } from "../src/transform/protocol";
 import { routes } from "./server";
 import type { LakeStore, RawStore } from "./storage";
 
@@ -38,10 +34,7 @@ test("POST /decode answers an outcome per work item", async () => {
 
   expect(response.status).toBe(200);
   const body = (await response.json()) as DecodeResponse;
-  expect(body.outcomes.map((outcome) => outcome.status)).toEqual([
-    "ok",
-    "skipped",
-  ]);
+  expect(body.outcomes.map((outcome) => outcome.status)).toEqual(["ok", "skipped"]);
 });
 
 test("POST /decode rejects a body that is not a decode request", async () => {

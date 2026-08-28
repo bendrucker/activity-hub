@@ -1,19 +1,11 @@
 import { Decoder, Stream } from "@garmin/fitsdk";
 import polyline from "@mapbox/polyline";
 import { decodeGpx } from "./gpx";
-import {
-  gunzip,
-  nullIsland,
-  position,
-  type TelemetryRecord,
-} from "./telemetry";
+import { gunzip, nullIsland, position, type TelemetryRecord } from "./telemetry";
 
 export type TrackPoint = [latitude: number, longitude: number];
 
-export async function extractTrack(
-  bytes: Uint8Array,
-  filename: string,
-): Promise<TrackPoint[]> {
+export async function extractTrack(bytes: Uint8Array, filename: string): Promise<TrackPoint[]> {
   if (filename.endsWith(".gz")) {
     return extractTrack(await gunzip(bytes), filename.slice(0, -3));
   }
@@ -47,10 +39,7 @@ function fitTrack(bytes: Uint8Array): TrackPoint[] {
   }
   const points: TrackPoint[] = [];
   for (const record of records) {
-    const { latitude, longitude } = position(
-      record.positionLat,
-      record.positionLong,
-    );
+    const { latitude, longitude } = position(record.positionLat, record.positionLong);
     if (latitude !== null && longitude !== null) {
       points.push([latitude, longitude]);
     }

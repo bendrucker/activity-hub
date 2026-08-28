@@ -96,9 +96,7 @@ export function lakeClient(env: Env): LakeClient {
         return { accepted: false };
       }
       if (!response.ok) {
-        throw new Error(
-          `lake container returned ${response.status}: ${await response.text()}`,
-        );
+        throw new Error(`lake container returned ${response.status}: ${await response.text()}`);
       }
       return (await response.json()) as LakeAccepted;
     },
@@ -119,9 +117,7 @@ async function call<T>(env: Env, route: string, request: unknown): Promise<T> {
     body: JSON.stringify(request),
   });
   if (!response.ok) {
-    throw new Error(
-      `${route} container returned ${response.status}: ${await response.text()}`,
-    );
+    throw new Error(`${route} container returned ${response.status}: ${await response.text()}`);
   }
   return (await response.json()) as T;
 }

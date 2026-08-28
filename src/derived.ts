@@ -1,7 +1,4 @@
-import {
-  DECODE_SCHEMA_VERSION,
-  PUBLISH_SCHEMA_VERSION,
-} from "./transform/protocol";
+import { DECODE_SCHEMA_VERSION, PUBLISH_SCHEMA_VERSION } from "./transform/protocol";
 
 export type Stage = "decode" | "lake" | "publish";
 
@@ -49,10 +46,7 @@ const MISSING_OBJECT = "absent";
 
 // Only `original` holds decodable telemetry bytes: `summary` and `detail` are
 // provider JSON and `streams` is Strava's resampled view of the same ride.
-export async function activityRawKeys(
-  db: D1Database,
-  activityId: string,
-): Promise<string[]> {
+export async function activityRawKeys(db: D1Database, activityId: string): Promise<string[]> {
   const { results } = await db
     .prepare(
       `SELECT DISTINCT json_extract(raw_keys, '$.original') AS raw_key
@@ -70,10 +64,7 @@ export async function activityRawKeys(
 // An upstream edit rewrites the raw object, which changes its etag, which
 // changes this digest. Every stage downstream is then stale by definition
 // without anything having to observe the edit.
-export async function inputFingerprint(
-  bucket: R2Bucket,
-  keys: readonly string[],
-): Promise<string> {
+export async function inputFingerprint(bucket: R2Bucket, keys: readonly string[]): Promise<string> {
   if (keys.length === 0) {
     return EMPTY_FINGERPRINT;
   }
@@ -86,13 +77,8 @@ export async function inputFingerprint(
     .map((key, index) => `${key}:${objects[index]?.etag ?? MISSING_OBJECT}`)
     .join("\n");
 
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(payload),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(payload));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 // Candidate selection cannot afford a fingerprint, which costs an R2 head per
@@ -136,13 +122,7 @@ export async function staleActivities(
 ): Promise<string[]> {
   const { results } = await db
     .prepare(STALE)
-    .bind(
-      stage,
-      MAX_ATTEMPTS,
-      limit,
-      ARTIFACT_VERSION[stage],
-      upstreamStage(stage),
-    )
+    .bind(stage, MAX_ATTEMPTS, limit, ARTIFACT_VERSION[stage], upstreamStage(stage))
     .all<{ activity_id: string; source_updated_at: string }>();
   return results.map((row) => row.activity_id);
 }
@@ -224,10 +204,7 @@ export interface DerivedOutcome {
   error?: string;
 }
 
-export async function recordOutcome(
-  db: D1Database,
-  outcome: DerivedOutcome,
-): Promise<void> {
+export async function recordOutcome(db: D1Database, outcome: DerivedOutcome): Promise<void> {
   await outcomeStatement(db, outcome).run();
 }
 
@@ -244,10 +221,7 @@ export async function recordOutcomes(
   await db.batch(outcomes.map((outcome) => outcomeStatement(db, outcome)));
 }
 
-function outcomeStatement(
-  db: D1Database,
-  outcome: DerivedOutcome,
-): D1PreparedStatement {
+function outcomeStatement(db: D1Database, outcome: DerivedOutcome): D1PreparedStatement {
   const failed = outcome.status === "failed";
   return db
     .prepare(
@@ -332,9 +306,7 @@ export async function clearDerived(
 ): Promise<void> {
   const statement =
     stage === undefined
-      ? db
-          .prepare("DELETE FROM derived WHERE activity_id = ?1")
-          .bind(activityId)
+      ? db.prepare("DELETE FROM derived WHERE activity_id = ?1").bind(activityId)
       : db
           .prepare("DELETE FROM derived WHERE activity_id = ?1 AND stage = ?2")
           .bind(activityId, stage);
@@ -394,15 +366,7 @@ export async function pipelineReport(db: D1Database): Promise<PipelineReport> {
     source_updated_at: string;
   }>(
     SWEPT_STAGES.map((stage) =>
-      db
-        .prepare(STALE)
-        .bind(
-          stage,
-          MAX_ATTEMPTS,
-          1,
-          ARTIFACT_VERSION[stage],
-          upstreamStage(stage),
-        ),
+      db.prepare(STALE).bind(stage, MAX_ATTEMPTS, 1, ARTIFACT_VERSION[stage], upstreamStage(stage)),
     ),
   );
 

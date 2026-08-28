@@ -14,10 +14,7 @@ export interface ConsumeLogEntry {
   outcome: string;
 }
 
-export function consumeLogEntry(
-  message: IngestMessage,
-  outcome: string,
-): ConsumeLogEntry {
+export function consumeLogEntry(message: IngestMessage, outcome: string): ConsumeLogEntry {
   return {
     at: new Date().toISOString(),
     source: message.source,
@@ -27,10 +24,7 @@ export function consumeLogEntry(
   };
 }
 
-export async function appendConsumeLog(
-  kv: KVNamespace,
-  entries: ConsumeLogEntry[],
-): Promise<void> {
+export async function appendConsumeLog(kv: KVNamespace, entries: ConsumeLogEntry[]): Promise<void> {
   if (entries.length === 0) {
     return;
   }
@@ -38,9 +32,7 @@ export async function appendConsumeLog(
   await kv.put(KEY, JSON.stringify(merged.slice(-LIMIT)));
 }
 
-export async function readConsumeLog(
-  kv: KVNamespace,
-): Promise<ConsumeLogEntry[]> {
+export async function readConsumeLog(kv: KVNamespace): Promise<ConsumeLogEntry[]> {
   const raw = await kv.get(KEY);
   if (!raw) {
     return [];

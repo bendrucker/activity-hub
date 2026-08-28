@@ -21,10 +21,7 @@ export const DECODE_CONCURRENCY = 4;
 
 const DECODABLE = [".fit", ".fit.gz", ".gpx", ".gpx.gz"];
 
-export type Decoder = (
-  bytes: Uint8Array,
-  filename: string,
-) => Promise<TelemetryActivity>;
+export type Decoder = (bytes: Uint8Array, filename: string) => Promise<TelemetryActivity>;
 
 export interface DecodeDeps {
   raw: RawStore;
@@ -37,10 +34,8 @@ export async function decodeBatch(
   request: DecodeRequest,
   deps: DecodeDeps,
 ): Promise<DecodeResponse> {
-  const outcomes = await mapConcurrent(
-    request.work,
-    DECODE_CONCURRENCY,
-    (work) => decodeActivity(work, deps),
+  const outcomes = await mapConcurrent(request.work, DECODE_CONCURRENCY, (work) =>
+    decodeActivity(work, deps),
   );
   return { outcomes };
 }
@@ -49,10 +44,7 @@ export function outputKey(activityId: string): string {
   return `decode/v1/${activityId}/`;
 }
 
-async function decodeActivity(
-  work: DecodeWork,
-  deps: DecodeDeps,
-): Promise<DecodeOutcome> {
+async function decodeActivity(work: DecodeWork, deps: DecodeDeps): Promise<DecodeOutcome> {
   const key = work.rawKeys.find(decodable);
   if (key === undefined) {
     return {
@@ -126,18 +118,15 @@ async function mapConcurrent<T, R>(
   const results: R[] = new Array<R>(items.length);
   let next = 0;
 
-  const workers = Array.from(
-    { length: Math.min(limit, items.length) },
-    async () => {
-      for (let index = next++; index < items.length; index = next++) {
-        const item = items[index];
-        if (item === undefined) {
-          throw new Error(`no work at index ${index}`);
-        }
-        results[index] = await run(item);
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (let index = next++; index < items.length; index = next++) {
+      const item = items[index];
+      if (item === undefined) {
+        throw new Error(`no work at index ${index}`);
       }
-    },
-  );
+      results[index] = await run(item);
+    }
+  });
 
   await Promise.all(workers);
   return results;

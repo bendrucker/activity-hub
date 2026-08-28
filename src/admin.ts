@@ -21,11 +21,7 @@ import {
   type ReconcileOptions,
   type ReconcileReport,
 } from "./strava/reconcile";
-import {
-  enqueueActivity,
-  reconcileTransform,
-  RECONCILE_LIMIT,
-} from "./transform/enqueue";
+import { enqueueActivity, reconcileTransform, RECONCILE_LIMIT } from "./transform/enqueue";
 import { LAKE_BUILD_SUMMARY_KEY } from "./transform/protocol";
 import { backfillWahooWorkouts, type BackfillOptions } from "./wahoo/backfill";
 import { wahooClient, type WahooClient } from "./wahoo/client";
@@ -34,8 +30,7 @@ import { isWorkoutSummary } from "./wahoo/summary";
 
 function authorized(request: Request, env: Env): boolean {
   return (
-    Boolean(env.ADMIN_TOKEN) &&
-    request.headers.get("Authorization") === `Bearer ${env.ADMIN_TOKEN}`
+    Boolean(env.ADMIN_TOKEN) && request.headers.get("Authorization") === `Bearer ${env.ADMIN_TOKEN}`
   );
 }
 
@@ -110,9 +105,7 @@ export async function handleWahooProbe(
     const client = options.client ?? wahooClient(env);
     const workoutResponse = await client.fetch(`/v1/workouts/${workoutId}`);
     const workoutText = await workoutResponse.text();
-    const summaryResponse = await client.fetch(
-      `/v1/workouts/${workoutId}/workout_summary`,
-    );
+    const summaryResponse = await client.fetch(`/v1/workouts/${workoutId}/workout_summary`);
     const summaryText = await summaryResponse.text();
 
     let guardPassed: boolean | null = null;
@@ -171,9 +164,7 @@ export async function handleWahooIngest(
       });
     }
     if (!response.ok) {
-      return errorResponse(
-        new Error(`Wahoo workout fetch failed: ${response.status}`),
-      );
+      return errorResponse(new Error(`Wahoo workout fetch failed: ${response.status}`));
     }
     const entry = (await response.json()) as Record<string, unknown> & {
       id: number;
@@ -204,10 +195,7 @@ export async function handleWahooIngest(
   }
 }
 
-export async function handleConsumeLog(
-  request: Request,
-  env: Env,
-): Promise<Response> {
+export async function handleConsumeLog(request: Request, env: Env): Promise<Response> {
   if (!authorized(request, env)) {
     return new Response("Forbidden", { status: 403 });
   }
@@ -230,9 +218,7 @@ export async function handleStravaBackfill(
   const cursor = new URL(request.url).searchParams.get("cursor") ?? undefined;
 
   try {
-    return Response.json(
-      await backfillStravaStreams(env, { cursor, ...options }),
-    );
+    return Response.json(await backfillStravaStreams(env, { cursor, ...options }));
   } catch (error) {
     return errorResponse(error);
   }
@@ -255,9 +241,7 @@ function listedIds(body: unknown): string[] {
   // would have no way to tell a trim from a page whose activities were already
   // archived.
   if (ids.length > PER_RUN) {
-    throw new Error(
-      `ids is limited to ${PER_RUN} per request, send the rest as further pages`,
-    );
+    throw new Error(`ids is limited to ${PER_RUN} per request, send the rest as further pages`);
   }
   return ids as string[];
 }
@@ -304,10 +288,7 @@ export async function handlePhotoBackfill(
 
 // Seeding spends no Strava read, so the per-request cap bounds nothing but the
 // D1 batch. It is kept at PER_RUN anyway so both endpoints take the same page.
-export async function handlePhotoBackfillTargets(
-  request: Request,
-  env: Env,
-): Promise<Response> {
+export async function handlePhotoBackfillTargets(request: Request, env: Env): Promise<Response> {
   if (!authorized(request, env)) {
     return new Response("Forbidden", { status: 403 });
   }
@@ -345,18 +326,12 @@ interface StageSummary {
 // rather than the NaN that would serialize as one anyway.
 function behindS(sourceUpdatedAt: string, now: number): number | null {
   const at = Date.parse(sourceUpdatedAt);
-  return Number.isFinite(at)
-    ? Math.max(0, Math.round((now - at) / 1000))
-    : null;
+  return Number.isFinite(at) ? Math.max(0, Math.round((now - at) / 1000)) : null;
 }
 
 // A status absent from the counts has zero rows. Every stage reports all three
 // so a reader can take a missing status at face value.
-function stageSummary(
-  report: PipelineReport,
-  stage: Stage,
-  now: number,
-): StageSummary {
+function stageSummary(report: PipelineReport, stage: Stage, now: number): StageSummary {
   const statuses: Record<DerivedStatus, number> = {
     ok: 0,
     failed: 0,
@@ -393,10 +368,7 @@ function stageSummary(
 // Reading this route is the first step of a recovery, so it carries the failure
 // text alongside the counts. A count on its own only sends the reader to
 // another query to find out what broke.
-export async function handlePipeline(
-  request: Request,
-  env: Env,
-): Promise<Response> {
+export async function handlePipeline(request: Request, env: Env): Promise<Response> {
   if (!authorized(request, env)) {
     return new Response("Forbidden", { status: 403 });
   }
@@ -419,10 +391,7 @@ export async function handlePipeline(
 // to reach it: an upstream edit, a decoder fix, a row that parked as failed.
 // Naming the activity does exactly that, and `force` covers the case where the
 // raw bytes did not change but what they should produce did.
-export async function handleTransform(
-  request: Request,
-  env: Env,
-): Promise<Response> {
+export async function handleTransform(request: Request, env: Env): Promise<Response> {
   if (!authorized(request, env)) {
     return new Response("Forbidden", { status: 403 });
   }
@@ -432,19 +401,11 @@ export async function handleTransform(
     const activityId = url.searchParams.get("activityId");
     const stage = (url.searchParams.get("stage") ?? "decode") as Stage;
     if (!STAGES.includes(stage)) {
-      return Response.json(
-        { ok: false, error: `unknown stage ${stage}` },
-        { status: 400 },
-      );
+      return Response.json({ ok: false, error: `unknown stage ${stage}` }, { status: 400 });
     }
 
     if (activityId !== null) {
-      await enqueueActivity(
-        env,
-        activityId,
-        stage,
-        url.searchParams.get("force") === "true",
-      );
+      await enqueueActivity(env, activityId, stage, url.searchParams.get("force") === "true");
       return Response.json({ ok: true, enqueued: 1, activityId, stage });
     }
 
@@ -502,10 +463,7 @@ async function latestLakeBuild(env: Env): Promise<Response> {
   try {
     const summary = await env.LAKE.get(LAKE_BUILD_SUMMARY_KEY);
     if (summary === null) {
-      return Response.json(
-        { ok: false, error: "no lake build summary" },
-        { status: 404 },
-      );
+      return Response.json({ ok: false, error: "no lake build summary" }, { status: 404 });
     }
     return Response.json({ ok: true, build: await summary.json() });
   } catch (error) {
@@ -529,9 +487,7 @@ export async function handleWahooBackfill(
   }
 
   try {
-    return Response.json(
-      await backfillWahooWorkouts(env, { page, ...options }),
-    );
+    return Response.json(await backfillWahooWorkouts(env, { page, ...options }));
   } catch (error) {
     if (error instanceof RateLimitedError) {
       return new Response("Wahoo rate limited, retry after the 5m window", {

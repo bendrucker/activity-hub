@@ -1,11 +1,6 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import {
-  brokerSource,
-  brokerStub,
-  clearTokens,
-  withBroker,
-} from "../../test/broker";
+import { brokerSource, brokerStub, clearTokens, withBroker } from "../../test/broker";
 import { stubFetch, type FetchStub } from "../../test/fetch-stub";
 import type { TokenBroker } from "../tokens/broker";
 import { REFRESH_MARGIN_S, type StoredTokens } from "../tokens/source";
@@ -52,9 +47,7 @@ describe("StravaClient", () => {
     const stub = stubFetch(() => new Response("{}"));
 
     await withBroker("strava", async (broker) => {
-      await expect(client(broker, stub).fetch("/athlete")).rejects.toThrow(
-        /auth\/strava/,
-      );
+      await expect(client(broker, stub).fetch("/athlete")).rejects.toThrow(/auth\/strava/);
     });
 
     expect(stub.requests).toHaveLength(0);
@@ -68,9 +61,7 @@ describe("StravaClient", () => {
     });
     const stub = stubFetch(() => Response.json({ id: 42 }));
 
-    const response = await withBroker("strava", (broker) =>
-      client(broker, stub).fetch("/athlete"),
-    );
+    const response = await withBroker("strava", (broker) => client(broker, stub).fetch("/athlete"));
 
     expect(response.status).toBe(200);
     expect(stub.requests).toHaveLength(1);
@@ -91,9 +82,7 @@ describe("StravaClient", () => {
       return Response.json({ id: 42 });
     });
 
-    await withBroker("strava", (broker) =>
-      client(broker, stub).fetch("/athlete"),
-    );
+    await withBroker("strava", (broker) => client(broker, stub).fetch("/athlete"));
 
     expect(stub.requests).toHaveLength(2);
     expect(stub.requests[0]!.url).toBe(TOKEN_URL);
@@ -117,9 +106,7 @@ describe("StravaClient", () => {
       return Response.json({ id: 42 });
     });
 
-    const response = await withBroker("strava", (broker) =>
-      client(broker, stub).fetch("/athlete"),
-    );
+    const response = await withBroker("strava", (broker) => client(broker, stub).fetch("/athlete"));
 
     expect(response.status).toBe(200);
     expect(stub.requests.map((request) => request.url)).toEqual([
@@ -143,9 +130,7 @@ describe("StravaClient", () => {
     // to catch a regression to the old `this.fetch = fetch` assignment.
     globalThis.fetch = async function (this: unknown) {
       if (this !== undefined && this !== globalThis) {
-        throw new TypeError(
-          "Illegal invocation: function called with incorrect 'this' reference",
-        );
+        throw new TypeError("Illegal invocation: function called with incorrect 'this' reference");
       }
       return Response.json({ id: 42 });
     } as typeof globalThis.fetch;

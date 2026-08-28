@@ -4,10 +4,7 @@ import type { TrackPoint } from "./track";
 // Virtual rides carry in-game course GPS (Zwift's Watopia sits in the
 // Solomon Islands), which says nothing about where the athlete was, so
 // their zone stays unresolved and is inferred from neighbors.
-export function trackTimezone(
-  points: TrackPoint[],
-  sportType: string,
-): string | null {
+export function trackTimezone(points: TrackPoint[], sportType: string): string | null {
   if (sportType.startsWith("Virtual")) {
     return null;
   }
@@ -32,14 +29,9 @@ export interface TimezoneSlot {
 // is where the athlete was at the time: the zone of the nearest-in-time
 // activity that has one. The fallback only applies when no activity in the
 // input resolved a zone.
-export function inferTimezones(
-  slots: readonly TimezoneSlot[],
-  fallback: string,
-): string[] {
+export function inferTimezones(slots: readonly TimezoneSlot[], fallback: string): string[] {
   const known = slots.flatMap((slot) =>
-    slot.timezone === null
-      ? []
-      : [{ atMs: Date.parse(slot.startedAt), timezone: slot.timezone }],
+    slot.timezone === null ? [] : [{ atMs: Date.parse(slot.startedAt), timezone: slot.timezone }],
   );
 
   return slots.map((slot) => {

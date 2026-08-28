@@ -3,13 +3,7 @@
 // Strava's archived detail supplies the title and the numbers a device without
 // sessions never recorded.
 
-import {
-  inputFingerprint,
-  isCurrent,
-  MAX_ATTEMPTS,
-  stageRow,
-  type StageRow,
-} from "../derived";
+import { inputFingerprint, isCurrent, MAX_ATTEMPTS, stageRow, type StageRow } from "../derived";
 import { lakeUri } from "../lake/location";
 import { isWorkoutSummary } from "../wahoo/summary";
 import { publishClient, type PublishClient } from "./container";
@@ -38,10 +32,7 @@ export interface PublishedActivity {
 
 export interface SitePublisher {
   publishActivity(row: PublishedActivity): Promise<void>;
-  publishPowerCurve(
-    activityId: string,
-    bests: readonly PowerBest[],
-  ): Promise<void>;
+  publishPowerCurve(activityId: string, bests: readonly PowerBest[]): Promise<void>;
   deleteActivity(activityId: string): Promise<void>;
 }
 
@@ -77,15 +68,11 @@ function notDecoded(reason = "activity has not been decoded"): PublishResult {
   return { fingerprint: UNDECODED, status: "skipped", reason };
 }
 
-function stravaSource(
-  sources: readonly ActivitySource[],
-): ActivitySource | undefined {
+function stravaSource(sources: readonly ActivitySource[]): ActivitySource | undefined {
   return sources.find((source) => source.source === "strava");
 }
 
-function wahooSource(
-  sources: readonly ActivitySource[],
-): ActivitySource | undefined {
+function wahooSource(sources: readonly ActivitySource[]): ActivitySource | undefined {
   return sources.find((source) => source.source === "wahoo");
 }
 
@@ -115,9 +102,7 @@ export async function publishToSite(
     return { fingerprint: DELETED, status: "ok" };
   }
 
-  const hasOriginal = registry.sources.some(
-    (source) => source.rawKeys.original !== undefined,
-  );
+  const hasOriginal = registry.sources.some((source) => source.rawKeys.original !== undefined);
   const decode = await stageRow(env.REGISTRY, activityId, "decode");
   if (decode?.status !== "ok" || decode.outputKey === null) {
     if (!decodeSettled(decode, hasOriginal)) {
@@ -154,9 +139,7 @@ export async function publishToSite(
     stravaDetail(env.RAW, registry.sources),
     photos(env.RAW, registry.sources),
   ]);
-  await site.publishActivity(
-    row(activityId, registry, outcome.artifact, detail, photoKeys),
-  );
+  await site.publishActivity(row(activityId, registry, outcome.artifact, detail, photoKeys));
   await site.publishPowerCurve(activityId, outcome.artifact.bests);
   return { fingerprint, status: "ok" };
 }
@@ -174,8 +157,7 @@ function decodeSettled(decode: StageRow | null, hasOriginal: boolean): boolean {
     return false;
   }
   return (
-    decode.status === "skipped" ||
-    (decode.status === "failed" && decode.attempts >= MAX_ATTEMPTS)
+    decode.status === "skipped" || (decode.status === "failed" && decode.attempts >= MAX_ATTEMPTS)
   );
 }
 
@@ -198,9 +180,7 @@ async function publishWithoutTelemetry(
     return publishFromWahooSummary(env, activityId, registry, site, summaryKey);
   }
 
-  return notDecoded(
-    "activity has no decoded telemetry and no provider record to publish from",
-  );
+  return notDecoded("activity has no decoded telemetry and no provider record to publish from");
 }
 
 // Strava's detail carries totals but no telemetry, so the row publishes with
@@ -341,10 +321,7 @@ interface ActivityRow {
 // Strava's archived detail is the live title and wins wherever it exists. The
 // registry's name comes from the bulk export, which is a snapshot, so it
 // stands in for the activities whose detail was never archived.
-function title(
-  registry: ActivityRow,
-  detail: StravaDetail | null,
-): string | null {
+function title(registry: ActivityRow, detail: StravaDetail | null): string | null {
   return detail?.name ?? registry.name;
 }
 
@@ -376,10 +353,7 @@ function row(
   };
 }
 
-async function activityRow(
-  db: D1Database,
-  activityId: string,
-): Promise<ActivityRow | null> {
+async function activityRow(db: D1Database, activityId: string): Promise<ActivityRow | null> {
   const { results } = await db
     .prepare(
       `SELECT activities.name, activities.sport, activities.started_at,
@@ -484,10 +458,7 @@ function number(value: unknown): number | null {
 // Two shapes reach raw_keys: the webhook path records one `photos` entry
 // holding a prefix, and the import path records a `photos/<name>` entry per
 // file. Only the prefix costs a list.
-async function photos(
-  bucket: R2Bucket,
-  sources: readonly ActivitySource[],
-): Promise<string[]> {
+async function photos(bucket: R2Bucket, sources: readonly ActivitySource[]): Promise<string[]> {
   const keys = new Set<string>();
   for (const source of sources) {
     for (const [name, key] of Object.entries(source.rawKeys)) {

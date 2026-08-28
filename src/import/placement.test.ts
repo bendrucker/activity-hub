@@ -31,9 +31,7 @@ describe("placeActivity", () => {
 
   it("places polylines under the derived prefix", () => {
     const placement = placeActivity(activity(), new Set());
-    expect(placement.polylineKey).toBe(
-      "derived/strava/activities/19324502491/polyline.json",
-    );
+    expect(placement.polylineKey).toBe("derived/strava/activities/19324502491/polyline.json");
   });
 
   it("mirrors only photos present in the archive", () => {
@@ -75,12 +73,7 @@ describe("toSourceRecord", () => {
   });
 
   it("maps unknown sport types to other", () => {
-    const record = toSourceRecord(
-      activity({ sportType: "Windsurf" }),
-      "UTC",
-      false,
-      {},
-    );
+    const record = toSourceRecord(activity({ sportType: "Windsurf" }), "UTC", false, {});
     expect(record.sport).toBe("other");
     expect(record.timezoneInferred).toBe(false);
   });

@@ -2,11 +2,7 @@ import { env } from "cloudflare:test";
 import { decodeTime } from "ulid";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { SourceRecord } from "../record";
-import {
-  buildDelta,
-  type RegistryState,
-  type RegistrySourceRow,
-} from "./delta";
+import { buildDelta, type RegistryState, type RegistrySourceRow } from "./delta";
 
 const START = "2026-07-01T14:00:00.000Z";
 const NOW = "2026-07-16T00:00:00.000Z";
@@ -80,18 +76,12 @@ describe("buildDelta", () => {
     const delta = buildDelta(empty(), [record()], NOW);
     expect(delta.results).toHaveLength(1);
     expect(delta.results[0]?.outcome).toBe("minted");
-    expect(decodeTime(delta.results[0]?.activityId ?? "")).toBe(
-      Date.parse(START),
-    );
+    expect(decodeTime(delta.results[0]?.activityId ?? "")).toBe(Date.parse(START));
     expect(delta.statements).toHaveLength(2);
   });
 
   it("emits valid SQL that upserts into D1", async () => {
-    const delta = buildDelta(
-      empty(),
-      [record({ timezoneInferred: true })],
-      NOW,
-    );
+    const delta = buildDelta(empty(), [record({ timezoneInferred: true })], NOW);
     await apply(delta.statements);
 
     const state = await loadState();
@@ -102,36 +92,27 @@ describe("buildDelta", () => {
       sourceId: "12345",
       rawKeys: { original: "raw/strava/activities/12345/original.fit.gz" },
     });
-    const activity = await env.REGISTRY.prepare(
-      "SELECT timezone_inferred FROM activities",
-    ).first<{ timezone_inferred: number }>();
+    const activity = await env.REGISTRY.prepare("SELECT timezone_inferred FROM activities").first<{
+      timezone_inferred: number;
+    }>();
     expect(activity?.timezone_inferred).toBe(1);
   });
 
   it("emits an empty delta when re-run over its own output", async () => {
     const first = buildDelta(
       empty(),
-      [
-        record(),
-        record({ sourceId: "12346", startedAt: "2026-07-02T09:00:00.000Z" }),
-      ],
+      [record(), record({ sourceId: "12346", startedAt: "2026-07-02T09:00:00.000Z" })],
       NOW,
     );
     await apply(first.statements);
 
     const second = buildDelta(
       await loadState(),
-      [
-        record(),
-        record({ sourceId: "12346", startedAt: "2026-07-02T09:00:00.000Z" }),
-      ],
+      [record(), record({ sourceId: "12346", startedAt: "2026-07-02T09:00:00.000Z" })],
       NOW,
     );
     expect(second.statements).toEqual([]);
-    expect(second.results.map((result) => result.outcome)).toEqual([
-      "unchanged",
-      "unchanged",
-    ]);
+    expect(second.results.map((result) => result.outcome)).toEqual(["unchanged", "unchanged"]);
   });
 
   it("updates raw_keys when new keys appear for an existing source", async () => {
@@ -188,16 +169,10 @@ describe("buildDelta", () => {
   it("never attaches two records from the same source to one activity", () => {
     const delta = buildDelta(
       empty(),
-      [
-        record(),
-        record({ sourceId: "12346", startedAt: "2026-07-01T14:00:10.000Z" }),
-      ],
+      [record(), record({ sourceId: "12346", startedAt: "2026-07-01T14:00:10.000Z" })],
       NOW,
     );
-    expect(delta.results.map((result) => result.outcome)).toEqual([
-      "minted",
-      "minted",
-    ]);
+    expect(delta.results.map((result) => result.outcome)).toEqual(["minted", "minted"]);
   });
 
   it("escapes quotes in SQL text values", async () => {
@@ -214,11 +189,7 @@ describe("buildDelta", () => {
   });
 
   it("overwrites telemetry when a Wahoo record attaches", async () => {
-    const first = buildDelta(
-      empty(),
-      [record({ timezoneInferred: true })],
-      NOW,
-    );
+    const first = buildDelta(empty(), [record({ timezoneInferred: true })], NOW);
     await apply(first.statements);
 
     const second = buildDelta(
@@ -244,9 +215,9 @@ describe("buildDelta", () => {
       durationS: 3650,
     });
     // The Wahoo device zone replaces the inferred one, so the flag clears.
-    const activity = await env.REGISTRY.prepare(
-      "SELECT timezone_inferred FROM activities",
-    ).first<{ timezone_inferred: number }>();
+    const activity = await env.REGISTRY.prepare("SELECT timezone_inferred FROM activities").first<{
+      timezone_inferred: number;
+    }>();
     expect(activity?.timezone_inferred).toBe(0);
   });
 });

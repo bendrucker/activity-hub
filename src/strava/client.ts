@@ -20,8 +20,7 @@ export class StravaClient {
   constructor(private readonly config: StravaClientConfig) {
     // workerd's native fetch throws "Illegal invocation" when called with a
     // foreign `this`. An arrow wrapper keeps late binding without that risk.
-    this.transport =
-      config.fetch ?? ((input, init) => globalThis.fetch(input, init));
+    this.transport = config.fetch ?? ((input, init) => globalThis.fetch(input, init));
   }
 
   async fetch(path: string, init: RequestInit = {}): Promise<Response> {
@@ -34,11 +33,7 @@ export class StravaClient {
     return this.request(path, init, await this.config.tokens.refresh(token));
   }
 
-  private request(
-    path: string,
-    init: RequestInit,
-    accessToken: string,
-  ): Promise<Response> {
+  private request(path: string, init: RequestInit, accessToken: string): Promise<Response> {
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${accessToken}`);
     return this.transport(`${this.config.apiBase}${path}`, {

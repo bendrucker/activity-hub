@@ -8,10 +8,7 @@ function input(overrides: Partial<MatchInput> = {}): MatchInput {
   return { startedAt: START, sport: "ride", durationS: 3600, ...overrides };
 }
 
-function candidate(
-  activityId: string,
-  overrides: Partial<MatchInput> = {},
-): MatchCandidate {
+function candidate(activityId: string, overrides: Partial<MatchInput> = {}): MatchCandidate {
   return { activityId, ...input(overrides) };
 }
 
@@ -41,9 +38,7 @@ describe("matchActivity", () => {
 
   it("matches at exactly the duration ratio threshold", () => {
     const existing = candidate("a", { durationS: 950 });
-    expect(matchActivity(input({ durationS: 1000 }), [existing])).toBe(
-      existing,
-    );
+    expect(matchActivity(input({ durationS: 1000 }), [existing])).toBe(existing);
   });
 
   it("mints just over the duration ratio threshold", () => {

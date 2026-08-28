@@ -18,17 +18,15 @@ test("reads both credential pairs", () => {
 });
 
 test("names every missing variable at once", () => {
-  expect(() =>
-    readConfig({ R2_ACCOUNT_ID: "acct", R2_RAW_ACCESS_KEY_ID: "raw-key" }),
-  ).toThrow(
+  expect(() => readConfig({ R2_ACCOUNT_ID: "acct", R2_RAW_ACCESS_KEY_ID: "raw-key" })).toThrow(
     "missing container environment: R2_RAW_SECRET_ACCESS_KEY, R2_LAKE_ACCESS_KEY_ID, R2_LAKE_SECRET_ACCESS_KEY",
   );
 });
 
 test("treats an empty value as missing", () => {
-  expect(() =>
-    readConfig({ ...COMPLETE, R2_LAKE_SECRET_ACCESS_KEY: "" }),
-  ).toThrow("R2_LAKE_SECRET_ACCESS_KEY");
+  expect(() => readConfig({ ...COMPLETE, R2_LAKE_SECRET_ACCESS_KEY: "" })).toThrow(
+    "R2_LAKE_SECRET_ACCESS_KEY",
+  );
 });
 
 test("builds the account's S3 endpoint", () => {

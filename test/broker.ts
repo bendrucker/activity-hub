@@ -30,10 +30,7 @@ export async function clearTokens(provider: Provider): Promise<void> {
 
 // The production adapter reaches the broker over RPC, which cannot carry a
 // fetch stub. Tests that drive a refresh hold the instance itself instead.
-export function brokerSource(
-  broker: TokenBroker,
-  options: BrokerOptions = {},
-): TokenSource {
+export function brokerSource(broker: TokenBroker, options: BrokerOptions = {}): TokenSource {
   return {
     accessToken: () => broker.accessToken(options),
     refresh: (used) => broker.refresh(used, options),

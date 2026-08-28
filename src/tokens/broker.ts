@@ -182,10 +182,7 @@ export class TokenBroker extends DurableObject<Env> {
   }
 }
 
-export function tokenBroker(
-  env: Pick<Env, "TOKEN_BROKER">,
-  provider: Provider,
-): TokenSource {
+export function tokenBroker(env: Pick<Env, "TOKEN_BROKER">, provider: Provider): TokenSource {
   const namespace = env.TOKEN_BROKER;
   const stub = namespace.get(namespace.idFromName(provider));
   return {

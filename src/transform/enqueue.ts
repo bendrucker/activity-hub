@@ -1,9 +1,4 @@
-import {
-  clearDerived,
-  staleActivities,
-  SWEPT_STAGES,
-  type Stage,
-} from "../derived";
+import { clearDerived, staleActivities, SWEPT_STAGES, type Stage } from "../derived";
 import type { TransformMessage } from "./consume";
 
 // Cloudflare caps a batch send at 100 messages.
@@ -40,10 +35,7 @@ export async function enqueueTransform(
 // The sweep is what makes the pipeline data-driven: an activity is enqueued
 // because its stage output is missing or older than its input, never because
 // of when it arrived.
-export async function reconcileTransform(
-  env: Env,
-  limit = RECONCILE_LIMIT,
-): Promise<number> {
+export async function reconcileTransform(env: Env, limit = RECONCILE_LIMIT): Promise<number> {
   let enqueued = 0;
   for (const stage of SWEPT_STAGES) {
     const ids = await staleActivities(env.REGISTRY, stage, limit);

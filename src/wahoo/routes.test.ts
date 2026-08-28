@@ -47,16 +47,11 @@ beforeEach(async () => {
 
 describe("handleAuthorize", () => {
   it("redirects to Wahoo with the callback and scopes", () => {
-    const response = handleAuthorize(
-      new URL("https://hub.example/auth/wahoo"),
-      testEnv,
-    );
+    const response = handleAuthorize(new URL("https://hub.example/auth/wahoo"), testEnv);
 
     expect(response.status).toBe(302);
     const location = new URL(response.headers.get("Location") ?? "");
-    expect(location.origin + location.pathname).toBe(
-      `${testEnv.WAHOO_OAUTH_BASE}/authorize`,
-    );
+    expect(location.origin + location.pathname).toBe(`${testEnv.WAHOO_OAUTH_BASE}/authorize`);
     expect(location.searchParams.get("client_id")).toBe("2348");
     expect(location.searchParams.get("response_type")).toBe("code");
     expect(location.searchParams.get("redirect_uri")).toBe(
@@ -78,10 +73,7 @@ describe("handleAuthorize", () => {
 
 describe("handleCallback", () => {
   it("reports an authorization denial", async () => {
-    const response = await handleCallback(
-      callbackUrl({ error: "access_denied" }),
-      testEnv,
-    );
+    const response = await handleCallback(callbackUrl({ error: "access_denied" }), testEnv);
     expect(response.status).toBe(400);
     expect(await response.text()).toContain("access_denied");
   });
@@ -126,11 +118,7 @@ describe("handleCallback", () => {
   });
 
   it("stores tokens on a successful exchange", async () => {
-    const response = await handleCallback(
-      callbackUrl({ code: "abc" }),
-      testEnv,
-      stubExchange(),
-    );
+    const response = await handleCallback(callbackUrl({ code: "abc" }), testEnv, stubExchange());
 
     expect(response.status).toBe(200);
     expect(await brokerStub("wahoo").current()).toEqual({

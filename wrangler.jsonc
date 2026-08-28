@@ -45,9 +45,7 @@
     // job is paced this slowly.
     "crons": ["0 6 * * *", "0 8 * * *", "30 * * * *", "15 * * * *"],
   },
-  "kv_namespaces": [
-    { "binding": "TOKENS", "id": "bc72d180846d490395293eb92370f99b" },
-  ],
+  "kv_namespaces": [{ "binding": "TOKENS", "id": "bc72d180846d490395293eb92370f99b" }],
   "durable_objects": {
     "bindings": [
       { "name": "TOKEN_BROKER", "class_name": "TokenBroker" },

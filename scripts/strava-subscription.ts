@@ -15,16 +15,13 @@ function requireEnv(name: string): string {
 }
 
 async function withBody(response: Response): Promise<never> {
-  throw new Error(
-    `request failed: ${response.status} ${await response.text()}`,
-  );
+  throw new Error(`request failed: ${response.status} ${await response.text()}`);
 }
 
 async function create(clientId: string, clientSecret: string): Promise<void> {
   const verifyToken = requireEnv("STRAVA_VERIFY_TOKEN");
   const callbackUrl =
-    process.env.STRAVA_CALLBACK_URL ??
-    "https://hub.bendrucker.me/webhooks/strava";
+    process.env.STRAVA_CALLBACK_URL ?? "https://hub.bendrucker.me/webhooks/strava";
 
   const response = await fetch(API_BASE, {
     method: "POST",
@@ -87,9 +84,7 @@ async function main(): Promise<void> {
     case "delete":
       return remove(clientId, clientSecret, id);
     default:
-      throw new Error(
-        `usage: bun scripts/strava-subscription.ts <create|view|delete> [id]`,
-      );
+      throw new Error(`usage: bun scripts/strava-subscription.ts <create|view|delete> [id]`);
   }
 }
 
