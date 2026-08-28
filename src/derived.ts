@@ -228,8 +228,28 @@ export async function recordOutcome(
   db: D1Database,
   outcome: DerivedOutcome,
 ): Promise<void> {
+  await outcomeStatement(db, outcome).run();
+}
+
+// D1 runs a batch as one implicit transaction, so recording a queue batch
+// this way is all-or-nothing rather than row-by-row. The upsert is idempotent
+// and the caller retries the whole batch, so a replay lands the same rows.
+export async function recordOutcomes(
+  db: D1Database,
+  outcomes: readonly DerivedOutcome[],
+): Promise<void> {
+  if (outcomes.length === 0) {
+    return;
+  }
+  await db.batch(outcomes.map((outcome) => outcomeStatement(db, outcome)));
+}
+
+function outcomeStatement(
+  db: D1Database,
+  outcome: DerivedOutcome,
+): D1PreparedStatement {
   const failed = outcome.status === "failed";
-  await db
+  return db
     .prepare(
       `INSERT INTO derived (
          activity_id, stage, input_fingerprint, output_key,
@@ -267,8 +287,7 @@ export async function recordOutcome(
       outcome.error ?? null,
       new Date().toISOString(),
       ARTIFACT_VERSION[outcome.stage],
-    )
-    .run();
+    );
 }
 
 // A stage that re-runs and finds itself current writes nothing otherwise, so
