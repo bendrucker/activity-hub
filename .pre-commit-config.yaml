@@ -7,3 +7,6 @@ repos:
         args: [--branch, main]
       - id: check-added-large-files
         args: [--maxkb=1024]
+  - repo: https://github.com/oxc-project/mirrors-oxfmt
+    rev: v0.65.0
+    hooks: [{ id: oxfmt }]

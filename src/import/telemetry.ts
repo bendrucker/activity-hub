@@ -8,7 +8,11 @@ export type TelemetrySource = "fit" | "gpx";
 // invalid-value check misses non-finite floats, which have to be nulled here
 // rather than carried into a numeric column.
 export type DeveloperFieldValue =
-  number | string | (number | null)[] | (string | null)[] | null;
+  | number
+  | string
+  | (number | null)[]
+  | (string | null)[]
+  | null;
 
 export interface TelemetryRecord {
   timestamp: Date | null;
