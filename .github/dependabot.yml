@@ -6,3 +6,7 @@ updates:
   - package-ecosystem: bun
     directories: ["/", "/container"]
     schedule: { interval: weekly }
+    # Let a release sit for a week before Dependabot proposes it. GitHub
+    # Actions has no cooldown support, so it only applies to bun.
+    cooldown:
+      default-days: 7
