@@ -33,6 +33,8 @@ test("defines both secrets on the first connection", async () => {
   await configure(connection);
 
   expect(statements[0]).toBe("LOAD httpfs");
+  expect(statements).toContain("SET threads = 16");
+  expect(statements).toContain("SET enable_object_cache = true");
   expect(secretsIn(statements)).toHaveLength(2);
   expect(statements.join("\n")).toContain("s3://activity-hub-raw");
   expect(statements.join("\n")).toContain("s3://activity-hub-lake");
