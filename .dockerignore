@@ -12,3 +12,5 @@ docs
 migrations
 scripts
 test
+container/*.test.ts
+container/verify-*.ts
