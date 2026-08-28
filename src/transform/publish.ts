@@ -3,7 +3,13 @@
 // Strava's archived detail supplies the title and the numbers a device without
 // sessions never recorded.
 
-import { inputFingerprint, isCurrent, MAX_ATTEMPTS, stageRow, type StageRow } from "../derived";
+import {
+  currentFingerprints,
+  inputFingerprint,
+  MAX_ATTEMPTS,
+  stageRows,
+  type StageRow,
+} from "../derived";
 import { lakeUri } from "../lake/location";
 import { isWorkoutSummary } from "../wahoo/summary";
 import { publishClient, type PublishClient } from "./container";
@@ -76,13 +82,48 @@ function wahooSource(sources: readonly ActivitySource[]): ActivitySource | undef
   return sources.find((source) => source.source === "wahoo");
 }
 
+// Everything the publish stage reads out of D1 for one activity. The drain
+// loads a whole queue batch of these in three queries, because the reads are
+// identical per activity and the branching that consumes them is not.
+export interface PublishContext {
+  registry: ActivityRow | null;
+  decode: StageRow | null;
+  // The fingerprint publish last recorded as ok, absent when no current row
+  // stands. Every "is this already published?" test is a comparison against
+  // it, where each used to be its own query.
+  published: string | undefined;
+}
+
+export async function publishContexts(
+  db: D1Database,
+  activityIds: readonly string[],
+): Promise<Map<string, PublishContext>> {
+  const [registries, decodes, published] = await Promise.all([
+    activityRows(db, activityIds),
+    stageRows(db, "decode", activityIds),
+    currentFingerprints(db, "publish", activityIds),
+  ]);
+
+  return new Map(
+    activityIds.map((activityId) => [
+      activityId,
+      {
+        registry: registries.get(activityId) ?? null,
+        decode: decodes.get(activityId) ?? null,
+        published: published.get(activityId),
+      },
+    ]),
+  );
+}
+
 export async function publishToSite(
   env: Env,
   activityId: string,
+  context: PublishContext,
   options: PublishOptions = {},
 ): Promise<PublishResult> {
   const site = options.site ?? sitePublisher(env);
-  const registry = await activityRow(env.REGISTRY, activityId);
+  const { registry, decode, published } = context;
   if (registry === null) {
     return {
       fingerprint: UNDECODED,
@@ -95,7 +136,7 @@ export async function publishToSite(
   // out of the staleness query at the same moment, so this message is the last
   // chance to take the row off the site.
   if (registry.sources.length === 0) {
-    if (await isCurrent(env.REGISTRY, activityId, "publish", DELETED)) {
+    if (published === DELETED) {
       return { fingerprint: DELETED, status: "current" };
     }
     await site.deleteActivity(activityId);
@@ -103,7 +144,6 @@ export async function publishToSite(
   }
 
   const hasOriginal = registry.sources.some((source) => source.rawKeys.original !== undefined);
-  const decode = await stageRow(env.REGISTRY, activityId, "decode");
   if (decode?.status !== "ok" || decode.outputKey === null) {
     if (!decodeSettled(decode, hasOriginal)) {
       return notDecoded();
@@ -116,11 +156,11 @@ export async function publishToSite(
         `publishing ${activityId} without telemetry: decode ${decode?.status ?? "never ran"}`,
       );
     }
-    return publishWithoutTelemetry(env, activityId, registry, site);
+    return publishWithoutTelemetry(env, activityId, registry, site, published);
   }
 
   const fingerprint = `${decode.inputFingerprint}:${decode.artifactVersion}`;
-  if (await isCurrent(env.REGISTRY, activityId, "publish", fingerprint)) {
+  if (published === fingerprint) {
     return { fingerprint, status: "current" };
   }
 
@@ -169,15 +209,16 @@ async function publishWithoutTelemetry(
   activityId: string,
   registry: ActivityRow,
   site: SitePublisher,
+  published: string | undefined,
 ): Promise<PublishResult> {
   const detailKey = stravaSource(registry.sources)?.rawKeys.detail;
   if (detailKey !== undefined) {
-    return publishFromDetail(env, activityId, registry, site, detailKey);
+    return publishFromDetail(env, activityId, registry, site, published, detailKey);
   }
 
   const summaryKey = wahooSource(registry.sources)?.rawKeys.summary;
   if (summaryKey !== undefined) {
-    return publishFromWahooSummary(env, activityId, registry, site, summaryKey);
+    return publishFromWahooSummary(env, activityId, registry, site, published, summaryKey);
   }
 
   return notDecoded("activity has no decoded telemetry and no provider record to publish from");
@@ -191,10 +232,11 @@ async function publishFromDetail(
   activityId: string,
   registry: ActivityRow,
   site: SitePublisher,
+  published: string | undefined,
   detailKey: string,
 ): Promise<PublishResult> {
   const fingerprint = await inputFingerprint(env.RAW, [detailKey]);
-  if (await isCurrent(env.REGISTRY, activityId, "publish", fingerprint)) {
+  if (published === fingerprint) {
     return { fingerprint, status: "current" };
   }
 
@@ -250,10 +292,11 @@ async function publishFromWahooSummary(
   activityId: string,
   registry: ActivityRow,
   site: SitePublisher,
+  published: string | undefined,
   summaryKey: string,
 ): Promise<PublishResult> {
   const fingerprint = await inputFingerprint(env.RAW, [summaryKey]);
-  if (await isCurrent(env.REGISTRY, activityId, "publish", fingerprint)) {
+  if (published === fingerprint) {
     return { fingerprint, status: "current" };
   }
 
@@ -310,7 +353,7 @@ interface ActivitySource {
   rawKeys: Record<string, string>;
 }
 
-interface ActivityRow {
+export interface ActivityRow {
   name: string | null;
   sport: string;
   startedAt: string;
@@ -353,21 +396,30 @@ function row(
   };
 }
 
-async function activityRow(db: D1Database, activityId: string): Promise<ActivityRow | null> {
+async function activityRows(
+  db: D1Database,
+  activityIds: readonly string[],
+): Promise<Map<string, ActivityRow>> {
+  if (activityIds.length === 0) {
+    return new Map();
+  }
+
+  const placeholders = activityIds.map((_, index) => `?${index + 1}`).join(", ");
   const { results } = await db
     .prepare(
-      `SELECT activities.name, activities.sport, activities.started_at,
-              activities.timezone,
+      `SELECT activities.activity_id, activities.name, activities.sport,
+              activities.started_at, activities.timezone,
               sources.source, sources.source_id, sources.raw_keys
        FROM activities
        LEFT JOIN activity_sources AS sources
          ON sources.activity_id = activities.activity_id
         AND sources.deleted_at IS NULL
-       WHERE activities.activity_id = ?1
-       ORDER BY sources.source, sources.source_id`,
+       WHERE activities.activity_id IN (${placeholders})
+       ORDER BY activities.activity_id, sources.source, sources.source_id`,
     )
-    .bind(activityId)
+    .bind(...activityIds)
     .all<{
+      activity_id: string;
       name: string | null;
       sport: string;
       started_at: string;
@@ -377,27 +429,31 @@ async function activityRow(db: D1Database, activityId: string): Promise<Activity
       raw_keys: string | null;
     }>();
 
-  const [first] = results;
-  if (first === undefined) {
-    return null;
+  const rows = new Map<string, ActivityRow>();
+  for (const result of results) {
+    let row = rows.get(result.activity_id);
+    if (row === undefined) {
+      row = {
+        name: result.name,
+        sport: result.sport,
+        startedAt: result.started_at,
+        timezone: result.timezone,
+        sources: [],
+      };
+      rows.set(result.activity_id, row);
+    }
+    // The LEFT JOIN emits one null-source row for an activity whose sources
+    // are all deleted, which is the shape that drives the delete-from-site
+    // path below. The activity still has to appear in the map to get there.
+    if (result.source !== null && result.source_id !== null) {
+      row.sources.push({
+        source: result.source,
+        sourceId: result.source_id,
+        rawKeys: rawKeys(result.raw_keys),
+      });
+    }
   }
-  return {
-    name: first.name,
-    sport: first.sport,
-    startedAt: first.started_at,
-    timezone: first.timezone,
-    sources: results.flatMap((result) =>
-      result.source === null || result.source_id === null
-        ? []
-        : [
-            {
-              source: result.source,
-              sourceId: result.source_id,
-              rawKeys: rawKeys(result.raw_keys),
-            },
-          ],
-    ),
-  };
+  return rows;
 }
 
 function rawKeys(value: string | null): Record<string, string> {

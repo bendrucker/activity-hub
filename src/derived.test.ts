@@ -7,9 +7,9 @@ import {
   clearDerived,
   EMPTY_FINGERPRINT,
   inputFingerprint,
-  isCurrent,
   MAX_ATTEMPTS,
   pipelineReport,
+  currentFingerprints,
   recordOutcome,
   staleActivities,
   type DerivedStatus,
@@ -238,7 +238,7 @@ describe("artifact version", () => {
       artifactVersion: DECODE_SCHEMA_VERSION - 1,
     });
 
-    expect(await isCurrent(env.REGISTRY, "a1", "decode", "fingerprint")).toBe(false);
+    expect(await currentFingerprints(env.REGISTRY, "decode", ["a1"])).toEqual(new Map());
   });
 
   // A parked row gets its budget back, because the ceiling counts attempts
@@ -269,12 +269,12 @@ async function sha256(payload: string): Promise<string> {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-describe("isCurrent", () => {
+describe("currentFingerprints", () => {
   beforeEach(async () => {
     await seedActivity("a1");
   });
 
-  it("is true for an ok row with the same fingerprint", async () => {
+  it("reports the fingerprint an ok row recorded", async () => {
     await recordOutcome(env.REGISTRY, {
       activityId: "a1",
       stage: "decode",
@@ -283,21 +283,12 @@ describe("isCurrent", () => {
       outputKey: "decode/v1/a1/",
     });
 
-    expect(await isCurrent(env.REGISTRY, "a1", "decode", "abc")).toBe(true);
+    expect(await currentFingerprints(env.REGISTRY, "decode", ["a1"])).toEqual(
+      new Map([["a1", "abc"]]),
+    );
   });
 
-  it("is false once the fingerprint changes", async () => {
-    await recordOutcome(env.REGISTRY, {
-      activityId: "a1",
-      stage: "decode",
-      inputFingerprint: "abc",
-      status: "ok",
-    });
-
-    expect(await isCurrent(env.REGISTRY, "a1", "decode", "def")).toBe(false);
-  });
-
-  it("is false for a failed row, matching fingerprint or not", async () => {
+  it("omits a failed row, whatever it fingerprinted", async () => {
     await recordOutcome(env.REGISTRY, {
       activityId: "a1",
       stage: "decode",
@@ -306,10 +297,10 @@ describe("isCurrent", () => {
       error: "boom",
     });
 
-    expect(await isCurrent(env.REGISTRY, "a1", "decode", "abc")).toBe(false);
+    expect(await currentFingerprints(env.REGISTRY, "decode", ["a1"])).toEqual(new Map());
   });
 
-  it("is false for another stage's ok row", async () => {
+  it("omits another stage's ok row", async () => {
     await recordOutcome(env.REGISTRY, {
       activityId: "a1",
       stage: "decode",
@@ -317,7 +308,34 @@ describe("isCurrent", () => {
       status: "ok",
     });
 
-    expect(await isCurrent(env.REGISTRY, "a1", "lake", "abc")).toBe(false);
+    expect(await currentFingerprints(env.REGISTRY, "lake", ["a1"])).toEqual(new Map());
+  });
+
+  // The whole point of the plural form: one query answers for a drain's entire
+  // batch, and an activity with nothing recorded is simply absent rather than
+  // indistinguishable from one that was never asked about.
+  it("answers for several activities at once", async () => {
+    await seedActivity("a2");
+    await seedActivity("a3");
+    await recordOutcome(env.REGISTRY, {
+      activityId: "a1",
+      stage: "decode",
+      inputFingerprint: "abc",
+      status: "ok",
+    });
+    await recordOutcome(env.REGISTRY, {
+      activityId: "a3",
+      stage: "decode",
+      inputFingerprint: "ghi",
+      status: "ok",
+    });
+
+    expect(await currentFingerprints(env.REGISTRY, "decode", ["a1", "a2", "a3"])).toEqual(
+      new Map([
+        ["a1", "abc"],
+        ["a3", "ghi"],
+      ]),
+    );
   });
 });
 
