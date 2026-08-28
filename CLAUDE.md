@@ -25,6 +25,8 @@ D1 migrations live in `migrations/`, applied with `wrangler d1 migrations apply`
 
 Change Cloudflare resources (KV namespaces, R2 buckets, D1 databases, queues, cron triggers, secrets) through `wrangler.jsonc` plus the `wrangler` CLI, never through the Cloudflare dashboard. Dashboard edits drift from what's committed and get silently overwritten on the next deploy.
 
+The hostname, the Workers route, and the Access applications are Terraform instead, in `terraform/`, applied by HCP Terraform on merge to `main`. Wrangler does not own those.
+
 The Cloudflare HTTP API does support triggering scheduled/cron events and following prompts programmatically; don't assume it can't without checking the API docs first.
 
 ## Secrets

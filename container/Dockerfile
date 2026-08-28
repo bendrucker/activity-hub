@@ -23,20 +23,11 @@ RUN apt-get update \
 # installed packages belong at the app root rather than beside either one.
 COPY --from=dependencies /app/node_modules ./node_modules
 
-COPY container/decode.ts \
-  container/env.ts \
-  container/index.ts \
-  container/lake.ts \
-  container/parquet.ts \
-  container/power.ts \
-  container/publish.ts \
-  container/s3.ts \
-  container/schema.ts \
-  container/server.ts \
-  container/sql.ts \
-  container/storage.ts \
-  container/tables.ts \
-  ./container/
+# Every module under container/, less the tests and dev scripts .dockerignore
+# keeps out of the context. Naming each file drifted twice: a new module lands,
+# the image ships without it, and the container exits on the missing import
+# before it ever listens.
+COPY container/*.ts ./container/
 COPY src/import/fit.ts src/import/gpx.ts src/import/telemetry.ts ./src/import/
 COPY src/transform/protocol.ts ./src/transform/
 
