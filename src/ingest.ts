@@ -58,7 +58,9 @@ export interface StravaPhotosMessage {
 }
 
 export type StravaIngestMessage =
-  StravaWebhookMessage | StravaRefreshMessage | StravaPhotosMessage;
+  | StravaWebhookMessage
+  | StravaRefreshMessage
+  | StravaPhotosMessage;
 
 // Wahoo webhook events carry the full workout summary, FIT file URL
 // included, so the message carries it too and the consumer never calls the
