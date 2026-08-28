@@ -145,7 +145,7 @@ Inventory of every credential the system needs and where it lives.
 
 | Secret                                            | Location                                         | Consumer                                                                                    |
 | ------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------- |
-| `ADMIN_TOKEN`                                     | Worker secret, generated in `infra/`             | Every `/admin/*` route                                                                      |
+| `ADMIN_TOKEN`                                     | Worker secret, generated in `terraform/`             | Every `/admin/*` route                                                                      |
 | `CLOUDFLARE_API_TOKEN`                            | GitHub Actions repo secret, written by Terraform | `deploy.yml` (migrations + `wrangler deploy`), and `wrangler` from a laptop                 |
 | `STRAVA_CLIENT_SECRET`                            | Worker secret (`wrangler secret put`)            | Strava OAuth token refresh and webhook subscription management                              |
 | `STRAVA_VERIFY_TOKEN`                             | Worker secret (`wrangler secret put`)            | Webhook subscription validation ([#8](https://github.com/bendrucker/activity-hub/issues/8)) |
@@ -187,7 +187,7 @@ Reaching `/admin/*` from a script means a service token rather than a browser
 login. The client id is a Terraform output:
 
 ```sh
-curl -H "CF-Access-Client-Id: $(terraform -chdir=infra output -raw access_client_id)" \
+curl -H "CF-Access-Client-Id: $(terraform -chdir=terraform output -raw access_client_id)" \
      -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
      -H "Authorization: Bearer $ADMIN_TOKEN" \
      https://hub.bendrucker.me/admin/consume-log
@@ -198,18 +198,18 @@ no output to read it back from. Incrementing `client_secret_version` on the
 resource issues a new one, and the previous secret keeps working until
 `previous_client_secret_expires_at`.
 
-`ADMIN_TOKEN` is generated in `infra/` but not deployed from there. Terraform
+`ADMIN_TOKEN` is generated in `terraform/` but not deployed from there. Terraform
 cannot write Worker secrets, so pushing the value is a separate step:
 
 ```sh
-terraform -chdir=infra output -raw admin_token | bun run wrangler secret put ADMIN_TOKEN
+terraform -chdir=terraform output -raw admin_token | bun run wrangler secret put ADMIN_TOKEN
 ```
 
 The worker authenticates against whatever it was last given, so an apply that
 generates a new value locks nothing out until that command runs.
 
 The DNS record, the worker route, the Access applications, and the service token
-are Terraform-managed in [`infra/`](infra). Its HCP Terraform workspace is
+are Terraform-managed in [`terraform/`](terraform). Its HCP Terraform workspace is
 VCS-connected, so applies run from a merge to `main` rather than from a local
 `terraform apply`.
 
@@ -304,12 +304,12 @@ The table emptying is the measure of progress. The unphotographed count stalls a
 
 ## Infrastructure
 
-`infra/` holds the Terraform for everything the worker is reached through: the
+`terraform/` holds the Terraform for everything the worker is reached through: the
 `hub` DNS record, the Workers route that binds the hostname to the script, the
 two Access applications guarding `/admin` and `/auth`, and the policies and
 service token they match on. It also generates `ADMIN_TOKEN`, which needs no
 Cloudflare API call at all. An HCP Terraform workspace named `activity-hub`
-applies it on merge to `main`, triggered by changes under `infra/`. There is no
+applies it on merge to `main`, triggered by changes under `terraform/`. There is no
 local apply path.
 
 Credentials stay in [bendrucker/infrastructure](https://github.com/bendrucker/infrastructure),
