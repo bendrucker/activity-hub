@@ -282,6 +282,16 @@ The cron deletes each target as it takes it, whether or not that id earned a mes
 
 The table emptying is the measure of progress. The unphotographed count stalls above zero instead, because an activity that turns out to have no photos gains no key and stays in that set forever. Once the table is empty the cron is a no-op and can stay deployed.
 
+## Development
+
+Git hooks run through [prek](https://github.com/j178/prek), configured in `.pre-commit-config.yaml`. Install them once per clone:
+
+```sh
+uv tool install prek && prek install
+```
+
+CI runs the same hooks with `prek run --all-files`, so a hook that passes locally passes there.
+
 ## Status
 
 The Strava pipeline is live. The historical export is imported, OAuth and webhooks run, and a daily reconciliation cron catches anything webhooks miss. Wahoo is in progress ([#11](https://github.com/bendrucker/activity-hub/issues/11)).
