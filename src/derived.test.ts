@@ -181,9 +181,7 @@ describe("inputFingerprint", () => {
     await env.RAW.put("raw/test/one.fit", "one");
     await env.RAW.put("raw/test/two.fit", "two");
 
-    expect(
-      await inputFingerprint(env.RAW, ["raw/test/one.fit", "raw/test/two.fit"]),
-    ).toBe(
+    expect(await inputFingerprint(env.RAW, ["raw/test/one.fit", "raw/test/two.fit"])).toBe(
       await inputFingerprint(env.RAW, ["raw/test/two.fit", "raw/test/one.fit"]),
     );
   });
@@ -198,11 +196,7 @@ describe("inputFingerprint", () => {
     await env.RAW.put("raw/test/pinned.fit", "bytes");
 
     expect(await inputFingerprint(env.RAW, ["raw/test/pinned.fit"])).toBe(
-      await sha256(
-        `raw/test/pinned.fit:${
-          (await env.RAW.head("raw/test/pinned.fit"))?.etag
-        }`,
-      ),
+      await sha256(`raw/test/pinned.fit:${(await env.RAW.head("raw/test/pinned.fit"))?.etag}`),
     );
   });
 });
@@ -244,9 +238,7 @@ describe("artifact version", () => {
       artifactVersion: DECODE_SCHEMA_VERSION - 1,
     });
 
-    expect(await isCurrent(env.REGISTRY, "a1", "decode", "fingerprint")).toBe(
-      false,
-    );
+    expect(await isCurrent(env.REGISTRY, "a1", "decode", "fingerprint")).toBe(false);
   });
 
   // A parked row gets its budget back, because the ceiling counts attempts
@@ -273,13 +265,8 @@ describe("artifact version", () => {
 });
 
 async function sha256(payload: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(payload),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(payload));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 describe("isCurrent", () => {
@@ -540,10 +527,7 @@ describe("staleActivities", () => {
       });
     }
 
-    expect(await staleActivities(env.REGISTRY, "decode", 2)).toEqual([
-      "a2",
-      "a3",
-    ]);
+    expect(await staleActivities(env.REGISTRY, "decode", 2)).toEqual(["a2", "a3"]);
   });
 });
 
@@ -743,18 +727,14 @@ describe("pipelineReport", () => {
     const report = await pipelineReport(env.REGISTRY);
 
     expect(report.parked).toEqual([{ stage: "decode", count: 1 }]);
-    expect(
-      report.failures.map((failure) => [failure.activityId, failure.attempts]),
-    ).toEqual(
+    expect(report.failures.map((failure) => [failure.activityId, failure.attempts])).toEqual(
       expect.arrayContaining([
         ["a1", 1],
         ["a2", MAX_ATTEMPTS],
       ]),
     );
     // The one still under the ceiling is what the next sweep picks up.
-    expect(
-      report.oldestStale.find((entry) => entry.stage === "decode")?.activityId,
-    ).toBe("a1");
+    expect(report.oldestStale.find((entry) => entry.stage === "decode")?.activityId).toBe("a1");
   });
 
   it("reports empty over an empty pipeline", async () => {

@@ -5,10 +5,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { buildLake } from "./lake";
 import { writeActivityParquet } from "./parquet";
-import type {
-  TelemetryActivity,
-  TelemetryRecord,
-} from "../src/import/telemetry";
+import type { TelemetryActivity, TelemetryRecord } from "../src/import/telemetry";
 
 let instance: DuckDBInstance;
 let work: string;
@@ -46,9 +43,7 @@ function record(overrides: Partial<TelemetryRecord> = {}): TelemetryRecord {
   };
 }
 
-function activity(
-  overrides: Partial<TelemetryActivity> = {},
-): TelemetryActivity {
+function activity(overrides: Partial<TelemetryActivity> = {}): TelemetryActivity {
   return {
     source: "fit",
     records: [record()],
@@ -71,13 +66,7 @@ async function seed(seeds: Seed[], registry: object[]): Promise<void> {
   for (const item of seeds) {
     const directory = join(work, "decode", item.activityId);
     await mkdir(directory, { recursive: true });
-    await writeActivityParquet(
-      instance,
-      directory,
-      item.activityId,
-      item.rawKey,
-      item.activity,
-    );
+    await writeActivityParquet(instance, directory, item.activityId, item.rawKey, item.activity);
   }
   await writeFile(
     join(work, "registry.ndjson"),
@@ -143,11 +132,7 @@ const RIDE_START = new Date("2026-01-01T14:00:00.000Z");
 // A 1 Hz stretch of records at one wattage, starting `offset` seconds in. The
 // gap between two stretches is the absence of records, which is exactly how a
 // paused ride reaches the decode artifact.
-function effort(
-  offset: number,
-  seconds: number,
-  power: number | null,
-): TelemetryRecord[] {
+function effort(offset: number, seconds: number, power: number | null): TelemetryRecord[] {
   return Array.from({ length: seconds }, (_, index) =>
     record({
       timestamp: new Date(RIDE_START.getTime() + (offset + index) * 1000),
@@ -198,12 +183,8 @@ test("counts a stop as real time at zero watts", async () => {
   await build();
 
   const rows = await powerCurve();
-  expect(
-    Number(rows.find((row) => Number(row.duration_s) === 600)?.watts),
-  ).toBe(300);
-  expect(
-    Number(rows.find((row) => Number(row.duration_s) === 1200)?.watts),
-  ).toBe(150);
+  expect(Number(rows.find((row) => Number(row.duration_s) === 600)?.watts)).toBe(300);
+  expect(Number(rows.find((row) => Number(row.duration_s) === 1200)?.watts)).toBe(150);
 });
 
 test("omits a duration the ride is shorter than", async () => {
@@ -245,9 +226,7 @@ test("tags a GPX ride's bests as estimated", async () => {
   await build();
 
   expect(
-    Object.fromEntries(
-      (await powerCurve()).map((row) => [row.activity_id, row.power_source]),
-    ),
+    Object.fromEntries((await powerCurve()).map((row) => [row.activity_id, row.power_source])),
   ).toEqual({ gpx: "estimated", fit: "measured" });
 });
 
@@ -283,9 +262,7 @@ test("unions every activity's rows into one table per grain", async () => {
 
   const response = await build();
 
-  expect(
-    Object.fromEntries(response.tables.map((t) => [t.name, t.rows])),
-  ).toEqual({
+  expect(Object.fromEntries(response.tables.map((t) => [t.name, t.rows]))).toEqual({
     activities: 2,
     records: 3,
     laps: 0,
@@ -319,9 +296,7 @@ test("reads telemetry provenance off the raw key that produced the rows", async 
 
   await build();
 
-  expect(
-    (await activities()).map((row) => [row.activity_id, row.telemetry_origin]),
-  ).toEqual([
+  expect((await activities()).map((row) => [row.activity_id, row.telemetry_origin])).toEqual([
     ["a", "wahoo"],
     ["b", "strava_export"],
     ["c", "strava"],
@@ -356,9 +331,7 @@ test("calls GPX power estimated and FIT power measured", async () => {
   await build();
 
   expect(
-    Object.fromEntries(
-      (await activities()).map((row) => [row.activity_id, row.power_source]),
-    ),
+    Object.fromEntries((await activities()).map((row) => [row.activity_id, row.power_source])),
   ).toEqual({ gpx: "estimated", fit: "measured", none: "none" });
 });
 
@@ -422,9 +395,7 @@ test("carries the registry's own duration", async () => {
   await build();
 
   expect(
-    Object.fromEntries(
-      (await activities()).map((r) => [r.activity_id, r.duration_s]),
-    ),
+    Object.fromEntries((await activities()).map((r) => [r.activity_id, r.duration_s])),
   ).toEqual({ a: 3600, orphan: 3600 });
 });
 
@@ -450,10 +421,7 @@ test("stops serving a partition that lost its last row", async () => {
   expect(await recordYears()).toEqual([2024, 2026]);
 
   await rm(join(work, "decode", "old"), { recursive: true });
-  await writeFile(
-    join(work, "registry.ndjson"),
-    `${JSON.stringify(registryRow("a"))}\n`,
-  );
+  await writeFile(join(work, "registry.ndjson"), `${JSON.stringify(registryRow("a"))}\n`);
   await build();
 
   expect(await recordYears()).toEqual([2026]);
@@ -472,10 +440,7 @@ test("replaces the previous run's files", async () => {
   await build();
 
   await rm(join(work, "decode", "b"), { recursive: true });
-  await writeFile(
-    join(work, "registry.ndjson"),
-    `${JSON.stringify(registryRow("a"))}\n`,
-  );
+  await writeFile(join(work, "registry.ndjson"), `${JSON.stringify(registryRow("a"))}\n`);
   const response = await build();
 
   expect(response.tables.find((t) => t.name === "activities")?.rows).toBe(1);

@@ -3,12 +3,8 @@ import { inferTimezones, trackTimezone } from "./timezone";
 
 describe("trackTimezone", () => {
   it("resolves the zone of the first point", () => {
-    expect(trackTimezone([[37.7715, -122.4609]], "Ride")).toBe(
-      "America/Los_Angeles",
-    );
-    expect(trackTimezone([[40.7259, -74.0014]], "Run")).toBe(
-      "America/New_York",
-    );
+    expect(trackTimezone([[37.7715, -122.4609]], "Ride")).toBe("America/Los_Angeles");
+    expect(trackTimezone([[40.7259, -74.0014]], "Run")).toBe("America/New_York");
   });
 
   it("returns null without points", () => {

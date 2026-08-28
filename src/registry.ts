@@ -1,12 +1,7 @@
 import { MAX_START_DELTA_S } from "./match";
 import type { Source, SourceRecord } from "./record";
 import type { Sport } from "./sport";
-import {
-  parseStartedAt,
-  planMatchOrMint,
-  planSourceUpdate,
-  type Statement,
-} from "./upsert";
+import { parseStartedAt, planMatchOrMint, planSourceUpdate, type Statement } from "./upsert";
 
 export type { Source, SourceRecord };
 
@@ -41,12 +36,8 @@ export async function upsertSourceRecord(
   }
 
   const startedAtMs = parseStartedAt(record);
-  const windowStart = new Date(
-    startedAtMs - MAX_START_DELTA_S * 1000,
-  ).toISOString();
-  const windowEnd = new Date(
-    startedAtMs + MAX_START_DELTA_S * 1000,
-  ).toISOString();
+  const windowStart = new Date(startedAtMs - MAX_START_DELTA_S * 1000).toISOString();
+  const windowEnd = new Date(startedAtMs + MAX_START_DELTA_S * 1000).toISOString();
 
   const { results } = await db
     .prepare(

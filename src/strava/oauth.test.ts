@@ -3,13 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { stubFetch } from "../../test/fetch-stub";
 import { SECRETS } from "../../test/secrets";
 import type { OAuthConfig, StoredTokens } from "../tokens/source";
-import {
-  exchangeCode,
-  oauthConfig,
-  readTokens,
-  refreshTokens,
-  TOKENS_KEY,
-} from "./oauth";
+import { exchangeCode, oauthConfig, readTokens, refreshTokens, TOKENS_KEY } from "./oauth";
 
 const CONFIG: OAuthConfig = {
   oauthBase: "https://oauth.example/oauth",

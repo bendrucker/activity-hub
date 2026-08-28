@@ -58,10 +58,7 @@ export async function publishActivity(
   }
 }
 
-async function artifact(
-  connection: DuckDBConnection,
-  prefix: string,
-): Promise<PublishArtifact> {
+async function artifact(connection: DuckDBConnection, prefix: string): Promise<PublishArtifact> {
   const records = `read_parquet(${literal(`${prefix}/records.parquet`)})`;
   const meta = `read_parquet(${literal(`${prefix}/meta.parquet`)})`;
   const sessions = `read_parquet(${literal(`${prefix}/sessions.parquet`)})`;
@@ -87,10 +84,7 @@ interface DeviceTotals {
 // the feed shows the whole outing. Moving time falls back to timer time: not
 // every device records the pause-aware total, and both mean the clock the
 // device was counting.
-async function totals(
-  connection: DuckDBConnection,
-  sessions: string,
-): Promise<DeviceTotals> {
+async function totals(connection: DuckDBConnection, sessions: string): Promise<DeviceTotals> {
   const reader = await connection.runAndReadAll(`
     SELECT
       SUM(total_distance) AS distance_m,
@@ -114,10 +108,7 @@ function optional(value: unknown): number | null {
   return Number.isFinite(number) ? Math.round(number) : null;
 }
 
-async function track(
-  connection: DuckDBConnection,
-  records: string,
-): Promise<string | null> {
+async function track(connection: DuckDBConnection, records: string): Promise<string | null> {
   const reader = await connection.runAndReadAll(`
     SELECT lat, lon
     FROM (
@@ -214,10 +205,7 @@ async function powerSummary(
   };
 }
 
-async function bests(
-  connection: DuckDBConnection,
-  records: string,
-): Promise<PowerBest[]> {
+async function bests(connection: DuckDBConnection, records: string): Promise<PowerBest[]> {
   const reader = await connection.runAndReadAll(`
     SELECT duration_s, watts
     FROM (${powerBestsSql(`SELECT * FROM ${records}`)})

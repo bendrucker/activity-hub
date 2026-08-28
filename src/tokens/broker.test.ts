@@ -50,12 +50,12 @@ beforeEach(async () => {
 
 describe("TokenBroker", () => {
   it("throws with the provider's authorize path when nothing is stored", async () => {
-    await expect(
-      withBroker("wahoo", (broker) => broker.accessToken()),
-    ).rejects.toThrow(/no Wahoo tokens stored; authorize at \/auth\/wahoo/);
-    await expect(
-      withBroker("strava", (broker) => broker.accessToken()),
-    ).rejects.toThrow(/no Strava tokens stored; authorize at \/auth\/strava/);
+    await expect(withBroker("wahoo", (broker) => broker.accessToken())).rejects.toThrow(
+      /no Wahoo tokens stored; authorize at \/auth\/wahoo/,
+    );
+    await expect(withBroker("strava", (broker) => broker.accessToken())).rejects.toThrow(
+      /no Strava tokens stored; authorize at \/auth\/strava/,
+    );
   });
 
   it("reports no state before a pair is stored", async () => {
@@ -80,24 +80,18 @@ describe("TokenBroker", () => {
     it("adopts the pair KV already holds", async () => {
       await seedKv(WAHOO_TOKENS_KEY, live({ accessToken: "from-kv" }));
 
-      expect(await withBroker("wahoo", (broker) => broker.accessToken())).toBe(
-        "from-kv",
-      );
-      expect(
-        await withBroker("wahoo", (broker) => broker.current()),
-      ).toMatchObject({ accessToken: "from-kv" });
+      expect(await withBroker("wahoo", (broker) => broker.accessToken())).toBe("from-kv");
+      expect(await withBroker("wahoo", (broker) => broker.current())).toMatchObject({
+        accessToken: "from-kv",
+      });
     });
 
     it("reads each provider's own KV key", async () => {
       await seedKv(WAHOO_TOKENS_KEY, live({ accessToken: "wahoo-kv" }));
       await seedKv(STRAVA_TOKENS_KEY, live({ accessToken: "strava-kv" }));
 
-      expect(await withBroker("wahoo", (broker) => broker.accessToken())).toBe(
-        "wahoo-kv",
-      );
-      expect(await withBroker("strava", (broker) => broker.accessToken())).toBe(
-        "strava-kv",
-      );
+      expect(await withBroker("wahoo", (broker) => broker.accessToken())).toBe("wahoo-kv");
+      expect(await withBroker("strava", (broker) => broker.accessToken())).toBe("strava-kv");
     });
 
     it("stops consulting KV once it holds a pair", async () => {
@@ -106,9 +100,7 @@ describe("TokenBroker", () => {
 
       await seedKv(WAHOO_TOKENS_KEY, live({ accessToken: "stale-kv" }));
 
-      expect(await withBroker("wahoo", (broker) => broker.accessToken())).toBe(
-        "from-kv",
-      );
+      expect(await withBroker("wahoo", (broker) => broker.accessToken())).toBe("from-kv");
     });
 
     it("does not write back the pair it just adopted", async () => {
@@ -129,31 +121,26 @@ describe("TokenBroker", () => {
       await seedKv(WAHOO_TOKENS_KEY, expired({ refreshToken: "kv-refresh" }));
       const stub = wahooRefresh();
 
-      await withBroker("wahoo", (broker) =>
-        broker.accessToken({ fetch: stub.fetch }),
-      );
+      await withBroker("wahoo", (broker) => broker.accessToken({ fetch: stub.fetch }));
 
-      expect(
-        await env.TOKENS.get<StoredTokens>(WAHOO_TOKENS_KEY, "json"),
-      ).toMatchObject({ accessToken: "fresh", refreshToken: "next-refresh" });
+      expect(await env.TOKENS.get<StoredTokens>(WAHOO_TOKENS_KEY, "json")).toMatchObject({
+        accessToken: "fresh",
+        refreshToken: "next-refresh",
+      });
     });
 
     it("takes the pair an OAuth callback stores", async () => {
-      await withBroker("strava", (broker) =>
-        broker.store(live({ accessToken: "reauthorized" })),
-      );
+      await withBroker("strava", (broker) => broker.store(live({ accessToken: "reauthorized" })));
 
-      expect(
-        await env.TOKENS.get<StoredTokens>(STRAVA_TOKENS_KEY, "json"),
-      ).toMatchObject({ accessToken: "reauthorized" });
+      expect(await env.TOKENS.get<StoredTokens>(STRAVA_TOKENS_KEY, "json")).toMatchObject({
+        accessToken: "reauthorized",
+      });
     });
 
     it("cannot fail a rotation", async () => {
       const stub = wahooRefresh();
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-      const put = vi
-        .spyOn(env.TOKENS, "put")
-        .mockRejectedValue(new Error("KV unavailable"));
+      const put = vi.spyOn(env.TOKENS, "put").mockRejectedValue(new Error("KV unavailable"));
 
       const token = await withBroker("wahoo", async (broker) => {
         await broker.store(expired());
@@ -161,15 +148,13 @@ describe("TokenBroker", () => {
       });
 
       expect(token).toBe("fresh");
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining("KV unavailable"),
-      );
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("KV unavailable"));
       put.mockRestore();
       warn.mockRestore();
 
-      expect(
-        await withBroker("wahoo", (broker) => broker.current()),
-      ).toMatchObject({ accessToken: "fresh" });
+      expect(await withBroker("wahoo", (broker) => broker.current())).toMatchObject({
+        accessToken: "fresh",
+      });
     });
   });
 
@@ -183,9 +168,7 @@ describe("TokenBroker", () => {
         await broker.store(expired());
         expect(await broker.accessToken({ fetch: stub.fetch })).toBe("fresh");
         return Promise.all(
-          stub.requests.map(async (request) =>
-            Object.fromEntries(await request.formData()),
-          ),
+          stub.requests.map(async (request) => Object.fromEntries(await request.formData())),
         );
       });
 
@@ -197,9 +180,9 @@ describe("TokenBroker", () => {
           refresh_token: "refresh",
         },
       ]);
-      expect(
-        await withBroker("wahoo", (broker) => broker.current()),
-      ).toMatchObject({ accessToken: "fresh" });
+      expect(await withBroker("wahoo", (broker) => broker.current())).toMatchObject({
+        accessToken: "fresh",
+      });
     });
 
     it("sends one upstream request for concurrent callers", async () => {
@@ -273,10 +256,7 @@ describe("TokenBroker", () => {
           broker.accessToken({ fetch: revoked.fetch }),
           broker.accessToken({ fetch: revoked.fetch }),
         ]);
-        expect(results.map((result) => result.status)).toEqual([
-          "rejected",
-          "rejected",
-        ]);
+        expect(results.map((result) => result.status)).toEqual(["rejected", "rejected"]);
       });
       expect(revoked.requests).toHaveLength(1);
 

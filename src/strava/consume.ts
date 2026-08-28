@@ -1,13 +1,5 @@
-import {
-  RateLimitedError,
-  type StravaIngestMessage,
-  retryAfterS,
-} from "../ingest";
-import {
-  markSourceDeleted,
-  mergeRawKeys,
-  upsertSourceRecord,
-} from "../registry";
+import { RateLimitedError, type StravaIngestMessage, retryAfterS } from "../ingest";
+import { markSourceDeleted, mergeRawKeys, upsertSourceRecord } from "../registry";
 import { sportFromStrava } from "../sport";
 import { enqueueActivity } from "../transform/enqueue";
 import { stravaClient, type StravaClient } from "./client";
@@ -43,16 +35,10 @@ function photosPrefix(activityId: number): string {
   return `raw/strava/activities/${activityId}/photos/`;
 }
 
-async function fetchOrThrow(
-  client: StravaClient,
-  path: string,
-): Promise<Response> {
+async function fetchOrThrow(client: StravaClient, path: string): Promise<Response> {
   const response = await client.fetch(path);
   if (response.status === 429) {
-    throw new RateLimitedError(
-      `rate limited on ${path}`,
-      retryAfterS(response),
-    );
+    throw new RateLimitedError(`rate limited on ${path}`, retryAfterS(response));
   }
   return response;
 }
@@ -67,10 +53,7 @@ function parseTimezone(raw: string): string {
 
 // The body comes back as text so a refresh can compare it byte for byte
 // against what R2 already holds.
-async function fetchDetailText(
-  client: StravaClient,
-  activityId: number,
-): Promise<string | null> {
+async function fetchDetailText(client: StravaClient, activityId: number): Promise<string | null> {
   const response = await fetchOrThrow(client, `/activities/${activityId}`);
   if (response.status === 404) {
     console.warn(`Strava activity ${activityId} not found, skipping`);
@@ -84,11 +67,7 @@ async function fetchDetailText(
   return response.text();
 }
 
-async function fetchStreams(
-  client: StravaClient,
-  env: Env,
-  activityId: number,
-): Promise<boolean> {
+async function fetchStreams(client: StravaClient, env: Env, activityId: number): Promise<boolean> {
   const response = await fetchOrThrow(
     client,
     `/activities/${activityId}/streams?keys=time,distance,latlng,altitude,heartrate,cadence,watts,temp,moving,grade_smooth&key_by_type=true`,
@@ -123,16 +102,11 @@ function hasPhotos(photos: PhotoSync): boolean {
   return photos.stored + photos.added > 0;
 }
 
-async function storedPhotoIds(
-  env: Env,
-  activityId: number,
-): Promise<Set<string>> {
+async function storedPhotoIds(env: Env, activityId: number): Promise<Set<string>> {
   const prefix = photosPrefix(activityId);
   const listing = await env.RAW.list({ prefix });
   return new Set(
-    listing.objects.map((object) =>
-      object.key.slice(prefix.length).replace(/\.jpg$/, ""),
-    ),
+    listing.objects.map((object) => object.key.slice(prefix.length).replace(/\.jpg$/, "")),
   );
 }
 
@@ -183,9 +157,7 @@ async function syncPhotos(
     `/activities/${activityId}/photos?size=5000&photo_sources=true`,
   );
   if (!response.ok) {
-    console.warn(
-      `Strava photos ${activityId} fetch failed: ${response.status}`,
-    );
+    console.warn(`Strava photos ${activityId} fetch failed: ${response.status}`);
     return { stored: stored.size, added: 0, complete: false };
   }
 
@@ -253,18 +225,12 @@ async function refreshActivity(
   const rawKeys: Record<string, string> = { detail: detailKey(activityId) };
 
   const hadStreams = (await env.RAW.head(streamsKey(activityId))) !== null;
-  const streamsAdded =
-    !hadStreams && (await fetchStreams(client, env, activityId));
+  const streamsAdded = !hadStreams && (await fetchStreams(client, env, activityId));
   if (hadStreams || streamsAdded) {
     rawKeys.streams = streamsKey(activityId);
   }
 
-  const photos = await syncPhotos(
-    client,
-    env,
-    activityId,
-    options.fetch ?? globalThis.fetch,
-  );
+  const photos = await syncPhotos(client, env, activityId, options.fetch ?? globalThis.fetch);
   if (hasPhotos(photos)) {
     rawKeys.photos = photosPrefix(activityId);
   }
@@ -276,12 +242,7 @@ async function refreshActivity(
   console.log(
     `Strava activity ${activityId} refreshed: detail ${detailChanged ? "changed" : "unchanged"}, ${photos.added} new photos, streams ${streamsAdded ? "filled" : "unchanged"}`,
   );
-  await upsertDetail(
-    env,
-    activityId,
-    JSON.parse(text) as StravaActivityDetail,
-    rawKeys,
-  );
+  await upsertDetail(env, activityId, JSON.parse(text) as StravaActivityDetail, rawKeys);
 }
 
 // One Strava read, the photo listing, and nothing else. The backfill population
@@ -297,12 +258,7 @@ async function archivePhotos(
   options: ConsumeOptions,
 ): Promise<string | undefined> {
   const client = options.client ?? stravaClient(env);
-  const photos = await syncPhotos(
-    client,
-    env,
-    activityId,
-    options.fetch ?? globalThis.fetch,
-  );
+  const photos = await syncPhotos(client, env, activityId, options.fetch ?? globalThis.fetch);
   // A download that failed leaves the activity unarchived and still
   // unphotographed, which is indistinguishable from an activity that has no
   // photos at all. Throwing hands the id to the queue's retries and then the
@@ -351,11 +307,7 @@ export async function consumeStravaEvent(
   const activityId = message.objectId;
 
   if (message.kind === "delete") {
-    const deleted = await markSourceDeleted(
-      env.REGISTRY,
-      "strava",
-      String(activityId),
-    );
+    const deleted = await markSourceDeleted(env.REGISTRY, "strava", String(activityId));
     if (deleted !== null) {
       await enqueueActivity(env, deleted, "publish");
     }
@@ -374,21 +326,11 @@ export async function consumeStravaEvent(
     if (await fetchStreams(client, env, activityId)) {
       rawKeys.streams = streamsKey(activityId);
     }
-    const photos = await syncPhotos(
-      client,
-      env,
-      activityId,
-      options.fetch ?? globalThis.fetch,
-    );
+    const photos = await syncPhotos(client, env, activityId, options.fetch ?? globalThis.fetch);
     if (hasPhotos(photos)) {
       rawKeys.photos = photosPrefix(activityId);
     }
   }
 
-  await upsertDetail(
-    env,
-    activityId,
-    JSON.parse(text) as StravaActivityDetail,
-    rawKeys,
-  );
+  await upsertDetail(env, activityId, JSON.parse(text) as StravaActivityDetail, rawKeys);
 }

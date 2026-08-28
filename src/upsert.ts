@@ -81,9 +81,7 @@ export function planMatchOrMint(
         };
     return {
       outcome: "attached",
-      activity: wahoo
-        ? { ...match, startedAt, durationS: record.durationS }
-        : match,
+      activity: wahoo ? { ...match, startedAt, durationS: record.durationS } : match,
       statements: [insertSource(record, match.activityId, now), updateActivity],
     };
   }
@@ -125,19 +123,9 @@ export function parseStartedAt(record: SourceRecord): number {
   return startedAtMs;
 }
 
-function insertSource(
-  record: SourceRecord,
-  activityId: string,
-  now: string,
-): Statement {
+function insertSource(record: SourceRecord, activityId: string, now: string): Statement {
   return {
     sql: "INSERT INTO activity_sources (source, source_id, activity_id, raw_keys, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
-    params: [
-      record.source,
-      record.sourceId,
-      activityId,
-      JSON.stringify(record.rawKeys),
-      now,
-    ],
+    params: [record.source, record.sourceId, activityId, JSON.stringify(record.rawKeys), now],
   };
 }

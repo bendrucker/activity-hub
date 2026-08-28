@@ -1,10 +1,4 @@
-import {
-  Encoder,
-  Profile,
-  type Encodable,
-  type FileIdMesg,
-  type RecordMesg,
-} from "@garmin/fitsdk";
+import { Encoder, Profile, type Encodable, type FileIdMesg, type RecordMesg } from "@garmin/fitsdk";
 import { decode } from "@mapbox/polyline";
 import { describe, expect, it } from "vitest";
 import { extractTrack, polylineDocument, type TrackPoint } from "./track";
@@ -48,9 +42,7 @@ function syntheticFit(points: number): Uint8Array {
 }
 
 async function gzip(bytes: Uint8Array): Promise<Uint8Array> {
-  const stream = new Blob([bytes])
-    .stream()
-    .pipeThrough(new CompressionStream("gzip"));
+  const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream("gzip"));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
@@ -100,10 +92,7 @@ describe("extractTrack", () => {
   });
 
   it("parses GPX trackpoints", async () => {
-    const points = await extractTrack(
-      new TextEncoder().encode(GPX),
-      "activities/2.gpx",
-    );
+    const points = await extractTrack(new TextEncoder().encode(GPX), "activities/2.gpx");
     expect(points).toEqual([
       [40.72596, -74.001394],
       [40.725897, -74.001231],
@@ -111,10 +100,7 @@ describe("extractTrack", () => {
   });
 
   it("parses TCX trackpoints, skipping positionless ones", async () => {
-    const points = await extractTrack(
-      new TextEncoder().encode(TCX),
-      "activities/3.tcx",
-    );
+    const points = await extractTrack(new TextEncoder().encode(TCX), "activities/3.tcx");
     expect(points).toEqual([[37.7715, -122.4609]]);
   });
 
@@ -129,10 +115,7 @@ describe("extractTrack", () => {
      <trkpt lat="0.0" lon="0.0"></trkpt>
      <trkpt lat="40.7259600" lon="-74.0013940"></trkpt>
     </trkseg></trk></gpx>`;
-    const points = await extractTrack(
-      new TextEncoder().encode(gpx),
-      "activities/7.gpx",
-    );
+    const points = await extractTrack(new TextEncoder().encode(gpx), "activities/7.gpx");
     expect(points).toEqual([[40.72596, -74.001394]]);
   });
 
@@ -157,10 +140,7 @@ describe("extractTrack", () => {
      <trkpt lat="40.7259600" lon="-74.0013940"><ele>5.2</ele></trkpt>
      <trkpt lat="40.7258970" lon="-74.0012310"><ele>5.4</ele></trkpt>
     </trk></gpx>`;
-    const points = await extractTrack(
-      new TextEncoder().encode(gpx),
-      "activities/10.gpx",
-    );
+    const points = await extractTrack(new TextEncoder().encode(gpx), "activities/10.gpx");
     expect(points).toEqual([
       [40.72596, -74.001394],
       [40.725897, -74.001231],
@@ -178,17 +158,14 @@ describe("extractTrack", () => {
       <LongitudeDegrees>-122.4609</LongitudeDegrees>
      </Position></Trackpoint>
     </Track></Lap></Activity></Activities></TrainingCenterDatabase>`;
-    const points = await extractTrack(
-      new TextEncoder().encode(tcx),
-      "activities/8.tcx",
-    );
+    const points = await extractTrack(new TextEncoder().encode(tcx), "activities/8.tcx");
     expect(points).toEqual([[37.7715, -122.4609]]);
   });
 
   it("rejects unsupported extensions", async () => {
-    await expect(
-      extractTrack(new Uint8Array(), "activities/4.kml"),
-    ).rejects.toThrow("unsupported track file");
+    await expect(extractTrack(new Uint8Array(), "activities/4.kml")).rejects.toThrow(
+      "unsupported track file",
+    );
   });
 
   it("rejects non-FIT bytes", async () => {

@@ -46,13 +46,7 @@ export function decodeGpx(bytes: Uint8Array): TelemetryActivity {
   for (const children of segments(text)) {
     for (const [, attributes, point] of children.matchAll(TRACK_POINT)) {
       activity.records.push(
-        decodeTrackPoint(
-          attributes ?? "",
-          point ?? "",
-          segment,
-          index,
-          activity.errors,
-        ),
+        decodeTrackPoint(attributes ?? "", point ?? "", segment, index, activity.errors),
       );
       index++;
     }
@@ -61,9 +55,7 @@ export function decodeGpx(bytes: Uint8Array): TelemetryActivity {
 
   const openPoints = count(text, POINT_OPEN);
   if (openPoints > index) {
-    activity.errors.push(
-      `${openPoints - index} unterminated trackpoint(s), document is truncated`,
-    );
+    activity.errors.push(`${openPoints - index} unterminated trackpoint(s), document is truncated`);
   }
 
   if (activity.records.length === 0) {
@@ -76,9 +68,7 @@ export function decodeGpx(bytes: Uint8Array): TelemetryActivity {
 // directly under `trk`. Falling back to the whole document keeps those points
 // rather than reading the file as trackless.
 function segments(text: string): string[] {
-  const matched = [...text.matchAll(TRACK_SEGMENT)].map(
-    ([, children]) => children ?? "",
-  );
+  const matched = [...text.matchAll(TRACK_SEGMENT)].map(([, children]) => children ?? "");
   return matched.length > 0 ? matched : [text];
 }
 

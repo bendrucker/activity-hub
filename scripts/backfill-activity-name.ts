@@ -29,9 +29,7 @@ const { values: flags, positionals } = parseArgs({
 
 const exportDir = positionals[0];
 if (!exportDir) {
-  console.error(
-    "usage: bun scripts/backfill-activity-name.ts <export-dir> [--dry-run]",
-  );
+  console.error("usage: bun scripts/backfill-activity-name.ts <export-dir> [--dry-run]");
   process.exit(1);
 }
 
@@ -65,9 +63,7 @@ const statements = activities.flatMap((activity) => {
 });
 
 console.log(`names to write: ${statements.length}`);
-console.log(
-  `not in the registry: ${unmatched}, blank in the export: ${untitled}`,
-);
+console.log(`not in the registry: ${unmatched}, blank in the export: ${untitled}`);
 
 if (flags["dry-run"]) {
   console.log("dry run: nothing written");
@@ -87,9 +83,7 @@ for (let start = 0; start < statements.length; start += BATCH) {
   console.log(`wrote ${String(start + batch.length)}/${statements.length}`);
 }
 
-const counts = query(
-  "SELECT COUNT(*) AS named FROM activities WHERE name IS NOT NULL",
-);
+const counts = query("SELECT COUNT(*) AS named FROM activities WHERE name IS NOT NULL");
 console.log("named now:", JSON.stringify(counts[0]));
 
 function literal(value: string): string {
@@ -97,15 +91,7 @@ function literal(value: string): string {
 }
 
 function query(sql: string): Record<string, unknown>[] {
-  const stdout = run([
-    "d1",
-    "execute",
-    DATABASE,
-    "--remote",
-    "--json",
-    "--command",
-    sql,
-  ]);
+  const stdout = run(["d1", "execute", DATABASE, "--remote", "--json", "--command", sql]);
   const parsed = JSON.parse(stdout) as { results: Record<string, unknown>[] }[];
   const first = parsed[0];
   if (!first) {
@@ -115,10 +101,9 @@ function query(sql: string): Record<string, unknown>[] {
 }
 
 function run(args: string[]): string {
-  const result = Bun.spawnSync(
-    ["bun", "run", "--silent", "wrangler", "--", ...args],
-    { stdio: ["ignore", "pipe", "inherit"] },
-  );
+  const result = Bun.spawnSync(["bun", "run", "--silent", "wrangler", "--", ...args], {
+    stdio: ["ignore", "pipe", "inherit"],
+  });
   if (result.exitCode !== 0) {
     throw new Error(`wrangler ${args.join(" ")} failed (${result.exitCode})`);
   }

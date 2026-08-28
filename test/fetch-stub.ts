@@ -3,9 +3,7 @@ export interface FetchStub {
   requests: Request[];
 }
 
-export function stubFetch(
-  respond: (request: Request) => Response | Promise<Response>,
-): FetchStub {
+export function stubFetch(respond: (request: Request) => Response | Promise<Response>): FetchStub {
   const requests: Request[] = [];
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);

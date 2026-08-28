@@ -198,10 +198,7 @@ export const META: Table<MetaRow> = {
 // the activity without reparsing object keys out of `filename`.
 const ACTIVITY_ID = "activity_id";
 
-export function metaRows(
-  activity: TelemetryActivity,
-  rawKey: string,
-): MetaRow[] {
+export function metaRows(activity: TelemetryActivity, rawKey: string): MetaRow[] {
   return [
     deviceRow(activity.source, rawKey, activity.device),
     ...activity.developerFields.map((descriptor) =>
@@ -269,9 +266,7 @@ function developerFieldRow(
 export function emptySelectSql<R>(table: Table<R>): string {
   const columns = [
     `NULL::VARCHAR AS ${quote(ACTIVITY_ID)}`,
-    ...columnNames(table).map(
-      (name) => `NULL::${castType(table.columns[name])} AS ${quote(name)}`,
-    ),
+    ...columnNames(table).map((name) => `NULL::${castType(table.columns[name])} AS ${quote(name)}`),
   ];
   return `SELECT * FROM (SELECT ${columns.join(", ")}) WHERE false`;
 }
@@ -299,11 +294,7 @@ export function appendRows<R extends object>(
   }
 }
 
-function appendCell(
-  appender: DuckDBAppender,
-  type: ColumnType,
-  value: unknown,
-): void {
+function appendCell(appender: DuckDBAppender, type: ColumnType, value: unknown): void {
   if (value == null) {
     appender.appendNull();
     return;
@@ -318,9 +309,7 @@ function appendCell(
       return;
     case "TIMESTAMP":
       if (value instanceof Date && !Number.isNaN(value.getTime())) {
-        appender.appendTimestamp(
-          timestampValue(BigInt(value.getTime()) * 1000n),
-        );
+        appender.appendTimestamp(timestampValue(BigInt(value.getTime()) * 1000n));
       } else {
         appender.appendNull();
       }

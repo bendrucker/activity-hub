@@ -6,11 +6,7 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import polyline from "@mapbox/polyline";
 import { writeActivityParquet } from "./parquet";
 import { publishActivity } from "./publish";
-import type {
-  TelemetryActivity,
-  TelemetryRecord,
-  TelemetrySession,
-} from "../src/import/telemetry";
+import type { TelemetryActivity, TelemetryRecord, TelemetrySession } from "../src/import/telemetry";
 
 let instance: DuckDBInstance;
 let work: string;
@@ -26,10 +22,7 @@ afterEach(async () => {
 
 const RIDE_START = new Date("2026-01-01T14:00:00.000Z");
 
-function record(
-  second: number,
-  overrides: Partial<TelemetryRecord> = {},
-): TelemetryRecord {
+function record(second: number, overrides: Partial<TelemetryRecord> = {}): TelemetryRecord {
   return {
     timestamp: new Date(RIDE_START.getTime() + second * 1000),
     position_lat: 37.7 + second / 10000,
@@ -52,9 +45,7 @@ function record(
 }
 
 function ride(seconds: number, overrides: Partial<TelemetryRecord> = {}) {
-  return Array.from({ length: seconds }, (_, second) =>
-    record(second, overrides),
-  );
+  return Array.from({ length: seconds }, (_, second) => record(second, overrides));
 }
 
 function session(overrides: Partial<TelemetrySession> = {}): TelemetrySession {

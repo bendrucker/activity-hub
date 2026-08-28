@@ -3,13 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { stubFetch } from "../../test/fetch-stub";
 import { SECRETS } from "../../test/secrets";
 import type { OAuthConfig, StoredTokens } from "../tokens/source";
-import {
-  exchangeCode,
-  oauthConfig,
-  readTokens,
-  refreshTokens,
-  TOKENS_KEY,
-} from "./oauth";
+import { exchangeCode, oauthConfig, readTokens, refreshTokens, TOKENS_KEY } from "./oauth";
 
 const CONFIG: OAuthConfig = {
   oauthBase: "https://oauth.example/oauth",
@@ -49,12 +43,12 @@ describe("oauthConfig", () => {
   });
 
   it("throws when the client id or secret is unset", () => {
-    expect(() =>
-      oauthConfig({ ...env, ...SECRETS, WAHOO_CLIENT_ID: "" }),
-    ).toThrow(/WAHOO_CLIENT_ID/);
-    expect(() =>
-      oauthConfig({ ...env, ...SECRETS, WAHOO_CLIENT_SECRET: "" }),
-    ).toThrow(/WAHOO_CLIENT_SECRET/);
+    expect(() => oauthConfig({ ...env, ...SECRETS, WAHOO_CLIENT_ID: "" })).toThrow(
+      /WAHOO_CLIENT_ID/,
+    );
+    expect(() => oauthConfig({ ...env, ...SECRETS, WAHOO_CLIENT_SECRET: "" })).toThrow(
+      /WAHOO_CLIENT_SECRET/,
+    );
   });
 });
 
@@ -85,15 +79,11 @@ describe("exchangeCode", () => {
     expect(body.get("client_secret")).toBe("shh");
     expect(body.get("grant_type")).toBe("authorization_code");
     expect(body.get("code")).toBe("abc");
-    expect(body.get("redirect_uri")).toBe(
-      "https://hub.example/auth/wahoo/callback",
-    );
+    expect(body.get("redirect_uri")).toBe("https://hub.example/auth/wahoo/callback");
   });
 
   it("computes expiry from now when created_at is absent", async () => {
-    const { fetch } = stubFetch(
-      respondJson(200, { ...TOKEN_RESPONSE, created_at: undefined }),
-    );
+    const { fetch } = stubFetch(respondJson(200, { ...TOKEN_RESPONSE, created_at: undefined }));
 
     const before = Math.floor(Date.now() / 1000);
     const tokens = await exchangeCode(CONFIG, "abc", "https://cb", fetch);
@@ -104,9 +94,7 @@ describe("exchangeCode", () => {
 
   it("throws on a failed exchange", async () => {
     const { fetch } = stubFetch(respondJson(400, { error: "bad" }));
-    await expect(
-      exchangeCode(CONFIG, "abc", "https://cb", fetch),
-    ).rejects.toThrow(/400/);
+    await expect(exchangeCode(CONFIG, "abc", "https://cb", fetch)).rejects.toThrow(/400/);
   });
 });
 

@@ -1,16 +1,11 @@
 import path from "node:path";
-import {
-  cloudflareTest,
-  readD1Migrations,
-} from "@cloudflare/vitest-pool-workers";
+import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-pool-workers";
 import { configDefaults, defineConfig } from "vitest/config";
 import { SECRETS } from "./test/secrets";
 import { SITE_STUB, SITE_WORKER } from "./test/site";
 
 export default defineConfig(async () => {
-  const migrations = await readD1Migrations(
-    path.join(import.meta.dirname, "migrations"),
-  );
+  const migrations = await readD1Migrations(path.join(import.meta.dirname, "migrations"));
 
   return {
     plugins: [

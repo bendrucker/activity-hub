@@ -8,8 +8,7 @@ import { quote } from "./sql";
 // points below are the ones a rider reads: neuromuscular through anaerobic in
 // seconds, threshold and endurance in minutes.
 export const POWER_DURATIONS: readonly number[] = [
-  5, 10, 15, 20, 30, 45, 60, 120, 180, 300, 480, 600, 720, 900, 1200, 1800,
-  2400, 3000, 3600,
+  5, 10, 15, 20, 30, 45, 60, 120, 180, 300, 480, 600, 720, 900, 1200, 1800, 2400, 3000, 3600,
 ];
 
 // Long form: one row per activity per duration, columns activity_id,
@@ -31,9 +30,7 @@ export function powerBestsSql(records: string): string {
          ROWS BETWEEN ${duration - 1} PRECEDING AND CURRENT ROW
        ) END AS ${quote(String(duration))}`,
   );
-  const columns = POWER_DURATIONS.map((duration) =>
-    quote(String(duration)),
-  ).join(", ");
+  const columns = POWER_DURATIONS.map((duration) => quote(String(duration))).join(", ");
 
   return `
     WITH samples AS (${records}),

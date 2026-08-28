@@ -1,11 +1,7 @@
 import { env } from "cloudflare:test";
 import { decodeTime } from "ulid";
 import { beforeEach, describe, expect, it } from "vitest";
-import {
-  mergeRawKeys,
-  upsertSourceRecord,
-  type SourceRecord,
-} from "./registry";
+import { mergeRawKeys, upsertSourceRecord, type SourceRecord } from "./registry";
 
 const START = "2026-07-01T14:00:00.000Z";
 
@@ -38,9 +34,9 @@ function wahoo(overrides: Partial<SourceRecord> = {}): SourceRecord {
 }
 
 async function countActivities(): Promise<number> {
-  const row = await env.REGISTRY.prepare(
-    "SELECT COUNT(*) AS n FROM activities",
-  ).first<{ n: number }>();
+  const row = await env.REGISTRY.prepare("SELECT COUNT(*) AS n FROM activities").first<{
+    n: number;
+  }>();
   return row?.n ?? 0;
 }
 
@@ -58,9 +54,7 @@ describe("upsertSourceRecord", () => {
     expect(result.outcome).toBe("minted");
     expect(decodeTime(result.activityId)).toBe(Date.parse(START));
 
-    const activity = await env.REGISTRY.prepare(
-      "SELECT * FROM activities WHERE activity_id = ?1",
-    )
+    const activity = await env.REGISTRY.prepare("SELECT * FROM activities WHERE activity_id = ?1")
       .bind(result.activityId)
       .first();
     expect(activity).toMatchObject({
@@ -73,10 +67,7 @@ describe("upsertSourceRecord", () => {
   });
 
   it("records an inferred timezone on mint", async () => {
-    const result = await upsertSourceRecord(
-      env.REGISTRY,
-      strava({ timezoneInferred: true }),
-    );
+    const result = await upsertSourceRecord(env.REGISTRY, strava({ timezoneInferred: true }));
 
     const activity = await env.REGISTRY.prepare(
       "SELECT timezone_inferred FROM activities WHERE activity_id = ?1",
@@ -107,10 +98,7 @@ describe("upsertSourceRecord", () => {
   });
 
   it("attaches a Wahoo record to a matching Strava activity", async () => {
-    const first = await upsertSourceRecord(
-      env.REGISTRY,
-      strava({ timezoneInferred: true }),
-    );
+    const first = await upsertSourceRecord(env.REGISTRY, strava({ timezoneInferred: true }));
     const second = await upsertSourceRecord(env.REGISTRY, wahoo());
 
     expect(second.outcome).toBe("attached");
@@ -142,10 +130,7 @@ describe("upsertSourceRecord", () => {
 
   it("mints on sport mismatch even within the window", async () => {
     await upsertSourceRecord(env.REGISTRY, strava());
-    const result = await upsertSourceRecord(
-      env.REGISTRY,
-      wahoo({ sport: "run" }),
-    );
+    const result = await upsertSourceRecord(env.REGISTRY, wahoo({ sport: "run" }));
 
     expect(result.outcome).toBe("minted");
     expect(await countActivities()).toBe(2);
@@ -241,8 +226,6 @@ describe("mergeRawKeys", () => {
   });
 
   it("answers false for a source that was never recorded", async () => {
-    expect(
-      await mergeRawKeys(env.REGISTRY, "strava", "99999", { photos: "p/" }),
-    ).toBe(false);
+    expect(await mergeRawKeys(env.REGISTRY, "strava", "99999", { photos: "p/" })).toBe(false);
   });
 });

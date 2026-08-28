@@ -35,9 +35,7 @@ export function isWorkoutSummary(
   }
   const { file, workout } = value;
   const fileOk =
-    file === undefined ||
-    file === null ||
-    (isRecord(file) && typeof file.url === "string");
+    file === undefined || file === null || (isRecord(file) && typeof file.url === "string");
   return (
     fileOk &&
     isRecord(workout) &&
@@ -84,9 +82,7 @@ export function syncStub(workout: Record<string, unknown>): SyncStub | null {
 // rounded, so it is only the fallback.
 export function durationS(summary: WahooWorkoutSummary): number {
   const total = Number(summary.duration_total_accum);
-  return Number.isFinite(total) && total > 0
-    ? Math.round(total)
-    : summary.workout.minutes * 60;
+  return Number.isFinite(total) && total > 0 ? Math.round(total) : summary.workout.minutes * 60;
 }
 
 export interface ResolvedTimezone {

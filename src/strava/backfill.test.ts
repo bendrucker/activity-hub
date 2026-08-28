@@ -43,9 +43,7 @@ describe("backfillStravaStreams", () => {
 
     const result = await backfillStravaStreams(testEnv(queue));
 
-    expect(queue.messages).toEqual([
-      { source: "strava", kind: "refresh", objectId: 101 },
-    ]);
+    expect(queue.messages).toEqual([{ source: "strava", kind: "refresh", objectId: 101 }]);
     expect(result).toEqual({ enqueued: 1, remaining: 1, done: true });
   });
 
@@ -93,9 +91,7 @@ describe("backfillStravaStreams", () => {
 
     const first = await backfillStravaStreams(testEnv(queue), { perRun: 2 });
 
-    expect(queue.messages.map((message) => message.objectId)).toEqual([
-      101, 102,
-    ]);
+    expect(queue.messages.map((message) => message.objectId)).toEqual([101, 102]);
     expect(first).toEqual({
       enqueued: 2,
       remaining: 3,
@@ -140,9 +136,7 @@ describe("backfillStravaPhotos", () => {
 
     const result = await backfillStravaPhotos(testEnv(queue));
 
-    expect(queue.messages).toEqual([
-      { source: "strava", kind: "refresh", objectId: 101 },
-    ]);
+    expect(queue.messages).toEqual([{ source: "strava", kind: "refresh", objectId: 101 }]);
     expect(result).toEqual({ enqueued: 1, remaining: 1, done: true });
   });
 
@@ -159,10 +153,7 @@ describe("backfillStravaPhotos", () => {
 
   // The bulk import records one key per file instead.
   it("skips a row whose photos came out of the bulk import", async () => {
-    await seed(
-      "101",
-      '{"photos/IMG_1.jpg":"raw/strava/export/photos/IMG_1.jpg"}',
-    );
+    await seed("101", '{"photos/IMG_1.jpg":"raw/strava/export/photos/IMG_1.jpg"}');
     const queue = stubQueue<StravaIngestMessage>();
 
     const result = await backfillStravaPhotos(testEnv(queue));
@@ -197,10 +188,7 @@ async function targetIds(): Promise<string[]> {
 
 describe("seedPhotoBackfillTargets", () => {
   it("records the ids it was handed", async () => {
-    const result = await seedPhotoBackfillTargets(testEnv(stubQueue()), [
-      "101",
-      "102",
-    ]);
+    const result = await seedPhotoBackfillTargets(testEnv(stubQueue()), ["101", "102"]);
 
     expect(result).toEqual({ added: 2, alreadyPresent: 0, pending: 2 });
     expect(await targetIds()).toEqual(["101", "102"]);
@@ -211,20 +199,14 @@ describe("seedPhotoBackfillTargets", () => {
   it("is idempotent on a page that already landed", async () => {
     await seedPhotoBackfillTargets(testEnv(stubQueue()), ["101", "102"]);
 
-    const result = await seedPhotoBackfillTargets(testEnv(stubQueue()), [
-      "102",
-      "103",
-    ]);
+    const result = await seedPhotoBackfillTargets(testEnv(stubQueue()), ["102", "103"]);
 
     expect(result).toEqual({ added: 1, alreadyPresent: 1, pending: 3 });
     expect(await targetIds()).toEqual(["101", "102", "103"]);
   });
 
   it("counts a repeated id once", async () => {
-    const result = await seedPhotoBackfillTargets(testEnv(stubQueue()), [
-      "101",
-      "101",
-    ]);
+    const result = await seedPhotoBackfillTargets(testEnv(stubQueue()), ["101", "101"]);
 
     expect(result).toEqual({ added: 1, alreadyPresent: 0, pending: 1 });
   });
@@ -248,9 +230,7 @@ describe("drainPhotoBackfillTargets", () => {
   });
 
   it("takes at most PHOTO_DRAIN targets per run", async () => {
-    const ids = Array.from({ length: PHOTO_DRAIN + 2 }, (_, index) =>
-      String(1000 + index),
-    );
+    const ids = Array.from({ length: PHOTO_DRAIN + 2 }, (_, index) => String(1000 + index));
     for (const id of ids) {
       await seed(id, "{}");
     }
@@ -278,9 +258,7 @@ describe("drainPhotoBackfillTargets", () => {
 
     const result = await drainPhotoBackfillTargets(testEnv(queue));
 
-    expect(queue.messages).toEqual([
-      { source: "strava", kind: "photos", objectId: 102 },
-    ]);
+    expect(queue.messages).toEqual([{ source: "strava", kind: "photos", objectId: 102 }]);
     expect(result).toEqual({ enqueued: 1, dropped: 1, unknown: 0, pending: 0 });
     expect(await targetIds()).toEqual([]);
   });

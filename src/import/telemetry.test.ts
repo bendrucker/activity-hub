@@ -15,9 +15,7 @@ function bytes(text: string): Uint8Array {
 }
 
 async function gzip(input: Uint8Array): Promise<Uint8Array> {
-  const stream = new Blob([input])
-    .stream()
-    .pipeThrough(new CompressionStream("gzip"));
+  const stream = new Blob([input]).stream().pipeThrough(new CompressionStream("gzip"));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
@@ -29,10 +27,7 @@ describe("decodeTelemetry", () => {
   });
 
   it("unwraps a gzipped file before dispatching on the inner extension", async () => {
-    const activity = await decodeTelemetry(
-      await gzip(bytes(GPX)),
-      "activities/10.gpx.gz",
-    );
+    const activity = await decodeTelemetry(await gzip(bytes(GPX)), "activities/10.gpx.gz");
     expect(activity.source).toBe("gpx");
   });
 
@@ -45,16 +40,13 @@ describe("decodeTelemetry", () => {
     const plain = await decodeTelemetry(bytes(GPX), "activities/10.GPX");
     expect(plain.source).toBe("gpx");
 
-    const compressed = await decodeTelemetry(
-      await gzip(bytes(GPX)),
-      "activities/10.GPX.GZ",
-    );
+    const compressed = await decodeTelemetry(await gzip(bytes(GPX)), "activities/10.GPX.GZ");
     expect(compressed.source).toBe("gpx");
   });
 
   it("rejects an extension it has no decoder for", async () => {
-    await expect(
-      decodeTelemetry(bytes(GPX), "activities/10.tcx"),
-    ).rejects.toThrow("unsupported telemetry file activities/10.tcx");
+    await expect(decodeTelemetry(bytes(GPX), "activities/10.tcx")).rejects.toThrow(
+      "unsupported telemetry file activities/10.tcx",
+    );
   });
 });

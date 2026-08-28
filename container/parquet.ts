@@ -29,28 +29,10 @@ export async function writeActivityParquet(
   const connection = await instance.connect();
   try {
     return [
-      await writeTable(
-        connection,
-        directory,
-        activityId,
-        RECORDS,
-        activity.records,
-      ),
+      await writeTable(connection, directory, activityId, RECORDS, activity.records),
       await writeTable(connection, directory, activityId, LAPS, activity.laps),
-      await writeTable(
-        connection,
-        directory,
-        activityId,
-        SESSIONS,
-        activity.sessions,
-      ),
-      await writeTable(
-        connection,
-        directory,
-        activityId,
-        META,
-        metaRows(activity, rawKey),
-      ),
+      await writeTable(connection, directory, activityId, SESSIONS, activity.sessions),
+      await writeTable(connection, directory, activityId, META, metaRows(activity, rawKey)),
     ];
   } finally {
     connection.disconnectSync();

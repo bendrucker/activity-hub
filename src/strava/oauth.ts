@@ -17,16 +17,11 @@ export function oauthConfig(env: Env): OAuthConfig {
 // from this key and mirrors every pair back to it.
 export const TOKENS_KEY = "strava:tokens";
 
-export async function readTokens(
-  kv: KVNamespace,
-): Promise<StoredTokens | null> {
+export async function readTokens(kv: KVNamespace): Promise<StoredTokens | null> {
   return kv.get<StoredTokens>(TOKENS_KEY, "json");
 }
 
-export async function writeTokens(
-  kv: KVNamespace,
-  tokens: StoredTokens,
-): Promise<void> {
+export async function writeTokens(kv: KVNamespace, tokens: StoredTokens): Promise<void> {
   await kv.put(TOKENS_KEY, JSON.stringify(tokens));
 }
 
@@ -52,9 +47,7 @@ async function requestToken(
     }),
   });
   if (!response.ok) {
-    throw new Error(
-      `Strava token request failed: ${response.status} ${await response.text()}`,
-    );
+    throw new Error(`Strava token request failed: ${response.status} ${await response.text()}`);
   }
   return response.json();
 }
@@ -72,11 +65,7 @@ export async function exchangeCode(
   code: string,
   fetch: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<{ tokens: StoredTokens; athleteId: number | undefined }> {
-  const response = await requestToken(
-    config,
-    { grant_type: "authorization_code", code },
-    fetch,
-  );
+  const response = await requestToken(config, { grant_type: "authorization_code", code }, fetch);
   return { tokens: toTokens(response), athleteId: response.athlete?.id };
 }
 

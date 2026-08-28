@@ -42,18 +42,8 @@ test("returns exactly one outcome per work item, in input order", async () => {
     deps({ raw: { "raw/a.fit.gz": ride(), "raw/d.gpx": track() } }),
   );
 
-  expect(outcomes.map((outcome) => outcome.activityId)).toEqual([
-    "a",
-    "b",
-    "c",
-    "d",
-  ]);
-  expect(outcomes.map((outcome) => outcome.status)).toEqual([
-    "ok",
-    "skipped",
-    "failed",
-    "ok",
-  ]);
+  expect(outcomes.map((outcome) => outcome.activityId)).toEqual(["a", "b", "c", "d"]);
+  expect(outcomes.map((outcome) => outcome.status)).toEqual(["ok", "skipped", "failed", "ok"]);
 });
 
 test("skips an activity whose only raw key is not decodable telemetry", async () => {
@@ -70,10 +60,7 @@ test("skips an activity whose only raw key is not decodable telemetry", async ()
 });
 
 test("skips an activity with no raw keys at all", async () => {
-  const { outcomes } = await decodeBatch(
-    { work: [{ activityId: "a", rawKeys: [] }] },
-    deps({}),
-  );
+  const { outcomes } = await decodeBatch({ work: [{ activityId: "a", rawKeys: [] }] }, deps({}));
 
   expect(outcomes[0]?.status).toBe("skipped");
 });
@@ -98,11 +85,7 @@ test("a throwing decode fails one activity and leaves the rest ok", async () => 
     }),
   );
 
-  expect(outcomes.map((outcome) => outcome.status)).toEqual([
-    "ok",
-    "failed",
-    "ok",
-  ]);
+  expect(outcomes.map((outcome) => outcome.status)).toEqual(["ok", "failed", "ok"]);
   expect(failure(outcomes[1])).toContain("not a FIT file");
 });
 
@@ -165,9 +148,7 @@ test("pins an identical column set whether or not the source produced rows", asy
   );
 
   for (const table of ["records", "laps", "sessions", "meta"]) {
-    expect(await schemaOf(lake, `full`, table)).toEqual(
-      await schemaOf(lake, `sparse`, table),
-    );
+    expect(await schemaOf(lake, `full`, table)).toEqual(await schemaOf(lake, `sparse`, table));
   }
 });
 
@@ -180,9 +161,7 @@ test("writes the record schema derived from TelemetryRecord, activity_id first",
 
   const schema = await schemaOf(lake, "a", "records");
   expect(schema[0]).toEqual({ name: "activity_id", type: "VARCHAR" });
-  expect(schema.slice(1).map((column) => column.name)).toEqual(
-    Object.keys(RECORDS.columns),
-  );
+  expect(schema.slice(1).map((column) => column.name)).toEqual(Object.keys(RECORDS.columns));
   expect(new Map(schema.map((column) => [column.name, column.type]))).toEqual(
     new Map([
       ["activity_id", "VARCHAR"],
@@ -296,10 +275,7 @@ test("holds decodes to the concurrency limit", async () => {
     },
     deps({
       raw: Object.fromEntries(
-        Array.from({ length: 20 }, (_unused, index) => [
-          `raw/a${index}.fit`,
-          track(),
-        ]),
+        Array.from({ length: 20 }, (_unused, index) => [`raw/a${index}.fit`, track()]),
       ),
       decode: async (_bytes, _filename) => {
         running++;
@@ -399,11 +375,7 @@ async function rowsOf(
   return result.getRowObjectsJson();
 }
 
-function parquet(
-  lake: CollectingLake,
-  activityId: string,
-  table: string,
-): string {
+function parquet(lake: CollectingLake, activityId: string, table: string): string {
   const path = lake.written.get(`decode/v1/${activityId}/${table}.parquet`);
   if (path === undefined) {
     throw new Error(`no ${table} artifact for ${activityId}`);

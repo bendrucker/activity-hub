@@ -242,9 +242,7 @@ export interface PhotoDrainResult {
 // from a successful consume. The queue retries fifty times into a dead letter
 // queue and reseeding from the export costs nothing, so a target lost to a
 // failed consume is cheaper than tracking per-id completion.
-export async function drainPhotoBackfillTargets(
-  env: Env,
-): Promise<PhotoDrainResult> {
+export async function drainPhotoBackfillTargets(env: Env): Promise<PhotoDrainResult> {
   const { results: taken } = await env.REGISTRY.prepare(
     "SELECT source_id FROM photo_backfill_targets ORDER BY source_id LIMIT ?1",
   )
