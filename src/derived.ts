@@ -101,7 +101,7 @@ export async function inputFingerprint(bucket: R2Bucket, keys: readonly string[]
     return EMPTY_FINGERPRINT;
   }
 
-  const sorted = [...new Set(keys)].sort();
+  const sorted = [...new Set(keys)].toSorted();
   const objects = await Promise.all(sorted.map((key) => bucket.head(key)));
   // A deleted object contributes a marker rather than dropping out, so losing
   // the bytes is a fingerprint change and not a silent match.

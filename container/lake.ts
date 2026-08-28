@@ -32,7 +32,11 @@ export async function buildLake(request: LakeRequest, deps: LakeDeps): Promise<L
 
     const tables: LakeTableResult[] = [];
     for (const table of TABLES) {
-      tables.push(await buildTable(connection, table, sources, request.output));
+      // In-process DuckDB over one connection, which is not concurrency-safe,
+      // and no subrequest budget applies inside the container. Six concurrent
+      // scans would want six connections against a 24M-row corpus.
+      // oxlint-disable-next-line no-await-in-loop
+      tables.push(await buildTable(connection, table, sources, request.output)); // ast-grep-ignore: await-in-for-of
     }
     return { outputKey: request.output, tables };
   } finally {

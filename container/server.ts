@@ -12,13 +12,13 @@ export function routes(deps: DecodeDeps & PublishDeps & { runner: LakeRunner }) 
   return {
     "/health": () => new Response("ok"),
     "/decode": {
-      POST: (request: Request) => decode(request, deps),
+      POST: (request: Request) => postDecode(request, deps),
     },
     "/lake": {
-      POST: (request: Request) => lake(request, deps.runner),
+      POST: (request: Request) => postLake(request, deps.runner),
     },
     "/publish": {
-      POST: (request: Request) => publish(request, deps),
+      POST: (request: Request) => postPublish(request, deps),
     },
   };
 }
@@ -26,8 +26,8 @@ export function routes(deps: DecodeDeps & PublishDeps & { runner: LakeRunner }) 
 // One activity per request, so the outcome carries the failure the same way a
 // decode outcome does and the Worker never retries a whole batch for one bad
 // artifact.
-export async function publish(request: Request, deps: PublishDeps): Promise<Response> {
-  const parsed = parsePublishRequest(await body(request));
+export async function postPublish(request: Request, deps: PublishDeps): Promise<Response> {
+  const parsed = parsePublishRequest(await jsonBody(request));
   if (parsed === null) {
     return Response.json({ error: "expected { work: { activityId, decode } }" }, { status: 400 });
   }
@@ -39,8 +39,8 @@ export async function publish(request: Request, deps: PublishDeps): Promise<Resp
 // the library's in-flight counter and holds the container awake for hours. So
 // the route only accepts: the build runs in the background and the outcome
 // lands in R2 as the build summary.
-export async function lake(request: Request, runner: LakeRunner): Promise<Response> {
-  const parsed = parseLakeRequest(await body(request));
+export async function postLake(request: Request, runner: LakeRunner): Promise<Response> {
+  const parsed = parseLakeRequest(await jsonBody(request));
   if (parsed === null) {
     return Response.json(
       { error: "expected { decode, registry, stravaExport, output }" },
@@ -55,15 +55,15 @@ export async function lake(request: Request, runner: LakeRunner): Promise<Respon
 // container can attribute to a single activity comes back as that activity's
 // outcome instead, because the Worker retries the whole batch on any other
 // status.
-export async function decode(request: Request, deps: DecodeDeps): Promise<Response> {
-  const parsed = parseDecodeRequest(await body(request));
+export async function postDecode(request: Request, deps: DecodeDeps): Promise<Response> {
+  const parsed = parseDecodeRequest(await jsonBody(request));
   if (parsed === null) {
     return Response.json({ error: "expected { work: DecodeWork[] }" }, { status: 400 });
   }
   return Response.json(await decodeBatch(parsed, deps));
 }
 
-async function body(request: Request): Promise<unknown> {
+async function jsonBody(request: Request): Promise<unknown> {
   try {
     return await request.json();
   } catch {

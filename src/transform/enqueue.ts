@@ -27,6 +27,9 @@ export async function enqueueTransform(
 ): Promise<number> {
   for (let index = 0; index < messages.length; index += SEND_BATCH) {
     const chunk = messages.slice(index, index + SEND_BATCH);
+    // SEND_BATCH is Cloudflare's cap, so there is no larger send to collapse
+    // these into.
+    // oxlint-disable-next-line no-await-in-loop
     await queue.sendBatch(chunk.map((body) => ({ body })));
   }
   return messages.length;

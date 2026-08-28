@@ -64,6 +64,9 @@ export async function exportRegistry(
   const lines: string[] = [];
 
   for (let offset = 0; ; offset += PAGE) {
+    // Offset pagination: whether another page exists is only knowable from
+    // this one's row count.
+    // oxlint-disable-next-line no-await-in-loop
     const { results } = await db.prepare(EXPORT).bind(PAGE, offset).all<RegistryRow>();
     for (const row of results) {
       lines.push(JSON.stringify(row));

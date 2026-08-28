@@ -1,4 +1,4 @@
-import { RateLimitedError, sendBatched, type IngestMessage, retryAfterS } from "../ingest";
+import { RateLimitedError, sendBatched, type IngestMessage, parseRetryAfter } from "../ingest";
 import { stravaClient, type StravaClient } from "./client";
 
 // Activities can be uploaded long after they were recorded, so listing from
@@ -35,7 +35,14 @@ export async function reconcileStravaActivities(
 
   const report: ReconcileReport = { enqueued: 0, refreshed: 0 };
   for (let page = 1; ; page++) {
+    // Pagination: the loop exits on this page's length, so page N+1 cannot
+    // be issued until page N returns.
+    // oxlint-disable-next-line no-await-in-loop
     const activities = await listPage(client, page, after);
+    // Already one query for the whole page's ids. Its input is the page the
+    // line above just fetched, so it can neither be hoisted out nor issued
+    // alongside that fetch.
+    // oxlint-disable-next-line no-await-in-loop
     const known = await knownIds(env.REGISTRY, activities);
     const messages: IngestMessage[] = activities.map(({ id }) =>
       known.has(String(id))
@@ -48,6 +55,9 @@ export async function reconcileStravaActivities(
             updates: {},
           },
     );
+    // Sending per page is what makes the sweep incrementally durable: a 429
+    // on page five leaves the first four already enqueued.
+    // oxlint-disable-next-line no-await-in-loop
     await sendBatched(env.INGEST_QUEUE, messages);
     for (const message of messages) {
       if (message.kind === "refresh") {
@@ -91,7 +101,7 @@ async function listPage(
   }
   const response = await client.fetch(`/athlete/activities?${params}`);
   if (response.status === 429) {
-    throw new RateLimitedError("rate limited on /athlete/activities", retryAfterS(response));
+    throw new RateLimitedError("rate limited on /athlete/activities", parseRetryAfter(response));
   }
   if (!response.ok) {
     throw new Error(`Strava activity list failed: ${response.status} ${await response.text()}`);

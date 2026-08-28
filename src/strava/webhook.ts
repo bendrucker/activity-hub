@@ -1,10 +1,8 @@
 import type { IngestMessage } from "../ingest";
 
 const OBJECT_TYPES = ["activity", "athlete"] as const;
-type ObjectType = (typeof OBJECT_TYPES)[number];
 
 const ASPECT_TYPES = ["create", "update", "delete"] as const;
-type AspectType = (typeof ASPECT_TYPES)[number];
 
 function isOneOf<T extends string>(values: readonly T[]): (value: unknown) => value is T {
   return (value): value is T =>

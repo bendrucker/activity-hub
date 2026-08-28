@@ -127,7 +127,7 @@ test("writes all four artifacts under the activity prefix, empty ones included",
     deps({ raw: { "raw/a.gpx": track() }, lake }),
   );
 
-  expect([...lake.written.keys()].sort()).toEqual([
+  expect([...lake.written.keys()].toSorted()).toEqual([
     "decode/v1/a/laps.parquet",
     "decode/v1/a/meta.parquet",
     "decode/v1/a/records.parquet",

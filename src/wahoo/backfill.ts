@@ -1,4 +1,4 @@
-import { RateLimitedError, sendBatched, type IngestMessage, retryAfterS } from "../ingest";
+import { RateLimitedError, sendBatched, type IngestMessage, parseRetryAfter } from "../ingest";
 import { wahooClient, type WahooClient } from "./client";
 
 // /v1/workouts takes no date filters and sorts by start descending, so the
@@ -58,12 +58,18 @@ export async function backfillWahooWorkouts(
   });
 
   for (let page = startPage; pagesFetched < maxPages; page++) {
+    // Pagination, and `perPage` comes back on the response rather than the
+    // request, so the exit condition is unknowable until this resolves.
+    // oxlint-disable-next-line no-await-in-loop
     const { workouts, perPage } = await listPage(client, page);
     pagesFetched++;
     workoutsSeen += workouts.length;
     for (const workout of workouts) {
       oldestStartedAt = older(oldestStartedAt, workout.starts);
     }
+    // A flat two subrequests per page whatever the page holds: the read is
+    // one `IN` over every id and the send is one `sendBatch`.
+    // oxlint-disable-next-line no-await-in-loop
     enqueued += await enqueueMissing(env, workouts);
 
     if (workouts.length < perPage) {
@@ -88,7 +94,7 @@ async function listPage(client: WahooClient, page: number): Promise<WorkoutsPage
   });
   const response = await client.fetch(`/v1/workouts?${params}`);
   if (response.status === 429) {
-    throw new RateLimitedError("rate limited on /v1/workouts", retryAfterS(response));
+    throw new RateLimitedError("rate limited on /v1/workouts", parseRetryAfter(response));
   }
   if (!response.ok) {
     throw new Error(`Wahoo workout list failed: ${response.status} ${await response.text()}`);

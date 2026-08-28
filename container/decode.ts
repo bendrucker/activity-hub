@@ -117,7 +117,7 @@ async function mapConcurrent<T, R>(
   limit: number,
   run: (item: T) => Promise<R>,
 ): Promise<R[]> {
-  const results: R[] = new Array<R>(items.length);
+  const results: R[] = Array.from({ length: items.length });
   let next = 0;
 
   const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
@@ -126,6 +126,10 @@ async function mapConcurrent<T, R>(
       if (item === undefined) {
         throw new Error(`no work at index ${index}`);
       }
+      // Awaiting here is the bound itself: a worker takes the next index
+      // only once its current item settles, so `limit` decodes are ever in
+      // flight. Promise.all over the items deletes the cap.
+      // oxlint-disable-next-line no-await-in-loop
       results[index] = await run(item);
     }
   });

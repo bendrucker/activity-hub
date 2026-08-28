@@ -35,7 +35,7 @@ await mkdir(OUTPUT, { recursive: true });
 
 const files = (await readdir(join(EXPORT, "activities")))
   .filter((name) => DECODABLE.test(name))
-  .sort();
+  .toSorted();
 const selected = LIMIT > 0 ? files.slice(0, LIMIT) : files;
 console.log(`decoding ${selected.length} of ${files.length} export files`);
 
