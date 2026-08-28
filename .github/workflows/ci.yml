@@ -27,7 +27,7 @@ jobs:
         run: |
           git diff --exit-code -- worker-configuration.d.ts \
             || { echo '::error::wrangler.jsonc changed without `bun run types`'; exit 1; }
-      - uses: j178/prek-action@v3
+      - uses: j178/prek-action@v3.0.0
         env:
           SKIP: no-commit-to-branch
 
