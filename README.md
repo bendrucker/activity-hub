@@ -297,6 +297,12 @@ uv tool install prek && prek install
 
 CI runs the same hooks with `prek run --all-files`, so a hook that passes locally passes there.
 
+One commit reformatted the whole tree when `printWidth` moved from 80 to 100. Skip it in blame:
+
+```sh
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+```
+
 ## Status
 
 The Strava pipeline is live. The historical export is imported, OAuth and webhooks run, and a daily reconciliation cron catches anything webhooks miss. Wahoo is in progress ([#11](https://github.com/bendrucker/activity-hub/issues/11)).
