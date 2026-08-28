@@ -631,9 +631,26 @@ async function seedPublishable(activityId: string, sourceId = "9001"): Promise<v
   });
 }
 
-// The publish fingerprint is the decode row's, so it moves when the bytes
-// change or the decoder does, and stands still otherwise.
-const PUBLISHED = `fingerprint:${ARTIFACT_VERSION.decode}`;
+// The publish fingerprint covers the decode artifact, the archived objects the
+// row reads and the registry fields it copies, so a test that wants an
+// already-published activity takes the value from a real publish rather than
+// restating that composition. The row is then aged so a `current` outcome is
+// visible as a stamp.
+async function seedPublished(activityId: string): Promise<void> {
+  await consumeTransformBatch(batchOf([publishMessage(activityId)]), testEnv, {
+    container: {
+      summarize: summarizeReturning({
+        outcome: { activityId, status: "ok", artifact: artifact() },
+      }),
+    },
+    site: siteStub(),
+  });
+  await env.REGISTRY.prepare(
+    "UPDATE derived SET updated_at = ?2 WHERE activity_id = ?1 AND stage = 'publish'",
+  )
+    .bind(activityId, OLD)
+    .run();
+}
 
 describe("the publish stage", () => {
   it("assembles the row from the registry, the archive, and the container", async () => {
@@ -671,10 +688,7 @@ describe("the publish stage", () => {
       photoKeys: ["raw/test/photos/one.jpg", "raw/test/photos/two.jpg"],
     });
     expect(site.publishPowerCurve).toHaveBeenCalledWith("a1", [{ durationS: 5, watts: 400 }]);
-    expect(await publishRow("a1")).toMatchObject({
-      status: "ok",
-      input_fingerprint: PUBLISHED,
-    });
+    expect(await publishRow("a1")).toMatchObject({ status: "ok" });
     expect(summary).toEqual({ ...EMPTY_SUMMARY, published: 1 });
   });
 
@@ -1168,14 +1182,9 @@ describe("the publish stage", () => {
     expect(summary).toEqual({ ...EMPTY_SUMMARY, published: 1 });
   });
 
-  it("leaves a published activity alone until its decode artifact moves", async () => {
+  it("leaves a published activity alone until one of its inputs moves", async () => {
     await seedPublishable("a1");
-    await seedDerived({
-      activityId: "a1",
-      stage: "publish",
-      status: "ok",
-      fingerprint: PUBLISHED,
-    });
+    await seedPublished("a1");
     const summarize = summarizeReturning({
       outcome: { activityId: "a1", status: "ok", artifact: artifact() },
     });
@@ -1192,18 +1201,75 @@ describe("the publish stage", () => {
     expect(summary).toEqual({ ...EMPTY_SUMMARY, current: 1 });
   });
 
+  // Archiving a photo changes neither the raw telemetry bytes nor the decoder,
+  // so an activity that borrowed decode's fingerprint reported itself current
+  // and the drain then stamped it out of the staleness query. The site kept an
+  // empty photo list and nothing in the pipeline showed a backlog.
+  it("republishes an activity that gained a photo after it was published", async () => {
+    await seedPublishable("a1");
+    await seedPublished("a1");
+    await env.RAW.put("raw/test/photos/three.jpg", "three");
+    const site = siteStub();
+
+    const summary = await consumeTransformBatch(batchOf([publishMessage("a1")]), testEnv, {
+      container: {
+        summarize: summarizeReturning({
+          outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+        }),
+      },
+      site,
+    });
+
+    expect(site.publishActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        photoKeys: [
+          "raw/test/photos/one.jpg",
+          "raw/test/photos/three.jpg",
+          "raw/test/photos/two.jpg",
+        ],
+      }),
+    );
+    expect(summary).toEqual({ ...EMPTY_SUMMARY, published: 1 });
+  });
+
+  // Strava rewrites the archived detail when a title or a total is corrected.
+  // The decode artifact is untouched, so the row it feeds has to move on the
+  // detail alone.
+  it("republishes an activity whose archived detail was rewritten", async () => {
+    await seedPublishable("a1");
+    await seedPublished("a1");
+    await env.RAW.put(
+      "raw/test/detail.json",
+      JSON.stringify({
+        name: "Kings Mountain and Tunitas",
+        distance: 41000,
+        moving_time: 5000,
+        total_elevation_gain: 480,
+      }),
+    );
+    const site = siteStub();
+
+    await consumeTransformBatch(batchOf([publishMessage("a1")]), testEnv, {
+      container: {
+        summarize: summarizeReturning({
+          outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+        }),
+      },
+      site,
+    });
+
+    expect(site.publishActivity).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Kings Mountain and Tunitas" }),
+    );
+  });
+
   // The registry read that decides all three of these is one query, so the
   // outcomes have to be sorted out of one answer rather than fetched per
   // activity.
   it("sorts published, current and undecoded activities out of one batch", async () => {
     await seedPublishable("a1");
     await seedPublishable("a2", "9002");
-    await seedDerived({
-      activityId: "a2",
-      stage: "publish",
-      status: "ok",
-      fingerprint: PUBLISHED,
-    });
+    await seedPublished("a2");
     await seedArchived("a3", "raw/test/a3.fit");
     const site = siteStub();
 
