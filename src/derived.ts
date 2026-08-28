@@ -61,6 +61,38 @@ export async function activityRawKeys(db: D1Database, activityId: string): Promi
   return results.map((row) => row.raw_key);
 }
 
+// The queue hands over a whole batch at once, so asking per activity spends a
+// subrequest per message where one IN covers all of them. Every id asked for
+// comes back, mapped to an empty list when nothing is archived, so the caller
+// tells "no rows" apart from "not asked".
+export async function activityRawKeysFor(
+  db: D1Database,
+  activityIds: readonly string[],
+): Promise<Map<string, string[]>> {
+  const byActivity = new Map<string, string[]>(activityIds.map((id) => [id, []]));
+  if (activityIds.length === 0) {
+    return byActivity;
+  }
+
+  const placeholders = activityIds.map((_, index) => `?${index + 1}`).join(", ");
+  const { results } = await db
+    .prepare(
+      `SELECT DISTINCT activity_id, json_extract(raw_keys, '$.original') AS raw_key
+       FROM activity_sources
+       WHERE activity_id IN (${placeholders})
+         AND deleted_at IS NULL
+         AND json_extract(raw_keys, '$.original') IS NOT NULL
+       ORDER BY activity_id, raw_key`,
+    )
+    .bind(...activityIds)
+    .all<{ activity_id: string; raw_key: string }>();
+
+  for (const row of results) {
+    byActivity.get(row.activity_id)?.push(row.raw_key);
+  }
+  return byActivity;
+}
+
 // An upstream edit rewrites the raw object, which changes its etag, which
 // changes this digest. Every stage downstream is then stale by definition
 // without anything having to observe the edit.
@@ -125,6 +157,35 @@ export async function staleActivities(
     .bind(stage, MAX_ATTEMPTS, limit, ARTIFACT_VERSION[stage], upstreamStage(stage))
     .all<{ activity_id: string; source_updated_at: string }>();
   return results.map((row) => row.activity_id);
+}
+
+// The fingerprint a stage last recorded as ok, per activity, for the artifact
+// version the code writes today. An activity absent from the answer has no
+// current row and is work. Reading them together is what lets the drain ask
+// once for a whole queue batch.
+export async function currentFingerprints(
+  db: D1Database,
+  stage: Stage,
+  activityIds: readonly string[],
+): Promise<Map<string, string>> {
+  if (activityIds.length === 0) {
+    return new Map();
+  }
+
+  const placeholders = activityIds.map((_, index) => `?${index + 3}`).join(", ");
+  const { results } = await db
+    .prepare(
+      `SELECT activity_id, input_fingerprint
+       FROM derived
+       WHERE stage = ?1
+         AND artifact_version = ?2
+         AND status = 'ok'
+         AND activity_id IN (${placeholders})`,
+    )
+    .bind(stage, ARTIFACT_VERSION[stage], ...activityIds)
+    .all<{ activity_id: string; input_fingerprint: string }>();
+
+  return new Map(results.map((row) => [row.activity_id, row.input_fingerprint]));
 }
 
 export async function isCurrent(
@@ -286,16 +347,34 @@ export async function touchDerived(
   activityId: string,
   stage: Stage,
 ): Promise<void> {
+  await touchDerivedAll(db, stage, [activityId]);
+}
+
+// One batch rather than one statement per activity, for the same reason the
+// recording side batches: a queue batch of thirty otherwise spends thirty
+// subrequests stamping rows nobody is waiting on.
+export async function touchDerivedAll(
+  db: D1Database,
+  stage: Stage,
+  activityIds: readonly string[],
+): Promise<void> {
+  if (activityIds.length === 0) {
+    return;
+  }
+  const stamped = new Date().toISOString();
   try {
-    await db
-      .prepare(
-        `UPDATE derived SET updated_at = ?3
-         WHERE activity_id = ?1 AND stage = ?2 AND status = 'ok'`,
-      )
-      .bind(activityId, stage, new Date().toISOString())
-      .run();
+    await db.batch(
+      activityIds.map((activityId) =>
+        db
+          .prepare(
+            `UPDATE derived SET updated_at = ?3
+             WHERE activity_id = ?1 AND stage = ?2 AND status = 'ok'`,
+          )
+          .bind(activityId, stage, stamped),
+      ),
+    );
   } catch (error) {
-    console.warn(`failed to stamp ${stage} ${activityId}: ${String(error)}`);
+    console.warn(`failed to stamp ${stage} for ${activityIds.length}: ${String(error)}`);
   }
 }
 

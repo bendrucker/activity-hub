@@ -436,6 +436,73 @@ describe("consumeTransformBatch", () => {
     sendBatch.mockRestore();
     send.mockRestore();
   });
+
+  // Preparing a batch reads the registry once for every activity in it, so the
+  // three outcomes have to be sorted out of one answer rather than decided one
+  // message at a time.
+  it("sorts current, unarchived and decodable activities out of one batch", async () => {
+    await seedArchived("a1", "raw/test/a1.fit");
+    await seedArchived("a2", "raw/test/a2.fit");
+    await seedDerived({
+      activityId: "a2",
+      stage: "decode",
+      status: "ok",
+      fingerprint: await inputFingerprint(env.RAW, ["raw/test/a2.fit"]),
+      outputKey: "decode/v1/a2/",
+    });
+    await seedActivity("a3");
+    await seedSource({
+      source: "strava",
+      sourceId: "3",
+      activityId: "a3",
+      rawKeys: { summary: "raw/test/a3.json" },
+    });
+
+    const messages = [decodeMessage("a1"), decodeMessage("a2"), decodeMessage("a3")];
+    const decode = decodeReturning(decoded("a1"));
+
+    const summary = await consumeTransformBatch(batchOf(messages), testEnv, {
+      client: { decode },
+    });
+
+    // Only the activity that is neither current nor unarchived reaches the
+    // container.
+    expect(decode).toHaveBeenCalledWith({
+      work: [{ activityId: "a1", rawKeys: ["raw/test/a1.fit"] }],
+    });
+    expect(await derivedRow("a1")).toMatchObject({ status: "ok" });
+    expect(await derivedRow("a2")).toMatchObject({ output_key: "decode/v1/a2/" });
+    expect((await derivedRow("a2"))?.updated_at).not.toEqual(OLD);
+    expect(await derivedRow("a3")).toMatchObject({
+      status: "skipped",
+      error: "activity has no archived original",
+    });
+    for (const message of messages) {
+      expect(message.ack).toHaveBeenCalled();
+      expect(message.retry).not.toHaveBeenCalled();
+    }
+    expect(summary).toEqual({ ...EMPTY_SUMMARY, decoded: 1, current: 1, skipped: 1 });
+  });
+
+  // Both messages name the same activity, so it is prepared once and decoded
+  // once, and both are acked against that one result.
+  it("prepares an activity once when a batch names it twice", async () => {
+    await seedArchived("a1", "raw/test/a1.fit");
+    const first = decodeMessage("a1");
+    const second = decodeMessage("a1");
+    const decode = decodeReturning(decoded("a1"));
+
+    const summary = await consumeTransformBatch(batchOf([first, second]), testEnv, {
+      client: { decode },
+    });
+
+    expect(decode).toHaveBeenCalledWith({
+      work: [{ activityId: "a1", rawKeys: ["raw/test/a1.fit"] }],
+    });
+    expect(first.ack).toHaveBeenCalled();
+    expect(second.ack).toHaveBeenCalled();
+    expect(summary).toEqual({ ...EMPTY_SUMMARY, decoded: 1 });
+  });
 });
 
 class ValidationError extends Error {
