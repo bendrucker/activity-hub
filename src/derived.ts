@@ -115,7 +115,8 @@ export async function inputFingerprint(bucket: R2Bucket, keys: readonly string[]
 
 // Candidate selection cannot afford a fingerprint, which costs an R2 head per
 // key. This narrows thousands of activities to the ones worth hashing. A
-// candidate that turns out to be current is caught by isCurrent. The artifact
+// candidate that turns out to be current is caught by `currentFingerprints`.
+// The artifact
 // version is the one input SQL can compare on its own, and it has to be
 // compared here: a stage whose output shape changed leaves every source row's
 // updated_at exactly where it was, so nothing else would ever select it.
@@ -188,27 +189,6 @@ export async function currentFingerprints(
   return new Map(results.map((row) => [row.activity_id, row.input_fingerprint]));
 }
 
-export async function isCurrent(
-  db: D1Database,
-  activityId: string,
-  stage: Stage,
-  fingerprint: string,
-): Promise<boolean> {
-  const row = await db
-    .prepare(
-      `SELECT 1 AS current
-       FROM derived
-       WHERE activity_id = ?1
-         AND stage = ?2
-         AND status = 'ok'
-         AND input_fingerprint = ?3
-         AND artifact_version = ?4`,
-    )
-    .bind(activityId, stage, fingerprint, ARTIFACT_VERSION[stage])
-    .first<{ current: number }>();
-  return row !== null;
-}
-
 export interface StageRow {
   status: DerivedStatus;
   outputKey: string | null;
@@ -217,43 +197,54 @@ export interface StageRow {
   attempts: number;
 }
 
-// What an upstream stage last recorded. A stage that reads another's output
-// learns the location from the row that recorded it, so the two cannot drift
-// apart, and takes its own fingerprint from the same row because that
-// artifact is its input.
+// What an upstream stage last recorded, for every activity a drain is about to
+// ask about. A stage that reads another's output learns the location from the
+// row that recorded it, so the two cannot drift apart, and takes its own
+// fingerprint from the same row because that artifact is its input.
 //
 // The status and attempt count come back with it because a missing artifact
 // has two meanings. A stage that ran and gave up will never produce one, and a
 // stage that has not run yet still might. A reader that saw only the `ok` rows
-// would have to ask a second time to tell them apart.
-export async function stageRow(
+// would have to ask a second time to tell them apart. An activity absent from
+// the answer has no row for the stage at all.
+export async function stageRows(
   db: D1Database,
-  activityId: string,
   stage: Stage,
-): Promise<StageRow | null> {
-  const row = await db
+  activityIds: readonly string[],
+): Promise<Map<string, StageRow>> {
+  if (activityIds.length === 0) {
+    return new Map();
+  }
+
+  const placeholders = activityIds.map((_, index) => `?${index + 2}`).join(", ");
+  const { results } = await db
     .prepare(
-      `SELECT status, output_key, input_fingerprint, artifact_version, attempts
+      `SELECT activity_id, status, output_key, input_fingerprint, artifact_version, attempts
        FROM derived
-       WHERE activity_id = ?1 AND stage = ?2`,
+       WHERE stage = ?1 AND activity_id IN (${placeholders})`,
     )
-    .bind(activityId, stage)
-    .first<{
+    .bind(stage, ...activityIds)
+    .all<{
+      activity_id: string;
       status: DerivedStatus;
       output_key: string | null;
       input_fingerprint: string;
       artifact_version: number;
       attempts: number;
     }>();
-  return row === null
-    ? null
-    : {
+
+  return new Map(
+    results.map((row) => [
+      row.activity_id,
+      {
         status: row.status,
         outputKey: row.output_key,
         inputFingerprint: row.input_fingerprint,
         artifactVersion: row.artifact_version,
         attempts: row.attempts,
-      };
+      },
+    ]),
+  );
 }
 
 export interface DerivedOutcome {
@@ -323,31 +314,6 @@ function outcomeStatement(db: D1Database, outcome: DerivedOutcome): D1PreparedSt
       new Date().toISOString(),
       ARTIFACT_VERSION[outcome.stage],
     );
-}
-
-// A stage that re-runs and finds itself current writes nothing otherwise, so
-// whatever made STALE select it is still true on the next sweep, which selects
-// it again, without end. Stamping records that the stage checked its inputs and
-// found them unchanged, which is what STALE's updated_at comparison asks.
-//
-// Stamping decode leaves publish stale against its upstream, so a pair settles
-// in two sweeps rather than one. It does settle: a stamped row is selected again
-// only when its inputs actually move, and a stamp moves no stage's inputs.
-//
-// Only an `ok` row is stamped. That is the only status `isCurrent` returns true
-// for, so the predicate never declines a stamp this code meant to make. It does
-// decline one racing a duplicate message that just recorded a failure, whose
-// timestamp orders the recent-failure list.
-//
-// A stamp that fails is not worth retrying a message over. The row keeps the
-// timestamp it had, which is where every row sat before this existed, and the
-// next sweep asks again.
-export async function touchDerived(
-  db: D1Database,
-  activityId: string,
-  stage: Stage,
-): Promise<void> {
-  await touchDerivedAll(db, stage, [activityId]);
 }
 
 // One batch rather than one statement per activity, for the same reason the

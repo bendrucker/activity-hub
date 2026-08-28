@@ -601,7 +601,7 @@ async function seedWahooSummary(activityId: string, minutes: number): Promise<vo
 }
 
 // A Strava activity with an archived detail body and two photos, decoded.
-async function seedPublishable(activityId: string): Promise<void> {
+async function seedPublishable(activityId: string, sourceId = "9001"): Promise<void> {
   await seedActivity(activityId);
   await env.RAW.put(
     "raw/test/detail.json",
@@ -616,7 +616,7 @@ async function seedPublishable(activityId: string): Promise<void> {
   await env.RAW.put("raw/test/photos/two.jpg", "two");
   await seedSource({
     source: "strava",
-    sourceId: "9001",
+    sourceId,
     activityId,
     rawKeys: {
       detail: "raw/test/detail.json",
@@ -1190,5 +1190,65 @@ describe("the publish stage", () => {
     expect(site.publishActivity).not.toHaveBeenCalled();
     expect((await publishRow("a1"))?.updated_at).not.toEqual(OLD);
     expect(summary).toEqual({ ...EMPTY_SUMMARY, current: 1 });
+  });
+
+  // The registry read that decides all three of these is one query, so the
+  // outcomes have to be sorted out of one answer rather than fetched per
+  // activity.
+  it("sorts published, current and undecoded activities out of one batch", async () => {
+    await seedPublishable("a1");
+    await seedPublishable("a2", "9002");
+    await seedDerived({
+      activityId: "a2",
+      stage: "publish",
+      status: "ok",
+      fingerprint: PUBLISHED,
+    });
+    await seedArchived("a3", "raw/test/a3.fit");
+    const site = siteStub();
+
+    const summary = await consumeTransformBatch(
+      batchOf([publishMessage("a1"), publishMessage("a2"), publishMessage("a3")]),
+      testEnv,
+      {
+        container: {
+          summarize: summarizeReturning({
+            outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+          }),
+        },
+        site,
+      },
+    );
+
+    expect(site.publishActivity).toHaveBeenCalledTimes(1);
+    expect(await publishRow("a1")).toMatchObject({ status: "ok" });
+    expect(await publishRow("a3")).toMatchObject({
+      status: "skipped",
+      error: "activity has not been decoded",
+    });
+    expect(summary).toEqual({ ...EMPTY_SUMMARY, published: 1, current: 1, skipped: 1 });
+  });
+
+  // A webhook edit landing on top of a sweep queues the same activity twice.
+  // Both messages describe the same row, so it publishes once.
+  it("publishes an activity once when a batch names it twice", async () => {
+    await seedPublishable("a1");
+    const site = siteStub();
+    const messages = [publishMessage("a1"), publishMessage("a1")];
+
+    const summary = await consumeTransformBatch(batchOf(messages), testEnv, {
+      container: {
+        summarize: summarizeReturning({
+          outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+        }),
+      },
+      site,
+    });
+
+    expect(site.publishActivity).toHaveBeenCalledTimes(1);
+    for (const message of messages) {
+      expect(message.ack).toHaveBeenCalled();
+    }
+    expect(summary).toEqual({ ...EMPTY_SUMMARY, published: 1 });
   });
 });

@@ -2,9 +2,7 @@ import {
   activityRawKeysFor,
   currentFingerprints,
   inputFingerprint,
-  recordOutcome,
   recordOutcomes,
-  touchDerived,
   touchDerivedAll,
   type DerivedOutcome,
   type Stage,
@@ -12,7 +10,7 @@ import {
 import { decodeClient, type DecodeClient } from "./container";
 import { enqueueTransform } from "./enqueue";
 import type { DecodeOutcome, DecodeWork } from "./protocol";
-import { publishToSite, type PublishOptions, type PublishResult } from "./publish";
+import { publishContexts, publishToSite, type PublishOptions, type PublishResult } from "./publish";
 
 export interface TransformMessage {
   activityId: string;
@@ -65,11 +63,12 @@ export async function consumeTransformBatch(
   // are acked against that result. Grouping before any read is also what lets
   // the registry answer for the whole batch at once below.
   const queued = new Map<string, Message<TransformMessage>[]>();
+  const publishing = new Map<string, Message<TransformMessage>[]>();
 
   for (const message of batch.messages) {
     const { activityId, stage } = message.body;
     if (stage === "publish") {
-      await consumePublish(activityId, message, env, options, summary);
+      group(publishing, activityId, message);
       continue;
     }
     if (stage !== "decode") {
@@ -80,13 +79,10 @@ export async function consumeTransformBatch(
       continue;
     }
 
-    const existing = queued.get(activityId);
-    if (existing === undefined) {
-      queued.set(activityId, [message]);
-    } else {
-      existing.push(message);
-    }
+    group(queued, activityId, message);
   }
+
+  await consumePublishBatch(publishing, env, options, summary);
 
   const pending = await prepareDecodes(queued, env, summary);
 
@@ -281,66 +277,129 @@ async function prepareDecodes(
   return pending;
 }
 
-// One activity at a time: the container reads that activity's Parquet and
-// nothing about the work is shared across a batch, so batching would only make
-// one bad artifact everyone else's retry.
-async function consumePublish(
-  activityId: string,
-  message: Message<TransformMessage>,
+// The registry answers for the whole batch, the same shape the decode drain
+// uses above: three reads and two writes, against three reads and one write
+// per activity that this replaced.
+//
+// Publishing itself stays one activity at a time. The container's publish
+// route takes a single activity and nothing about the work is shared across a
+// batch, so a batched call would only make one bad artifact everyone else's
+// retry.
+async function consumePublishBatch(
+  queued: Map<string, Message<TransformMessage>[]>,
   env: Env,
   options: TransformBatchOptions,
   summary: TransformSummary,
 ): Promise<void> {
-  let result: PublishResult;
-  try {
-    result = await publishToSite(env, activityId, options);
-  } catch (error) {
-    // The site rejected the row's shape, which no retry changes. Anything else
-    // (the container, D1, R2, a service binding that could not connect) says
-    // nothing about this activity.
-    if (!(error instanceof Error) || error.name !== "ValidationError") {
-      console.error(`failed to publish ${activityId}: ${String(error)}`);
-      message.retry({ delaySeconds: RETRY_DELAY_S });
-      summary.retried += 1;
-      return;
-    }
-    result = {
-      fingerprint: "rejected",
-      status: "failed",
-      error: error.message,
-    };
-  }
-
-  if (result.status === "current") {
-    await touchDerived(env.REGISTRY, activityId, "publish");
-    summary.current += 1;
-    message.ack();
+  const activityIds = [...queued.keys()];
+  if (activityIds.length === 0) {
     return;
   }
 
+  const retryFor = (activityId: string): void => {
+    for (const message of queued.get(activityId) ?? []) {
+      message.retry({ delaySeconds: RETRY_DELAY_S });
+      summary.retried += 1;
+    }
+  };
+  const ackFor = (activityId: string): void => {
+    for (const message of queued.get(activityId) ?? []) {
+      message.ack();
+    }
+  };
+
+  let contexts: Awaited<ReturnType<typeof publishContexts>>;
   try {
-    await recordOutcome(env.REGISTRY, {
+    contexts = await publishContexts(env.REGISTRY, activityIds);
+  } catch (error) {
+    // A read spanning every activity says nothing about any one of them.
+    console.error(`failed to read the registry to publish ${activityIds.length}: ${String(error)}`);
+    for (const activityId of activityIds) {
+      retryFor(activityId);
+    }
+    return;
+  }
+
+  const current: string[] = [];
+  const outcomes: DerivedOutcome[] = [];
+
+  for (const [activityId, context] of contexts) {
+    let result: PublishResult;
+    try {
+      result = await publishToSite(env, activityId, context, options);
+    } catch (error) {
+      // The site rejected the row's shape, which no retry changes. Anything
+      // else (the container, D1, R2, a service binding that could not connect)
+      // says nothing about this activity.
+      if (!(error instanceof Error) || error.name !== "ValidationError") {
+        console.error(`failed to publish ${activityId}: ${String(error)}`);
+        retryFor(activityId);
+        continue;
+      }
+      result = { fingerprint: "rejected", status: "failed", error: error.message };
+    }
+
+    if (result.status === "current") {
+      current.push(activityId);
+      continue;
+    }
+    outcomes.push({
       activityId,
       stage: "publish",
       inputFingerprint: result.fingerprint,
       status: result.status,
       error: result.status === "ok" ? undefined : reason(result),
     });
-  } catch (error) {
-    console.error(`failed to record publish ${activityId}: ${String(error)}`);
-    message.retry({ delaySeconds: RETRY_DELAY_S });
-    summary.retried += 1;
+  }
+
+  // Stamping swallows its own failures, so these ack either way.
+  await touchDerivedAll(env.REGISTRY, "publish", current);
+  for (const activityId of current) {
+    summary.current += 1;
+    ackFor(activityId);
+  }
+
+  if (outcomes.length === 0) {
     return;
   }
 
-  if (result.status === "ok") {
+  try {
+    await recordOutcomes(env.REGISTRY, outcomes);
+    for (const outcome of outcomes) {
+      countPublished(summary, outcome.status);
+      ackFor(outcome.activityId);
+    }
+  } catch (error) {
+    // Acking without the row would drop the activity: the sweep reselects it
+    // only because no row says it was tried.
+    console.error(`failed to record ${outcomes.length} published: ${String(error)}`);
+    for (const outcome of outcomes) {
+      retryFor(outcome.activityId);
+    }
+  }
+}
+
+function group(
+  queued: Map<string, Message<TransformMessage>[]>,
+  activityId: string,
+  message: Message<TransformMessage>,
+): void {
+  const existing = queued.get(activityId);
+  if (existing === undefined) {
+    queued.set(activityId, [message]);
+  } else {
+    existing.push(message);
+  }
+}
+
+function countPublished(summary: TransformSummary, status: DerivedOutcome["status"]): void {
+  if (status === "ok") {
     summary.published += 1;
-  } else if (result.status === "skipped") {
+  } else if (status === "skipped") {
     summary.skipped += 1;
   } else {
     summary.failed += 1;
   }
-  message.ack();
 }
 
 function reason(result: PublishResult): string | undefined {
