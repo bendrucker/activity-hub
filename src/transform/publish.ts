@@ -158,10 +158,7 @@ export async function publishToSite(
     return publishWithoutTelemetry(env, activityId, registry, site, published);
   }
 
-  // Resolved before the fingerprint because the keys are an input to the row,
-  // not just a field on it.
-  const photoKeys = await photos(env.RAW, registry.sources);
-  const fingerprint = await publishFingerprint(env.RAW, registry, photoKeys, decode);
+  const { photoKeys, fingerprint } = await publishInputs(env.RAW, registry, decode);
   if (published === fingerprint) {
     return { fingerprint, status: "current" };
   }
@@ -183,48 +180,51 @@ export async function publishToSite(
   return { fingerprint, status: "ok" };
 }
 
-// Everything the published row is built from. Taking decode's fingerprint
-// instead would only be right if decode's inputs were a superset of publish's,
-// and they are not: the row also carries the archived photo keys, Strava's
+// Everything the published row is built from. Decode's fingerprint alone is
+// not enough, because the row also carries the archived photo keys, Strava's
 // archived title and totals, and the registry's own sport, start and timezone.
 // An activity that gains a photo moves none of decode's inputs, so publish
-// reports it current and `touchDerivedAll` stamps it out of the staleness
-// query with the site still holding no photo.
+// reports it current with the site still holding no photo.
 //
-// This costs an R2 head per archived object and a list per photo prefix. The
-// alternative to a check that can be trusted is no check, and that is a
-// container `summarize` per activity per sweep.
+// Photo objects never change once archived, so their keys are the whole input.
+// Heading each one would spend a request to learn an etag that cannot have
+// moved. That leaves one list per photo prefix and one head for the provider
+// record, and neither waits on the other.
 //
 // The registry fields are free, since the query that loaded the row already
 // read them. They only reach here when a source's `updated_at` moved with
 // them, which a re-ingest does: `activities.updated_at` alone is not what
 // STALE compares.
-async function publishFingerprint(
+async function publishInputs(
   bucket: R2Bucket,
   registry: ActivityRow,
-  photoKeys: readonly string[],
   decode: StageRow | null,
   extraKeys: readonly string[] = [],
-): Promise<string> {
+): Promise<{ photoKeys: string[]; fingerprint: string }> {
   const detailKey = stravaSource(registry.sources)?.rawKeys.detail;
-  const keys = [...photoKeys, ...extraKeys];
-  if (detailKey !== undefined) {
-    keys.push(detailKey);
-  }
+  const keys = detailKey === undefined ? extraKeys : [...extraKeys, detailKey];
+  const [photoKeys, archived] = await Promise.all([
+    photos(bucket, registry.sources),
+    inputFingerprint(bucket, keys),
+  ]);
 
-  return digest(
-    [
-      decode === null ? "" : `${decode.inputFingerprint}:${decode.artifactVersion}`,
-      await inputFingerprint(bucket, keys),
-      registry.name ?? "",
+  const fingerprint = await digest(
+    // JSON rather than a delimiter, so a name carrying the delimiter cannot
+    // shift the field boundaries and hash as some other set of inputs.
+    JSON.stringify([
+      decode === null ? null : [decode.inputFingerprint, decode.artifactVersion],
+      archived,
+      photoKeys,
+      registry.name,
       registry.sport,
       registry.startedAt,
       registry.timezone,
       // Ordered by the registry query, so two sources hash the same way every
       // time.
-      ...registry.sources.map((source) => `${source.source}/${source.sourceId}`),
-    ].join("\n"),
+      registry.sources.map((source) => [source.source, source.sourceId]),
+    ]),
   );
+  return { photoKeys, fingerprint };
 }
 
 // Whether decode has said everything it is going to say. No archived original
@@ -278,14 +278,13 @@ async function publishFromDetail(
   published: string | undefined,
   detailKey: string,
 ): Promise<PublishResult> {
-  const photoKeys = await photos(env.RAW, registry.sources);
-  const fingerprint = await publishFingerprint(env.RAW, registry, photoKeys, null);
+  const { photoKeys, fingerprint } = await publishInputs(env.RAW, registry, null);
   if (published === fingerprint) {
     return { fingerprint, status: "current" };
   }
 
   const detail = await stravaDetail(env.RAW, registry.sources);
-  // `publishFingerprint` just read this key's etag, so a miss here is the
+  // `publishInputs` just read this key's etag, so a miss here is the
   // bucket misbehaving. Recording it as failed keeps the row in the staleness
   // query, which retries it.
   if (detail === null) {
@@ -336,8 +335,7 @@ async function publishFromWahooSummary(
   published: string | undefined,
   summaryKey: string,
 ): Promise<PublishResult> {
-  const photoKeys = await photos(env.RAW, registry.sources);
-  const fingerprint = await publishFingerprint(env.RAW, registry, photoKeys, null, [summaryKey]);
+  const { photoKeys, fingerprint } = await publishInputs(env.RAW, registry, null, [summaryKey]);
   if (published === fingerprint) {
     return { fingerprint, status: "current" };
   }

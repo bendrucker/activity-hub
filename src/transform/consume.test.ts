@@ -687,7 +687,13 @@ describe("the publish stage", () => {
       photoKeys: ["raw/test/photos/one.jpg", "raw/test/photos/two.jpg"],
     });
     expect(site.publishPowerCurve).toHaveBeenCalledWith("a1", [{ durationS: 5, watts: 400 }]);
-    expect(await publishRow("a1")).toMatchObject({ status: "ok" });
+    // A digest of publish's own inputs. The format that let a photo change go
+    // unnoticed was decode's fingerprint and artifact version joined by a
+    // colon, which this pattern excludes.
+    expect(await publishRow("a1")).toMatchObject({
+      status: "ok",
+      input_fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
     expect(summary).toEqual({ ...EMPTY_SUMMARY, published: 1 });
   });
 
