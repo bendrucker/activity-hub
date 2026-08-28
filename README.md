@@ -145,7 +145,7 @@ Inventory of every credential the system needs and where it lives.
 
 | Secret                                            | Location                                         | Consumer                                                                                    |
 | ------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------- |
-| `ADMIN_TOKEN`                                     | Worker secret, generated in `terraform/`             | Every `/admin/*` route                                                                      |
+| `ADMIN_TOKEN`                                     | Worker secret, generated in `terraform/`         | Every `/admin/*` route                                                                      |
 | `CLOUDFLARE_API_TOKEN`                            | GitHub Actions repo secret, written by Terraform | `deploy.yml` (migrations + `wrangler deploy`), and `wrangler` from a laptop                 |
 | `STRAVA_CLIENT_SECRET`                            | Worker secret (`wrangler secret put`)            | Strava OAuth token refresh and webhook subscription management                              |
 | `STRAVA_VERIFY_TOKEN`                             | Worker secret (`wrangler secret put`)            | Webhook subscription validation ([#8](https://github.com/bendrucker/activity-hub/issues/8)) |
