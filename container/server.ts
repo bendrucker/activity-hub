@@ -1,5 +1,5 @@
 import { decodeBatch, type DecodeDeps } from "./decode";
-import { buildLake, type LakeDeps } from "./lake";
+import type { LakeRunner } from "./lake-runner";
 import { publishActivity, type PublishDeps } from "./publish";
 import type {
   DecodeRequest,
@@ -8,14 +8,16 @@ import type {
   PublishRequest,
 } from "../src/transform/protocol";
 
-export function routes(deps: DecodeDeps & LakeDeps & PublishDeps) {
+export function routes(
+  deps: DecodeDeps & PublishDeps & { runner: LakeRunner },
+) {
   return {
     "/health": () => new Response("ok"),
     "/decode": {
       POST: (request: Request) => decode(request, deps),
     },
     "/lake": {
-      POST: (request: Request) => lake(request, deps),
+      POST: (request: Request) => lake(request, deps.runner),
     },
     "/publish": {
       POST: (request: Request) => publish(request, deps),
@@ -40,11 +42,14 @@ export async function publish(
   return Response.json(await publishActivity(parsed, deps));
 }
 
-// The lake build is one indivisible unit: there is no per-item outcome to
-// report, and any failure is the whole request's.
+// The build outlives any connection a Worker can hold open (~55 minutes
+// against a 15-minute cron wall cap), and a response body nobody reads pins
+// the library's in-flight counter and holds the container awake for hours. So
+// the route only accepts: the build runs in the background and the outcome
+// lands in R2 as the build summary.
 export async function lake(
   request: Request,
-  deps: LakeDeps,
+  runner: LakeRunner,
 ): Promise<Response> {
   const parsed = parseLakeRequest(await body(request));
   if (parsed === null) {
@@ -53,7 +58,8 @@ export async function lake(
       { status: 400 },
     );
   }
-  return Response.json(await buildLake(parsed, deps));
+  const start = runner.start(parsed);
+  return Response.json(start, { status: start.accepted ? 202 : 409 });
 }
 
 // A malformed body is the one case that answers non-2xx. Anything the

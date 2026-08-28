@@ -1,9 +1,5 @@
 import type { DuckDBConnection, DuckDBInstance } from "@duckdb/node-api";
-import type {
-  LakeRequest,
-  LakeResponse,
-  LakeTableResult,
-} from "../src/transform/protocol";
+import type { LakeRequest, LakeTableResult } from "../src/transform/protocol";
 import { literal } from "./sql";
 import { TABLES, type LakeSources, type LakeTable } from "./tables";
 
@@ -14,13 +10,18 @@ export interface LakeDeps {
   configure?: (connection: DuckDBConnection) => Promise<void>;
 }
 
-// Rebuilds every table from scratch on every run. A full rebuild is two
-// minutes over the whole corpus, which is cheaper than the bookkeeping an
+export interface LakeBuildResult {
+  outputKey: string;
+  tables: LakeTableResult[];
+}
+
+// Rebuilds every table from scratch on every run. A full rebuild is about 55
+// minutes against R2, which is still cheaper than the bookkeeping an
 // incremental merge would need to stay correct across upstream edits.
 export async function buildLake(
   request: LakeRequest,
   deps: LakeDeps,
-): Promise<LakeResponse> {
+): Promise<LakeBuildResult> {
   const connection = await deps.instance.connect();
   try {
     await deps.configure?.(connection);

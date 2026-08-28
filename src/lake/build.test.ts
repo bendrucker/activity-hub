@@ -22,8 +22,8 @@ async function clearRaw(): Promise<void> {
 function client(): LakeClient & { build: ReturnType<typeof vi.fn> } {
   const build = vi.fn(() =>
     Promise.resolve({
-      outputKey: "s3://activity-hub-lake/lake/v1",
-      tables: [],
+      accepted: true as const,
+      startedAt: "2026-08-27T08:00:00.000Z",
     }),
   );
   return { build };
@@ -71,6 +71,10 @@ it("hands the container S3 URIs for every source", async () => {
     output: "s3://activity-hub-lake/lake/v1",
   });
   expect(result.registry.activities).toBe(0);
+  expect(result.start).toEqual({
+    accepted: true,
+    startedAt: "2026-08-27T08:00:00.000Z",
+  });
 });
 
 it("builds with a null export rather than refusing to run", async () => {

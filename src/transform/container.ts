@@ -2,8 +2,9 @@ import { Container, getContainer } from "@cloudflare/containers";
 import type {
   DecodeRequest,
   DecodeResponse,
+  LakeAccepted,
   LakeRequest,
-  LakeResponse,
+  LakeStart,
   PublishRequest,
   PublishResponse,
 } from "./protocol";
@@ -36,7 +37,7 @@ export interface DecodeClient {
 }
 
 export interface LakeClient {
-  build(request: LakeRequest): Promise<LakeResponse>;
+  build(request: LakeRequest): Promise<LakeStart>;
 }
 
 export interface PublishClient {
@@ -55,9 +56,32 @@ export function decodeClient(env: Env): DecodeClient {
   };
 }
 
+// The container only accepts the build (it runs long past any caller's wall
+// clock), so busy is an answer rather than an error: a 409 means the tables
+// are already being rebuilt, which is what the caller wanted.
 export function lakeClient(env: Env): LakeClient {
   return {
-    build: (request) => call(env, "lake", request),
+    async build(request) {
+      const container = getContainer(env.DECODE_CONTAINER, INSTANCE);
+      const response = await container.fetch("http://container/lake", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(request),
+      });
+      if (response.status === 409) {
+        // The body still has to be read: the library counts a response as in
+        // flight until its body is consumed, and that counter is what holds
+        // the container awake.
+        await response.text();
+        return { accepted: false };
+      }
+      if (!response.ok) {
+        throw new Error(
+          `lake container returned ${response.status}: ${await response.text()}`,
+        );
+      }
+      return (await response.json()) as LakeAccepted;
+    },
   };
 }
 

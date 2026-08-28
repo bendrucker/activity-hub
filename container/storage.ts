@@ -9,6 +9,7 @@ export interface RawStore {
 
 export interface LakeStore {
   put(key: string, path: string): Promise<void>;
+  putJson(key: string, value: unknown): Promise<void>;
 }
 
 export interface Stores {
@@ -54,6 +55,13 @@ export function lakeStore(client: S3Client): LakeStore {
     async put(key, path) {
       try {
         await client.write(key, Bun.file(path));
+      } catch (error) {
+        throw s3Error(error);
+      }
+    },
+    async putJson(key, value) {
+      try {
+        await client.write(key, JSON.stringify(value));
       } catch (error) {
         throw s3Error(error);
       }

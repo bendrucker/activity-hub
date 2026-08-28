@@ -226,7 +226,7 @@ export default {
       return new Response("Method Not Allowed", { status: 405 });
     }
     if (url.pathname === "/admin/lake") {
-      if (request.method === "POST") {
+      if (request.method === "GET" || request.method === "POST") {
         return handleLake(request, env);
       }
       return new Response("Method Not Allowed", { status: 405 });
@@ -245,9 +245,11 @@ export default {
   // Strava and runs on its own schedule.
   async scheduled(controller, env): Promise<void> {
     if (controller.cron === LAKE_CRON) {
-      const { registry, response } = await buildLake(env);
+      const { registry, start } = await buildLake(env);
       console.log(
-        `lake rebuilt from ${registry.activities} activities: ${JSON.stringify(response.tables)}`,
+        start.accepted
+          ? `lake build started from ${registry.activities} activities`
+          : "lake build already running, skipping this trigger",
       );
       return;
     }
