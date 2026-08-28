@@ -71,10 +71,35 @@ export interface LakeTableResult {
   rows: number;
 }
 
-export interface LakeResponse {
-  outputKey: string;
-  tables: LakeTableResult[];
+// The build runs far past any wall clock a Worker caller gets, so the wire
+// answer is only an accept: the container runs the build in the background and
+// the outcome lands in R2 at LAKE_BUILD_SUMMARY_KEY.
+export interface LakeAccepted {
+  accepted: true;
+  startedAt: string;
 }
+
+// One build at a time: a second request while one runs is refused, because
+// the tables it would write are the same tables the running build is
+// writing.
+export interface LakeBusy {
+  accepted: false;
+}
+
+export type LakeStart = LakeAccepted | LakeBusy;
+
+// Written by the container when a build settles, read back through the
+// Worker's admin surface. Success carries the per-table row counts, failure
+// carries the error.
+export interface LakeBuildSummary {
+  startedAt: string;
+  finishedAt: string;
+  tables?: LakeTableResult[];
+  error?: string;
+}
+
+// Outside lake/v1/ so no table glob ever reads it as data.
+export const LAKE_BUILD_SUMMARY_KEY = "lake/builds/latest.json";
 
 // The shape of what the publish stage sends the website. A change here means
 // every published row is one version behind what the site should be holding,

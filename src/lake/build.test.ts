@@ -22,8 +22,8 @@ async function clearRaw(): Promise<void> {
 function client(): LakeClient & { build: ReturnType<typeof vi.fn> } {
   const build = vi.fn(() =>
     Promise.resolve({
-      outputKey: "s3://activity-hub-lake/lake/v1",
-      tables: [],
+      accepted: true as const,
+      startedAt: "2026-08-27T08:00:00.000Z",
     }),
   );
   return { build };
@@ -65,12 +65,19 @@ it("hands the container S3 URIs for every source", async () => {
 
   expect(lake.build).toHaveBeenCalledWith({
     decode: "s3://activity-hub-lake/decode/v1",
-    registry: "s3://activity-hub-lake/lake/registry/v1/activities.ndjson",
+    registry: `s3://activity-hub-lake/${result.registry.key}`,
     stravaExport:
       "s3://activity-hub-raw/raw/strava/export/2026-07-16/activities.csv",
     output: "s3://activity-hub-lake/lake/v1",
   });
+  // The snapshot key is unique per run so a trigger that arrives while a
+  // build is running cannot overwrite the object that build is reading.
+  expect(result.registry.key).toMatch(/^lake\/registry\/v1\/.+\.ndjson$/);
   expect(result.registry.activities).toBe(0);
+  expect(result.start).toEqual({
+    accepted: true,
+    startedAt: "2026-08-27T08:00:00.000Z",
+  });
 });
 
 it("builds with a null export rather than refusing to run", async () => {

@@ -1,7 +1,11 @@
 import { lakeClient, type LakeClient } from "../transform/container";
-import type { LakeResponse } from "../transform/protocol";
+import type { LakeStart } from "../transform/protocol";
 import { DECODE_PREFIX, lakeUri, OUTPUT_PREFIX, rawUri } from "./location";
-import { exportRegistry, type RegistrySnapshot } from "./registry";
+import {
+  exportRegistry,
+  registryRunKey,
+  type RegistrySnapshot,
+} from "./registry";
 
 // Matches the second entry in wrangler.jsonc's crons. The scheduled handler
 // serves both triggers and tells them apart by this expression, so the two
@@ -18,29 +22,31 @@ export interface LakeBuildOptions {
 export interface LakeBuildResult {
   registry: RegistrySnapshot;
   stravaExport: string | null;
-  response: LakeResponse;
+  start: LakeStart;
 }
 
 // This is the whole stage: there is no per-activity unit, because a table is
-// only consistent once every activity in it came from the same rebuild.
+// only consistent once every activity in it came from the same rebuild. The
+// container only accepts the work here. The build itself settles into the
+// summary object it writes to R2.
 export async function buildLake(
   env: Env,
   options: LakeBuildOptions = {},
 ): Promise<LakeBuildResult> {
   const [registry, stravaExport] = await Promise.all([
-    exportRegistry(env.REGISTRY, env.LAKE),
+    exportRegistry(env.REGISTRY, env.LAKE, registryRunKey(new Date())),
     latestExportCsv(env.RAW),
   ]);
 
   const client = options.client ?? lakeClient(env);
-  const response = await client.build({
+  const start = await client.build({
     decode: lakeUri(DECODE_PREFIX),
     registry: lakeUri(registry.key),
     stravaExport: stravaExport === null ? null : rawUri(stravaExport),
     output: lakeUri(OUTPUT_PREFIX),
   });
 
-  return { registry, stravaExport, response };
+  return { registry, stravaExport, start };
 }
 
 // Exports are archived under a dated prefix and each one supersedes the last,

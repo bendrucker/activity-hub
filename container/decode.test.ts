@@ -365,6 +365,7 @@ function collectingLake(): CollectingLake {
       await copyFile(path, copy);
       written.set(key, copy);
     },
+    async putJson() {},
   };
 }
 

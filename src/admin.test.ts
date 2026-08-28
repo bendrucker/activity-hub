@@ -6,6 +6,7 @@ import { stubQueue } from "../test/queue-stub";
 import { SECRETS } from "../test/secrets";
 import {
   handleConsumeLog,
+  handleLake,
   handlePhotoBackfill,
   handlePhotoBackfillTargets,
   handlePipeline,
@@ -22,6 +23,8 @@ import {
   type Stage,
 } from "./derived";
 import type { StravaIngestMessage, WahooIngestMessage } from "./ingest";
+import type { LakeClient } from "./transform/container";
+import { LAKE_BUILD_SUMMARY_KEY, type LakeStart } from "./transform/protocol";
 import { PER_RUN } from "./strava/backfill";
 import { StravaClient } from "./strava/client";
 import { tokenBroker } from "./tokens/broker";
@@ -1045,6 +1048,80 @@ describe("handlePipeline", () => {
       expected,
       -1,
     );
+  });
+});
+
+describe("handleLake", () => {
+  function lakeRequest(method: string, authorization?: string): Request {
+    return new Request("https://hub.example/admin/lake", {
+      method,
+      headers: authorization ? { Authorization: authorization } : {},
+    });
+  }
+
+  function stubClient(start: LakeStart): LakeClient {
+    return { build: () => Promise.resolve(start) };
+  }
+
+  beforeEach(async () => {
+    await env.LAKE.delete(LAKE_BUILD_SUMMARY_KEY);
+  });
+
+  it("rejects a request without an Authorization header", async () => {
+    const response = await handleLake(lakeRequest("GET"), testEnv());
+    expect(response.status).toBe(403);
+  });
+
+  it("starts a build and answers with the accept", async () => {
+    const startedAt = "2026-08-27T08:00:00.000Z";
+    const response = await handleLake(
+      lakeRequest("POST", "Bearer admin-secret"),
+      testEnv(),
+      { client: stubClient({ accepted: true, startedAt }) },
+    );
+
+    expect(response.status).toBe(202);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body.ok).toBe(true);
+    expect(body.accepted).toBe(true);
+    expect(body.startedAt).toBe(startedAt);
+  });
+
+  it("answers 409 when a build is already running", async () => {
+    const response = await handleLake(
+      lakeRequest("POST", "Bearer admin-secret"),
+      testEnv(),
+      { client: stubClient({ accepted: false }) },
+    );
+
+    expect(response.status).toBe(409);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body.accepted).toBe(false);
+  });
+
+  it("reads the latest build summary back", async () => {
+    const summary = {
+      startedAt: "2026-08-27T08:00:00.000Z",
+      finishedAt: "2026-08-27T08:55:00.000Z",
+      tables: [{ name: "activities", rows: 4118 }],
+    };
+    await env.LAKE.put(LAKE_BUILD_SUMMARY_KEY, JSON.stringify(summary));
+
+    const response = await handleLake(
+      lakeRequest("GET", "Bearer admin-secret"),
+      testEnv(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, build: summary });
+  });
+
+  it("answers 404 before any build has written a summary", async () => {
+    const response = await handleLake(
+      lakeRequest("GET", "Bearer admin-secret"),
+      testEnv(),
+    );
+    expect(response.status).toBe(404);
   });
 });
 

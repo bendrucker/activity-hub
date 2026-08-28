@@ -26,6 +26,7 @@ import {
   reconcileTransform,
   RECONCILE_LIMIT,
 } from "./transform/enqueue";
+import { LAKE_BUILD_SUMMARY_KEY } from "./transform/protocol";
 import { backfillWahooWorkouts, type BackfillOptions } from "./wahoo/backfill";
 import { wahooClient, type WahooClient } from "./wahoo/client";
 import { consumeWahooEvent, type ConsumeOptions } from "./wahoo/consume";
@@ -463,9 +464,10 @@ export async function handleTransform(
   }
 }
 
-// The lake build takes minutes and rewrites every table, so it stays an
-// explicit request rather than something a stale row triggers. The response
-// carries the row count per table, which is the only cheap check that a
+// The lake build rewrites every table over about 55 minutes, so it stays an
+// explicit request and POST only starts it: the container answers as soon as
+// it accepts, and the outcome lands in R2 when the build settles. GET reads
+// that summary back. Its row count per table is the only cheap check that a
 // rebuild did not quietly drop a table's inputs.
 export async function handleLake(
   request: Request,
@@ -476,15 +478,36 @@ export async function handleLake(
     return new Response("Forbidden", { status: 403 });
   }
 
+  if (request.method === "GET") {
+    return latestLakeBuild(env);
+  }
+
   try {
     const result = await buildLake(env, options);
-    return Response.json({
-      ok: true,
-      registry: result.registry,
-      stravaExport: result.stravaExport,
-      output: result.response.outputKey,
-      tables: result.response.tables,
-    });
+    return Response.json(
+      {
+        ok: true,
+        registry: result.registry,
+        stravaExport: result.stravaExport,
+        ...result.start,
+      },
+      { status: result.start.accepted ? 202 : 409 },
+    );
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+async function latestLakeBuild(env: Env): Promise<Response> {
+  try {
+    const summary = await env.LAKE.get(LAKE_BUILD_SUMMARY_KEY);
+    if (summary === null) {
+      return Response.json(
+        { ok: false, error: "no lake build summary" },
+        { status: 404 },
+      );
+    }
+    return Response.json({ ok: true, build: await summary.json() });
   } catch (error) {
     return errorResponse(error);
   }

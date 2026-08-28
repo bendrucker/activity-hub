@@ -233,10 +233,15 @@ curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
 curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
   "https://hub.bendrucker.me/admin/transform?activityId=$ID&force=true"
 
-# Rebuild every lake table from the decode artifacts. Takes about two minutes
-# over the whole corpus and answers with a row count per table, which is the
-# cheap check that a rebuild did not lose a table's inputs.
+# Rebuild every lake table from the decode artifacts. The build takes about 55
+# minutes, so the POST only starts it and answers 409 while one is running.
 curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  "https://hub.bendrucker.me/admin/lake"
+
+# Read the latest build's outcome: start and finish times, plus a row count per
+# table on success, which is the cheap check that a rebuild did not lose a
+# table's inputs.
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
   "https://hub.bendrucker.me/admin/lake"
 
 ```

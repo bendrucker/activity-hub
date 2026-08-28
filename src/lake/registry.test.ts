@@ -1,8 +1,9 @@
 import { env } from "cloudflare:test";
 import { beforeEach, expect, it } from "vitest";
-import { exportRegistry, REGISTRY_KEY } from "./registry";
+import { exportRegistry, registryRunKey } from "./registry";
 
 const AT = "2026-01-01T00:00:00.000Z";
+const KEY = registryRunKey(new Date(AT));
 
 async function seedActivity(activityId: string, startedAt = AT): Promise<void> {
   await env.REGISTRY.prepare(
@@ -28,7 +29,7 @@ async function seedSource(
 }
 
 async function snapshot(): Promise<Record<string, unknown>[]> {
-  const object = await env.LAKE.get(REGISTRY_KEY);
+  const object = await env.LAKE.get(KEY);
   const text = (await object?.text()) ?? "";
   return text
     .split("\n")
@@ -46,9 +47,9 @@ it("writes one line per activity with each provider id in its own column", async
   await seedSource("strava", "111", "a");
   await seedSource("wahoo", "222", "a");
 
-  const result = await exportRegistry(env.REGISTRY, env.LAKE);
+  const result = await exportRegistry(env.REGISTRY, env.LAKE, KEY);
 
-  expect(result).toEqual({ key: REGISTRY_KEY, activities: 1 });
+  expect(result).toEqual({ key: KEY, activities: 1 });
   expect(await snapshot()).toEqual([
     expect.objectContaining({
       activity_id: "a",
@@ -64,7 +65,7 @@ it("keeps an activity live while any source survives", async () => {
   await seedSource("strava", "111", "a", AT);
   await seedSource("wahoo", "222", "a");
 
-  await exportRegistry(env.REGISTRY, env.LAKE);
+  await exportRegistry(env.REGISTRY, env.LAKE, KEY);
 
   expect((await snapshot())[0]?.deleted_at).toBeNull();
 });
@@ -74,7 +75,7 @@ it("marks an activity deleted once every source is", async () => {
   await seedSource("strava", "111", "a", AT);
   await seedSource("wahoo", "222", "a", AT);
 
-  await exportRegistry(env.REGISTRY, env.LAKE);
+  await exportRegistry(env.REGISTRY, env.LAKE, KEY);
 
   expect((await snapshot())[0]?.deleted_at).toBe(AT);
 });
@@ -82,7 +83,7 @@ it("marks an activity deleted once every source is", async () => {
 it("includes an activity that has no sources at all", async () => {
   await seedActivity("orphan");
 
-  await exportRegistry(env.REGISTRY, env.LAKE);
+  await exportRegistry(env.REGISTRY, env.LAKE, KEY);
 
   expect(await snapshot()).toEqual([
     expect.objectContaining({
@@ -106,7 +107,7 @@ it("pages past the D1 row limit", async () => {
   );
   await env.REGISTRY.batch(statements);
 
-  const result = await exportRegistry(env.REGISTRY, env.LAKE);
+  const result = await exportRegistry(env.REGISTRY, env.LAKE, KEY);
 
   expect(result.activities).toBe(total);
   const lines = await snapshot();
