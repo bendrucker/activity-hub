@@ -431,22 +431,22 @@ async function activityRows(
 
   const rows = new Map<string, ActivityRow>();
   for (const result of results) {
-    let row = rows.get(result.activity_id);
-    if (row === undefined) {
-      row = {
+    let activity = rows.get(result.activity_id);
+    if (activity === undefined) {
+      activity = {
         name: result.name,
         sport: result.sport,
         startedAt: result.started_at,
         timezone: result.timezone,
         sources: [],
       };
-      rows.set(result.activity_id, row);
+      rows.set(result.activity_id, activity);
     }
     // The LEFT JOIN emits one null-source row for an activity whose sources
     // are all deleted, which is the shape that drives the delete-from-site
     // path below. The activity still has to appear in the map to get there.
     if (result.source !== null && result.source_id !== null) {
-      row.sources.push({
+      activity.sources.push({
         source: result.source,
         sourceId: result.source_id,
         rawKeys: rawKeys(result.raw_keys),
@@ -535,13 +535,16 @@ async function photos(bucket: R2Bucket, sources: readonly ActivitySource[]): Pro
       keys.add(key);
     }
   }
-  return [...keys].sort();
+  return [...keys].toSorted();
 }
 
 async function listPrefix(bucket: R2Bucket, prefix: string): Promise<string[]> {
   const keys: string[] = [];
   let cursor: string | undefined;
   do {
+    // Cursor pagination: the next cursor and the truncation flag both come
+    // off the previous response.
+    // oxlint-disable-next-line no-await-in-loop
     const listed = await bucket.list({ prefix, cursor });
     keys.push(...listed.objects.map((object) => object.key));
     cursor = listed.truncated ? listed.cursor : undefined;

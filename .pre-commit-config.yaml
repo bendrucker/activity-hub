@@ -10,3 +10,16 @@ repos:
   - repo: https://github.com/oxc-project/mirrors-oxfmt
     rev: v0.65.0
     hooks: [{ id: oxfmt }]
+  - repo: https://github.com/oxc-project/mirrors-oxlint
+    rev: v1.80.0
+    hooks: [{ id: oxlint }]
+  # ast-grep runs from the pinned devDependency rather than a mirror, so the
+  # rule and the binary that reads it move together.
+  - repo: local
+    hooks:
+      - id: ast-grep
+        name: ast-grep
+        entry: bun run --silent ast-grep scan
+        language: system
+        types_or: [ts]
+        pass_filenames: false

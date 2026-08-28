@@ -166,7 +166,7 @@ test("spaces the elevation profile by distance", async () => {
   const profile = outcome.artifact.elevationProfile ?? [];
   expect(profile).toHaveLength(100);
   expect(profile.at(0)).toBeLessThan(profile.at(-1) ?? 0);
-  expect([...profile].sort((a, b) => a - b)).toEqual(profile);
+  expect(profile.toSorted((a, b) => a - b)).toEqual(profile);
 });
 
 test("tags a GPX ride's power as estimated", async () => {

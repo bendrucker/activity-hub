@@ -54,7 +54,7 @@ export async function latestExportCsv(bucket: R2Bucket): Promise<string | null> 
     prefix: EXPORT_PREFIX,
     delimiter: "/",
   });
-  const latest = [...listed.delimitedPrefixes].sort().pop();
+  const latest = listed.delimitedPrefixes.toSorted().pop();
   if (latest === undefined) {
     return null;
   }

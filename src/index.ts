@@ -95,7 +95,10 @@ export async function consumeBatch(
       continue;
     }
     try {
-      const outcome = await consume(message.body, env);
+      // The `exhausted` map read above is check-then-act: message N's 429 has
+      // to land before N+1 is attempted, or the parking parks nothing.
+      // oxlint-disable-next-line no-await-in-loop
+      const outcome = await consume(message.body, env); // ast-grep-ignore: await-in-for-of
       message.ack();
       trail.push(consumeLogEntry(message.body, outcome ?? "ok"));
     } catch (error) {

@@ -326,7 +326,9 @@ async function consumePublishBatch(
   for (const [activityId, context] of contexts) {
     let result: PublishResult;
     try {
-      result = await publishToSite(env, activityId, context, options);
+      // One activity at a time, for the reason above this function.
+      // oxlint-disable-next-line no-await-in-loop
+      result = await publishToSite(env, activityId, context, options); // ast-grep-ignore: await-in-for-of
     } catch (error) {
       // The site rejected the row's shape, which no retry changes. Anything
       // else (the container, D1, R2, a service binding that could not connect)

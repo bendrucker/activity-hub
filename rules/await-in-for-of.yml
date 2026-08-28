@@ -1,0 +1,31 @@
+id: await-in-for-of
+language: typescript
+severity: error
+message: Awaiting inside a for...of serializes work that is usually independent.
+note: |
+  Cloudflare bills a D1 query, an R2 operation, a queue send, and an outbound
+  fetch each as one subrequest, and a queue batch can carry thirty activities,
+  so a round trip per item is thirty where one would do.
+
+  Collapse it where a batch call exists: db.batch() for D1 writes, one
+  WHERE ... IN (...) for D1 reads, sendBatched() for queue messages. Where the
+  iterations are independent but nothing batches them, Promise.all issues them
+  together. Where the loop is genuinely sequential, write why above it and add
+  `// ast-grep-ignore: await-in-for-of`.
+
+  Cursor and page loops are written as counter loops rather than for...of,
+  which is why this rule does not see them.
+files:
+  - "src/**/*.ts"
+  - "container/**/*.ts"
+ignores:
+  - "**/*.test.ts"
+  - "container/verify-corpus.ts"
+rule:
+  kind: await_expression
+  inside:
+    kind: statement_block
+    stopBy: end
+    inside:
+      kind: for_in_statement
+      stopBy: neighbor

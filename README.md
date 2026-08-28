@@ -297,6 +297,10 @@ uv tool install prek && prek install
 
 CI runs the same hooks with `prek run --all-files`, so a hook that passes locally passes there.
 
+`bun run lint` runs two linters. oxlint carries the correctness, suspicious, and perf categories, configured in `.oxlintrc.json`. ast-grep carries one structural rule in `rules/`, which flags an `await` in a `for...of` body: awaiting per item there is a subrequest per item, where D1, R2, and Queues all bill per call and a queue batch carries thirty activities.
+
+Both rules stay on because they cover different things. oxlint sees every loop shape, including work hidden one indirection away inside a helper. ast-grep sees only `for...of`, which is where batchable per-item work gets written, and skips the counter loops that pagination uses. A loop that is genuinely sequential gets a comment saying why, plus whichever suppression applies: `// oxlint-disable-next-line no-await-in-loop` above the line, `// ast-grep-ignore: await-in-for-of` at the end of it.
+
 One commit reformatted the whole tree when `printWidth` moved from 80 to 100. Skip it in blame:
 
 ```sh

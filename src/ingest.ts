@@ -13,7 +13,7 @@ export class RateLimitedError extends Error {
   }
 }
 
-export function retryAfterS(response: Response): number | undefined {
+export function parseRetryAfter(response: Response): number | undefined {
   const header = response.headers.get("Retry-After");
   if (!header) {
     return undefined;
@@ -89,6 +89,10 @@ const QUEUE_BATCH_LIMIT = 100;
 export async function sendBatched<T>(queue: Queue<T>, messages: T[]): Promise<void> {
   for (let offset = 0; offset < messages.length; offset += QUEUE_BATCH_LIMIT) {
     const chunk = messages.slice(offset, offset + QUEUE_BATCH_LIMIT);
+    // QUEUE_BATCH_LIMIT is Cloudflare's cap, so the chunks cannot merge into
+    // one send. Awaiting each is also what bounds a caller-supplied list, and
+    // `backfillListedStravaPhotos` takes one with no ceiling.
+    // oxlint-disable-next-line no-await-in-loop
     await queue.sendBatch(chunk.map((body) => ({ body })));
   }
 }
