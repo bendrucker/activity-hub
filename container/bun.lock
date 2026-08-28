@@ -6,7 +6,7 @@
       "name": "activity-hub-container",
       "dependencies": {
         "@duckdb/node-api": "1.5.5-r.4",
-        "@garmin/fitsdk": "21.208.0",
+        "@garmin/fitsdk": "21.213.0",
         "@mapbox/polyline": "1.2.1",
       },
       "devDependencies": {
@@ -41,7 +41,7 @@
 
     "@duckdb/node-bindings-win32-x64": ["@duckdb/node-bindings-win32-x64@1.5.5-r.4", "", { "os": "win32", "cpu": "x64" }, "sha512-X9XGcWQ10P3mvUIaMXXk2bi94Cow7b/ziTPMKxJ0U8U3wQPxsLzEUP7D7C/KrBWINl5am2k+5SkDVyA/THUgPg=="],
 
-    "@garmin/fitsdk": ["@garmin/fitsdk@21.208.0", "", {}, "sha512-mEmPHyzqaS3bb8n+yaOmgmBo/0CUrsLsN5J4viAUN5Kh6+YiwdvPh5OAzb2Jgy2IaI23q7mGtNr/8WRJC1+HoA=="],
+    "@garmin/fitsdk": ["@garmin/fitsdk@21.213.0", "", {}, "sha512-MrJEm7naMxs+VTkWI0+HMC6K1xJtr8Lb2X8CQdUo0GEFhM9hQNfGyaTShdFphqP2pH/u8/fqw0w9JpjZDNE6Mw=="],
 
     "@mapbox/polyline": ["@mapbox/polyline@1.2.1", "", { "dependencies": { "meow": "^9.0.0" }, "bin": { "polyline": "bin/polyline.bin.js" } }, "sha512-sn0V18O3OzW4RCcPoUIVDWvEGQaBNH9a0y5lgqrf5hUycyw1CzrhEoxV5irzrMNXKCkw1xRsZXcaVbsVZggHXA=="],
 
