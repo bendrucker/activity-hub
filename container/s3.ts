@@ -21,6 +21,13 @@ export function configureS3(
   let secrets: Promise<void> | undefined;
   return async (connection) => {
     await connection.run("LOAD httpfs");
+    // The lake build fetches over 110k Parquet objects, and DuckDB's default
+    // thread count matches the vCPUs, so most of its ~55 minutes is threads
+    // waiting on R2 round trips a few at a time. Sixteen threads overlap those
+    // waits, and a thread parked on I/O bills no vCPU. The object cache keeps
+    // Parquet metadata across the tables that scan the same files.
+    await connection.run("SET threads = 16");
+    await connection.run("SET enable_object_cache = true");
     secrets ??= defineSecrets(connection, config).catch((error: unknown) => {
       secrets = undefined;
       throw error;
