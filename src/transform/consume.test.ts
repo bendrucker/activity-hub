@@ -25,10 +25,7 @@ const testEnv: Env = { ...env, ...SECRETS };
 const OLD = "2026-01-01T00:00:00.000Z";
 const RETRY = { delaySeconds: 60 };
 
-async function seedActivity(
-  activityId: string,
-  name: string | null = null,
-): Promise<void> {
+async function seedActivity(activityId: string, name: string | null = null): Promise<void> {
   await env.REGISTRY.prepare(
     `INSERT INTO activities (activity_id, name, started_at, timezone, sport, duration_s, created_at, updated_at)
      VALUES (?1, ?3, '2026-01-01T14:00:00.000Z', 'America/Los_Angeles', 'ride', 3600, ?2, ?2)`,
@@ -49,13 +46,7 @@ async function seedSource(seed: SeedSource): Promise<void> {
     `INSERT INTO activity_sources (source, source_id, activity_id, raw_keys, created_at, updated_at, deleted_at)
      VALUES (?1, ?2, ?3, ?4, ?5, ?5, NULL)`,
   )
-    .bind(
-      seed.source,
-      seed.sourceId,
-      seed.activityId,
-      JSON.stringify(seed.rawKeys ?? {}),
-      OLD,
-    )
+    .bind(seed.source, seed.sourceId, seed.activityId, JSON.stringify(seed.rawKeys ?? {}), OLD)
     .run();
 }
 
@@ -88,10 +79,7 @@ async function seedDerived(seed: SeedDerived): Promise<void> {
 }
 
 // An activity whose original bytes are archived, one source per key.
-async function seedArchived(
-  activityId: string,
-  ...rawKeys: string[]
-): Promise<void> {
+async function seedArchived(activityId: string, ...rawKeys: string[]): Promise<void> {
   await seedActivity(activityId);
   for (const [index, key] of rawKeys.entries()) {
     await env.RAW.put(key, `bytes of ${key}`);
@@ -124,9 +112,9 @@ function derivedRow(activityId: string): Promise<DerivedRow | null> {
 }
 
 async function derivedCount(): Promise<number> {
-  const row = await env.REGISTRY.prepare(
-    "SELECT COUNT(*) AS count FROM derived",
-  ).first<{ count: number }>();
+  const row = await env.REGISTRY.prepare("SELECT COUNT(*) AS count FROM derived").first<{
+    count: number;
+  }>();
   return row?.count ?? -1;
 }
 
@@ -337,11 +325,9 @@ describe("consumeTransformBatch", () => {
     const ignored = decodeMessage("a2");
     const decode = decodeReturning(decoded("a1"));
 
-    const summary = await consumeTransformBatch(
-      batchOf([answered, ignored]),
-      testEnv,
-      { client: { decode } },
-    );
+    const summary = await consumeTransformBatch(batchOf([answered, ignored]), testEnv, {
+      client: { decode },
+    });
 
     expect(await derivedRow("a1")).toMatchObject({ status: "ok" });
     expect(answered.ack).toHaveBeenCalled();
@@ -392,9 +378,7 @@ describe("consumeTransformBatch", () => {
   it("carries non-fatal decode errors onto a successful row", async () => {
     await seedArchived("a1", "raw/test/a1.fit");
     const message = decodeMessage("a1");
-    const decode = decodeReturning(
-      decoded("a1", ["dropped 3 records", "power stream ends early"]),
-    );
+    const decode = decodeReturning(decoded("a1", ["dropped 3 records", "power stream ends early"]));
 
     const summary = await consumeTransformBatch(batchOf([message]), testEnv, {
       client: { decode },
@@ -416,9 +400,7 @@ describe("consumeTransformBatch", () => {
       client: { decode: decodeReturning(decoded("a1")) },
     });
 
-    expect(sendBatch).toHaveBeenCalledWith([
-      { body: { activityId: "a1", stage: "publish" } },
-    ]);
+    expect(sendBatch).toHaveBeenCalledWith([{ body: { activityId: "a1", stage: "publish" } }]);
     sendBatch.mockRestore();
   });
 
@@ -530,10 +512,7 @@ async function seedUndecodable(activityId: string): Promise<void> {
 
 // A Wahoo workout the cloud kept no file for: the summary is the only archived
 // record, and `minutes` is the one number it carries about the ride.
-async function seedWahooSummary(
-  activityId: string,
-  minutes: number,
-): Promise<void> {
+async function seedWahooSummary(activityId: string, minutes: number): Promise<void> {
   await env.RAW.put(
     "raw/test/summary.json",
     JSON.stringify({
@@ -597,11 +576,10 @@ describe("the publish stage", () => {
       outcome: { activityId: "a1", status: "ok", artifact: artifact() },
     });
 
-    const summary = await consumeTransformBatch(
-      batchOf([publishMessage("a1")]),
-      testEnv,
-      { container: { summarize }, site },
-    );
+    const summary = await consumeTransformBatch(batchOf([publishMessage("a1")]), testEnv, {
+      container: { summarize },
+      site,
+    });
 
     expect(summarize).toHaveBeenCalledWith({
       work: {
@@ -625,9 +603,7 @@ describe("the publish stage", () => {
       elevationProfile: [10, 20, 30],
       photoKeys: ["raw/test/photos/one.jpg", "raw/test/photos/two.jpg"],
     });
-    expect(site.publishPowerCurve).toHaveBeenCalledWith("a1", [
-      { durationS: 5, watts: 400 },
-    ]);
+    expect(site.publishPowerCurve).toHaveBeenCalledWith("a1", [{ durationS: 5, watts: 400 }]);
     expect(await publishRow("a1")).toMatchObject({
       status: "ok",
       input_fingerprint: PUBLISHED,
@@ -728,9 +704,7 @@ describe("the publish stage", () => {
     await seedPublishable("a1");
     const message = publishMessage("a1");
     const site = siteStub({
-      publishActivity: vi.fn(() =>
-        Promise.reject(new ValidationError("sport is required")),
-      ),
+      publishActivity: vi.fn(() => Promise.reject(new ValidationError("sport is required"))),
     });
 
     const summary = await consumeTransformBatch(batchOf([message]), testEnv, {
@@ -756,9 +730,7 @@ describe("the publish stage", () => {
     const message = publishMessage("a1");
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     const site = siteStub({
-      publishActivity: vi.fn(() =>
-        Promise.reject(new Error("Network connection lost")),
-      ),
+      publishActivity: vi.fn(() => Promise.reject(new Error("Network connection lost"))),
     });
 
     const summary = await consumeTransformBatch(batchOf([message]), testEnv, {
@@ -780,22 +752,18 @@ describe("the publish stage", () => {
     await seedPublishable("a1");
     const site = siteStub();
 
-    const summary = await consumeTransformBatch(
-      batchOf([publishMessage("a1")]),
-      testEnv,
-      {
-        container: {
-          summarize: summarizeReturning({
-            outcome: {
-              activityId: "a1",
-              status: "failed",
-              error: "No files found that match the pattern",
-            },
-          }),
-        },
-        site,
+    const summary = await consumeTransformBatch(batchOf([publishMessage("a1")]), testEnv, {
+      container: {
+        summarize: summarizeReturning({
+          outcome: {
+            activityId: "a1",
+            status: "failed",
+            error: "No files found that match the pattern",
+          },
+        }),
       },
-    );
+      site,
+    });
 
     expect(site.publishActivity).not.toHaveBeenCalled();
     expect(await publishRow("a1")).toMatchObject({
@@ -811,11 +779,10 @@ describe("the publish stage", () => {
       outcome: { activityId: "a1", status: "ok", artifact: artifact() },
     });
 
-    const summary = await consumeTransformBatch(
-      batchOf([publishMessage("a1")]),
-      testEnv,
-      { container: { summarize }, site: siteStub() },
-    );
+    const summary = await consumeTransformBatch(batchOf([publishMessage("a1")]), testEnv, {
+      container: { summarize },
+      site: siteStub(),
+    });
 
     expect(summarize).not.toHaveBeenCalled();
     expect(await publishRow("a1")).toMatchObject({
@@ -849,11 +816,10 @@ describe("the publish stage", () => {
     });
     const site = siteStub();
 
-    const summary = await consumeTransformBatch(
-      batchOf([publishMessage("a1")]),
-      testEnv,
-      { container: { summarize }, site },
-    );
+    const summary = await consumeTransformBatch(batchOf([publishMessage("a1")]), testEnv, {
+      container: { summarize },
+      site,
+    });
 
     expect(summarize).not.toHaveBeenCalled();
     expect(site.publishActivity).toHaveBeenCalledWith({
@@ -884,17 +850,15 @@ describe("the publish stage", () => {
       outcome: { activityId: "a1", status: "ok", artifact: artifact() },
     });
 
-    const summary = await consumeTransformBatch(
-      batchOf([publishMessage("a1")]),
-      testEnv,
-      { container: { summarize }, site: siteStub() },
-    );
+    const summary = await consumeTransformBatch(batchOf([publishMessage("a1")]), testEnv, {
+      container: { summarize },
+      site: siteStub(),
+    });
 
     expect(summarize).not.toHaveBeenCalled();
     expect(await publishRow("a1")).toMatchObject({
       status: "skipped",
-      error:
-        "activity has no decoded telemetry and no provider record to publish from",
+      error: "activity has no decoded telemetry and no provider record to publish from",
     });
     expect(summary).toEqual({ ...EMPTY_SUMMARY, skipped: 1 });
   });
@@ -906,18 +870,14 @@ describe("the publish stage", () => {
     await seedWahooSummary("a1", 96);
     const site = siteStub();
 
-    const summary = await consumeTransformBatch(
-      batchOf([publishMessage("a1")]),
-      testEnv,
-      {
-        container: {
-          summarize: summarizeReturning({
-            outcome: { activityId: "a1", status: "ok", artifact: artifact() },
-          }),
-        },
-        site,
+    const summary = await consumeTransformBatch(batchOf([publishMessage("a1")]), testEnv, {
+      container: {
+        summarize: summarizeReturning({
+          outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+        }),
       },
-    );
+      site,
+    });
 
     expect(site.publishActivity).toHaveBeenCalledWith({
       activityId: "a1",
@@ -947,18 +907,14 @@ describe("the publish stage", () => {
     await seedWahooSummary("a1", 0);
     const site = siteStub();
 
-    const summary = await consumeTransformBatch(
-      batchOf([publishMessage("a1")]),
-      testEnv,
-      {
-        container: {
-          summarize: summarizeReturning({
-            outcome: { activityId: "a1", status: "ok", artifact: artifact() },
-          }),
-        },
-        site,
+    const summary = await consumeTransformBatch(batchOf([publishMessage("a1")]), testEnv, {
+      container: {
+        summarize: summarizeReturning({
+          outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+        }),
       },
-    );
+      site,
+    });
 
     expect(site.publishActivity).not.toHaveBeenCalled();
     expect(await publishRow("a1")).toMatchObject({
@@ -976,18 +932,14 @@ describe("the publish stage", () => {
     await seedDerived({ activityId: "a1", stage: "decode", status: "skipped" });
     const site = siteStub();
 
-    const summary = await consumeTransformBatch(
-      batchOf([publishMessage("a1")]),
-      testEnv,
-      {
-        container: {
-          summarize: summarizeReturning({
-            outcome: { activityId: "a1", status: "ok", artifact: artifact() },
-          }),
-        },
-        site,
+    const summary = await consumeTransformBatch(batchOf([publishMessage("a1")]), testEnv, {
+      container: {
+        summarize: summarizeReturning({
+          outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+        }),
       },
-    );
+      site,
+    });
 
     expect(site.publishActivity).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1015,18 +967,14 @@ describe("the publish stage", () => {
     });
     const site = siteStub();
 
-    const summary = await consumeTransformBatch(
-      batchOf([publishMessage("a1")]),
-      testEnv,
-      {
-        container: {
-          summarize: summarizeReturning({
-            outcome: { activityId: "a1", status: "ok", artifact: artifact() },
-          }),
-        },
-        site,
+    const summary = await consumeTransformBatch(batchOf([publishMessage("a1")]), testEnv, {
+      container: {
+        summarize: summarizeReturning({
+          outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+        }),
       },
-    );
+      site,
+    });
 
     expect(site.publishActivity).toHaveBeenCalledWith(
       expect.objectContaining({ activityId: "a1", distanceM: 41000 }),
@@ -1047,18 +995,14 @@ describe("the publish stage", () => {
     });
     const site = siteStub();
 
-    const summary = await consumeTransformBatch(
-      batchOf([publishMessage("a1")]),
-      testEnv,
-      {
-        container: {
-          summarize: summarizeReturning({
-            outcome: { activityId: "a1", status: "ok", artifact: artifact() },
-          }),
-        },
-        site,
+    const summary = await consumeTransformBatch(batchOf([publishMessage("a1")]), testEnv, {
+      container: {
+        summarize: summarizeReturning({
+          outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+        }),
       },
-    );
+      site,
+    });
 
     expect(site.publishActivity).not.toHaveBeenCalled();
     expect(await publishRow("a1")).toMatchObject({
@@ -1080,18 +1024,14 @@ describe("the publish stage", () => {
     });
     const site = siteStub();
 
-    const summary = await consumeTransformBatch(
-      batchOf([publishMessage("a1")]),
-      testEnv,
-      {
-        container: {
-          summarize: summarizeReturning({
-            outcome: { activityId: "a1", status: "ok", artifact: artifact() },
-          }),
-        },
-        site,
+    const summary = await consumeTransformBatch(batchOf([publishMessage("a1")]), testEnv, {
+      container: {
+        summarize: summarizeReturning({
+          outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+        }),
       },
-    );
+      site,
+    });
 
     expect(site.publishActivity).not.toHaveBeenCalled();
     expect(await publishRow("a1")).toMatchObject({
@@ -1121,18 +1061,14 @@ describe("the publish stage", () => {
     });
     const site = siteStub();
 
-    const summary = await consumeTransformBatch(
-      batchOf([publishMessage("a1")]),
-      testEnv,
-      {
-        container: {
-          summarize: summarizeReturning({
-            outcome: { activityId: "a1", status: "ok", artifact: artifact() },
-          }),
-        },
-        site,
+    const summary = await consumeTransformBatch(batchOf([publishMessage("a1")]), testEnv, {
+      container: {
+        summarize: summarizeReturning({
+          outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+        }),
       },
-    );
+      site,
+    });
 
     expect(site.publishActivity).not.toHaveBeenCalled();
     expect(await publishRow("a1")).toMatchObject({
@@ -1154,14 +1090,10 @@ describe("the publish stage", () => {
       .run();
     const site = siteStub();
 
-    const summary = await consumeTransformBatch(
-      batchOf([publishMessage("a1")]),
-      testEnv,
-      {
-        container: { summarize: summarizeReturning({} as PublishResponse) },
-        site,
-      },
-    );
+    const summary = await consumeTransformBatch(batchOf([publishMessage("a1")]), testEnv, {
+      container: { summarize: summarizeReturning({} as PublishResponse) },
+      site,
+    });
 
     expect(site.deleteActivity).toHaveBeenCalledWith("a1");
     expect(site.publishActivity).not.toHaveBeenCalled();
@@ -1182,11 +1114,10 @@ describe("the publish stage", () => {
     });
     const site = siteStub();
 
-    const summary = await consumeTransformBatch(
-      batchOf([publishMessage("a1")]),
-      testEnv,
-      { container: { summarize }, site },
-    );
+    const summary = await consumeTransformBatch(batchOf([publishMessage("a1")]), testEnv, {
+      container: { summarize },
+      site,
+    });
 
     expect(summarize).not.toHaveBeenCalled();
     expect(site.publishActivity).not.toHaveBeenCalled();

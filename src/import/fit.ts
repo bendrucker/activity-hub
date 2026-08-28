@@ -31,10 +31,8 @@ type ColumnSource<M, R> = {
 
 export const RECORD_COLUMNS: ColumnSource<RecordMesg, TelemetryRecord> = {
   timestamp: (record) => date(record.timestamp),
-  position_lat: (record) =>
-    position(record.positionLat, record.positionLong).latitude,
-  position_lon: (record) =>
-    position(record.positionLat, record.positionLong).longitude,
+  position_lat: (record) => position(record.positionLat, record.positionLong).latitude,
+  position_lon: (record) => position(record.positionLat, record.positionLong).longitude,
   altitude: (record) => number(record.enhancedAltitude ?? record.altitude),
   distance: (record) => number(record.distance),
   speed: (record) => number(record.enhancedSpeed ?? record.speed),
@@ -47,22 +45,17 @@ export const RECORD_COLUMNS: ColumnSource<RecordMesg, TelemetryRecord> = {
   accumulated_power: (record) => number(record.accumulatedPower),
   gps_accuracy: (record) => number(record.gpsAccuracy),
   segment: () => 0,
-  developer_fields: (record, names) =>
-    developerFields(record.developerFields, names),
+  developer_fields: (record, names) => developerFields(record.developerFields, names),
 };
 
 export const LAP_COLUMNS: ColumnSource<LapMesg, TelemetryLap> = {
   message_index: (lap) => numeric(lap.messageIndex),
   timestamp: (lap) => date(lap.timestamp),
   start_time: (lap) => date(lap.startTime),
-  start_position_lat: (lap) =>
-    position(lap.startPositionLat, lap.startPositionLong).latitude,
-  start_position_lon: (lap) =>
-    position(lap.startPositionLat, lap.startPositionLong).longitude,
-  end_position_lat: (lap) =>
-    position(lap.endPositionLat, lap.endPositionLong).latitude,
-  end_position_lon: (lap) =>
-    position(lap.endPositionLat, lap.endPositionLong).longitude,
+  start_position_lat: (lap) => position(lap.startPositionLat, lap.startPositionLong).latitude,
+  start_position_lon: (lap) => position(lap.startPositionLat, lap.startPositionLong).longitude,
+  end_position_lat: (lap) => position(lap.endPositionLat, lap.endPositionLong).latitude,
+  end_position_lon: (lap) => position(lap.endPositionLat, lap.endPositionLong).longitude,
   total_elapsed_time: (lap) => number(lap.totalElapsedTime),
   total_timer_time: (lap) => number(lap.totalTimerTime),
   total_moving_time: (lap) => number(lap.totalMovingTime),
@@ -102,8 +95,7 @@ export const SESSION_COLUMNS: ColumnSource<SessionMesg, TelemetrySession> = {
     position(session.startPositionLat, session.startPositionLong).latitude,
   start_position_lon: (session) =>
     position(session.startPositionLat, session.startPositionLong).longitude,
-  end_position_lat: (session) =>
-    position(session.endPositionLat, session.endPositionLong).latitude,
+  end_position_lat: (session) => position(session.endPositionLat, session.endPositionLong).latitude,
   end_position_lon: (session) =>
     position(session.endPositionLat, session.endPositionLong).longitude,
   sport: (session) => text(session.sport),
@@ -121,10 +113,8 @@ export const SESSION_COLUMNS: ColumnSource<SessionMesg, TelemetrySession> = {
   avg_heart_rate: (session) => number(session.avgHeartRate),
   max_heart_rate: (session) => number(session.maxHeartRate),
   min_heart_rate: (session) => number(session.minHeartRate),
-  avg_cadence: (session) =>
-    cadence(session.avgCadence, session.avgFractionalCadence),
-  max_cadence: (session) =>
-    cadence(session.maxCadence, session.maxFractionalCadence),
+  avg_cadence: (session) => cadence(session.avgCadence, session.avgFractionalCadence),
+  max_cadence: (session) => cadence(session.maxCadence, session.maxFractionalCadence),
   avg_power: (session) => number(session.avgPower),
   max_power: (session) => number(session.maxPower),
   normalized_power: (session) => number(session.normalizedPower),
@@ -132,20 +122,16 @@ export const SESSION_COLUMNS: ColumnSource<SessionMesg, TelemetrySession> = {
   training_stress_score: (session) => number(session.trainingStressScore),
   intensity_factor: (session) => number(session.intensityFactor),
   total_training_effect: (session) => number(session.totalTrainingEffect),
-  avg_altitude: (session) =>
-    number(session.enhancedAvgAltitude ?? session.avgAltitude),
-  min_altitude: (session) =>
-    number(session.enhancedMinAltitude ?? session.minAltitude),
-  max_altitude: (session) =>
-    number(session.enhancedMaxAltitude ?? session.maxAltitude),
+  avg_altitude: (session) => number(session.enhancedAvgAltitude ?? session.avgAltitude),
+  min_altitude: (session) => number(session.enhancedMinAltitude ?? session.minAltitude),
+  max_altitude: (session) => number(session.enhancedMaxAltitude ?? session.maxAltitude),
   avg_grade: (session) => number(session.avgGrade),
   avg_temperature: (session) => number(session.avgTemperature),
   max_temperature: (session) => number(session.maxTemperature),
   num_laps: (session) => number(session.numLaps),
   first_lap_index: (session) => number(session.firstLapIndex),
   trigger: (session) => text(session.trigger),
-  developer_fields: (session, names) =>
-    developerFields(session.developerFields, names),
+  developer_fields: (session, names) => developerFields(session.developerFields, names),
 };
 
 export function decodeFit(bytes: Uint8Array): TelemetryActivity {
@@ -166,12 +152,7 @@ export function decodeFit(bytes: Uint8Array): TelemetryActivity {
   const laps = project(LAP_COLUMNS, messages.lapMesgs ?? [], names);
   const sessions = project(SESSION_COLUMNS, messages.sessionMesgs ?? [], names);
 
-  if (
-    records.length === 0 &&
-    laps.length === 0 &&
-    sessions.length === 0 &&
-    errors.length > 0
-  ) {
+  if (records.length === 0 && laps.length === 0 && sessions.length === 0 && errors.length > 0) {
     throw new Error(`FIT decode failed: ${errors[0]}`);
   }
 
@@ -186,11 +167,7 @@ export function decodeFit(bytes: Uint8Array): TelemetryActivity {
   };
 }
 
-function project<M, R>(
-  source: ColumnSource<M, R>,
-  mesgs: M[],
-  names: DeveloperFieldNames,
-): R[] {
+function project<M, R>(source: ColumnSource<M, R>, mesgs: M[], names: DeveloperFieldNames): R[] {
   const columns = Object.keys(source) as (keyof R)[];
   return mesgs.map((mesg) => {
     const row = {} as R;
@@ -212,9 +189,7 @@ interface DeveloperFieldTable {
 // Redeclaring a developer data index replaces its definition rather than
 // appending to it, so a file that repeats its whole descriptor block hands
 // back the same keys again.
-function describeDeveloperFields(
-  mesgs: FieldDescriptionMesg[],
-): DeveloperFieldTable {
+function describeDeveloperFields(mesgs: FieldDescriptionMesg[]): DeveloperFieldTable {
   const descriptors: DeveloperFieldDescriptor[] = [];
   const names = new Map<string, string>();
   const declared = new Map<string, string>();
@@ -229,9 +204,7 @@ function describeDeveloperFields(
     const first = declared.get(key);
     if (first != null) {
       if (first !== fieldName) {
-        errors.push(
-          `developer field key ${key} redeclared as ${fieldName}, keeping ${first}`,
-        );
+        errors.push(`developer field key ${key} redeclared as ${fieldName}, keeping ${first}`);
       }
       continue;
     }
@@ -323,9 +296,7 @@ function device(messages: FitMessages): TelemetryDevice | null {
   );
   return {
     manufacturer: text(fileId.manufacturer),
-    product: text(
-      fileId.garminProduct ?? fileId.faveroProduct ?? fileId.product,
-    ),
+    product: text(fileId.garminProduct ?? fileId.faveroProduct ?? fileId.product),
     product_name: text(creator?.productName ?? fileId.productName),
     serial_number: number(fileId.serialNumber),
     software_version: number(creator?.softwareVersion),
@@ -334,10 +305,7 @@ function device(messages: FitMessages): TelemetryDevice | null {
   };
 }
 
-function cadence(
-  whole: number | undefined,
-  fractional: number | undefined,
-): number | null {
+function cadence(whole: number | undefined, fractional: number | undefined): number | null {
   const base = number(whole);
   return base == null ? null : base + (number(fractional) ?? 0);
 }
@@ -382,7 +350,5 @@ function text(value: string | number | undefined): string | null {
 }
 
 function baseTypeId(value: string | number | undefined): number | null {
-  return typeof value === "string"
-    ? (Utils.FieldTypeToBaseType[value] ?? null)
-    : number(value);
+  return typeof value === "string" ? (Utils.FieldTypeToBaseType[value] ?? null) : number(value);
 }

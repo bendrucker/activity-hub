@@ -1,10 +1,4 @@
-import {
-  Encoder,
-  Profile,
-  type Encodable,
-  type FileIdMesg,
-  type RecordMesg,
-} from "@garmin/fitsdk";
+import { Encoder, Profile, type Encodable, type FileIdMesg, type RecordMesg } from "@garmin/fitsdk";
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { clearTokens } from "../../test/broker";
@@ -96,9 +90,7 @@ function message(summary: WahooWorkoutSummary = SUMMARY): WahooIngestMessage {
 }
 
 // What backfill enqueues: the list entry, no summary.
-function backfillMessage(
-  workout: Record<string, unknown> = {},
-): WahooIngestMessage {
+function backfillMessage(workout: Record<string, unknown> = {}): WahooIngestMessage {
   return {
     source: "wahoo",
     kind: "workout",
@@ -130,9 +122,7 @@ function fitKey(id: number): string {
   return `raw/wahoo/workouts/${id}/original.fit`;
 }
 
-async function sourceRow(
-  sourceId: string,
-): Promise<Record<string, unknown> | null> {
+async function sourceRow(sourceId: string): Promise<Record<string, unknown> | null> {
   return env.REGISTRY.prepare(
     "SELECT * FROM activity_sources WHERE source = 'wahoo' AND source_id = ?1",
   )
@@ -140,9 +130,7 @@ async function sourceRow(
     .first();
 }
 
-async function activityRow(
-  activityId: string,
-): Promise<Record<string, unknown> | null> {
+async function activityRow(activityId: string): Promise<Record<string, unknown> | null> {
   return env.REGISTRY.prepare("SELECT * FROM activities WHERE activity_id = ?1")
     .bind(activityId)
     .first();
@@ -162,9 +150,7 @@ beforeEach(async () => {
   const existing = await env.RAW.list({
     prefix: `raw/wahoo/workouts/${WORKOUT_ID}/`,
   });
-  await Promise.all(
-    existing.objects.map((object) => env.RAW.delete(object.key)),
-  );
+  await Promise.all(existing.objects.map((object) => env.RAW.delete(object.key)));
 });
 
 describe("consumeWahooEvent", () => {
@@ -210,9 +196,9 @@ describe("consumeWahooEvent", () => {
     const secondRow = await sourceRow(String(WORKOUT_ID));
 
     expect(secondRow!.activity_id).toBe(firstRow!.activity_id);
-    const count = await env.REGISTRY.prepare(
-      "SELECT COUNT(*) AS n FROM activities",
-    ).first<{ n: number }>();
+    const count = await env.REGISTRY.prepare("SELECT COUNT(*) AS n FROM activities").first<{
+      n: number;
+    }>();
     expect(count?.n).toBe(1);
   });
 
@@ -278,9 +264,7 @@ describe("consumeWahooEvent", () => {
 
   it("archives an undecodable FIT and warns instead of failing", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const stub = stubFetch(
-      () => new Response(new TextEncoder().encode("not a fit file")),
-    );
+    const stub = stubFetch(() => new Response(new TextEncoder().encode("not a fit file")));
 
     await consumeWahooEvent(message(), testEnv, { fetch: stub.fetch });
 
@@ -293,9 +277,9 @@ describe("consumeWahooEvent", () => {
   it("throws on a failed download without writing anything", async () => {
     const stub = stubFetch(() => new Response("gone", { status: 500 }));
 
-    await expect(
-      consumeWahooEvent(message(), testEnv, { fetch: stub.fetch }),
-    ).rejects.toThrow(/500/);
+    await expect(consumeWahooEvent(message(), testEnv, { fetch: stub.fetch })).rejects.toThrow(
+      /500/,
+    );
 
     expect(await env.RAW.get(fitKey(WORKOUT_ID))).toBeNull();
     expect(await env.RAW.get(summaryKey(WORKOUT_ID))).toBeNull();
@@ -373,9 +357,7 @@ describe("consumeWahooEvent", () => {
       client: apiClient(api),
     });
 
-    expect(
-      api.requests.map((request) => new URL(request.url).pathname),
-    ).toEqual([SUMMARY_PATH]);
+    expect(api.requests.map((request) => new URL(request.url).pathname)).toEqual([SUMMARY_PATH]);
     expect(await sourceRow(String(WORKOUT_ID))).toBeNull();
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
@@ -387,11 +369,9 @@ describe("consumeWahooEvent", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const api = stubFetch(() => new Response(JSON.stringify({ id: 8297 })));
 
-    const outcome = await consumeWahooEvent(
-      backfillMessage({ minutes: undefined }),
-      testEnv,
-      { client: apiClient(api) },
-    );
+    const outcome = await consumeWahooEvent(backfillMessage({ minutes: undefined }), testEnv, {
+      client: apiClient(api),
+    });
 
     expect(outcome).toBe("skipped: summary returned but unreadable");
     expect(await sourceRow(String(WORKOUT_ID))).toBeNull();
@@ -408,10 +388,7 @@ describe("consumeWahooEvent", () => {
 
   it("ingests a backfill workout whose summary carries no file", async () => {
     const api = stubFetch(
-      () =>
-        new Response(
-          JSON.stringify({ id: 8297, duration_total_accum: "6998.0" }),
-        ),
+      () => new Response(JSON.stringify({ id: 8297, duration_total_accum: "6998.0" })),
     );
 
     const outcome = await consumeWahooEvent(backfillMessage(), testEnv, {

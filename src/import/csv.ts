@@ -25,8 +25,7 @@ const MONTHS: Record<string, number> = {
   Dec: 11,
 };
 
-const DATE_PATTERN =
-  /^([A-Z][a-z]{2}) (\d{1,2}), (\d{4}), (\d{1,2}):(\d{2}):(\d{2}) (AM|PM)$/;
+const DATE_PATTERN = /^([A-Z][a-z]{2}) (\d{1,2}), (\d{4}), (\d{1,2}):(\d{2}):(\d{2}) (AM|PM)$/;
 
 // Export dates carry no zone marker but are UTC: verified against the first
 // record timestamp of FIT files from the same archive.
@@ -42,14 +41,7 @@ export function parseExportDate(value: string): string {
     hours += 12;
   }
   return new Date(
-    Date.UTC(
-      Number(year),
-      month,
-      Number(day),
-      hours,
-      Number(minute),
-      Number(second),
-    ),
+    Date.UTC(Number(year), month, Number(day), hours, Number(minute), Number(second)),
   ).toISOString();
 }
 
@@ -88,9 +80,7 @@ export function parseActivitiesCsv(text: string): ExportActivity[] {
 function field(row: Record<string, string>, name: string): string {
   const value = row[name];
   if (!value) {
-    throw new Error(
-      `missing ${name} in row ${JSON.stringify(row["Activity ID"] ?? row)}`,
-    );
+    throw new Error(`missing ${name} in row ${JSON.stringify(row["Activity ID"] ?? row)}`);
   }
   return value;
 }

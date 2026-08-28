@@ -17,16 +17,11 @@ export function oauthConfig(env: Env): OAuthConfig {
 // from this key and mirrors every pair back to it.
 export const TOKENS_KEY = "wahoo:tokens";
 
-export async function readTokens(
-  kv: KVNamespace,
-): Promise<StoredTokens | null> {
+export async function readTokens(kv: KVNamespace): Promise<StoredTokens | null> {
   return kv.get<StoredTokens>(TOKENS_KEY, "json");
 }
 
-export async function writeTokens(
-  kv: KVNamespace,
-  tokens: StoredTokens,
-): Promise<void> {
+export async function writeTokens(kv: KVNamespace, tokens: StoredTokens): Promise<void> {
   await kv.put(TOKENS_KEY, JSON.stringify(tokens));
 }
 
@@ -52,9 +47,7 @@ async function requestToken(
     }),
   });
   if (!response.ok) {
-    throw new Error(
-      `Wahoo token request failed: ${response.status} ${await response.text()}`,
-    );
+    throw new Error(`Wahoo token request failed: ${response.status} ${await response.text()}`);
   }
   return response.json();
 }

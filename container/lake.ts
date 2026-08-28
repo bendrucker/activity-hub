@@ -18,10 +18,7 @@ export interface LakeBuildResult {
 // Rebuilds every table from scratch on every run. A full rebuild is about 55
 // minutes against R2, which is still cheaper than the bookkeeping an
 // incremental merge would need to stay correct across upstream edits.
-export async function buildLake(
-  request: LakeRequest,
-  deps: LakeDeps,
-): Promise<LakeBuildResult> {
+export async function buildLake(request: LakeRequest, deps: LakeDeps): Promise<LakeBuildResult> {
   const connection = await deps.instance.connect();
   try {
     await deps.configure?.(connection);
@@ -46,10 +43,7 @@ export async function buildLake(
 // glob() answers with a row per match and no rows when nothing matches, which
 // is the one way to ask the question that a missing prefix does not turn into
 // an error.
-async function anyDecoded(
-  connection: DuckDBConnection,
-  decode: string,
-): Promise<boolean> {
+async function anyDecoded(connection: DuckDBConnection, decode: string): Promise<boolean> {
   const reader = await connection.runAndReadAll(
     `SELECT COUNT(*) AS files FROM glob(${literal(`${decode}/*/records.parquet`)})`,
   );

@@ -1,10 +1,6 @@
 import { expect, test } from "bun:test";
 import { lakeRunner } from "./lake-runner";
-import type {
-  LakeBuildSummary,
-  LakeRequest,
-  LakeTableResult,
-} from "../src/transform/protocol";
+import type { LakeBuildSummary, LakeRequest, LakeTableResult } from "../src/transform/protocol";
 
 const request: LakeRequest = {
   decode: "s3://lake/decode/v1",
@@ -31,9 +27,7 @@ test("writes a summary carrying the tables when the build succeeds", async () =>
   if (start.accepted) {
     expect(summary.startedAt).toBe(start.startedAt);
   }
-  expect(Date.parse(summary.finishedAt)).toBeGreaterThanOrEqual(
-    Date.parse(summary.startedAt),
-  );
+  expect(Date.parse(summary.finishedAt)).toBeGreaterThanOrEqual(Date.parse(summary.startedAt));
 });
 
 test("captures a failed build in the summary rather than throwing", async () => {

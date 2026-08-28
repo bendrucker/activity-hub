@@ -48,10 +48,9 @@ export async function handleCallback(
   } catch {
     // Codes are single-use and short-lived, so a reloaded callback URL
     // fails here. Restarting the flow is the fix, so keep it a 4xx.
-    return new Response(
-      "authorization code exchange failed, restart at /auth/strava",
-      { status: 400 },
-    );
+    return new Response("authorization code exchange failed, restart at /auth/strava", {
+      status: 400,
+    });
   }
 
   if (exchange.athleteId !== Number(env.STRAVA_ATHLETE_ID)) {

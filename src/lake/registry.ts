@@ -64,10 +64,7 @@ export async function exportRegistry(
   const lines: string[] = [];
 
   for (let offset = 0; ; offset += PAGE) {
-    const { results } = await db
-      .prepare(EXPORT)
-      .bind(PAGE, offset)
-      .all<RegistryRow>();
+    const { results } = await db.prepare(EXPORT).bind(PAGE, offset).all<RegistryRow>();
     for (const row of results) {
       lines.push(JSON.stringify(row));
     }

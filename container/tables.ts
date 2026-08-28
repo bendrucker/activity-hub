@@ -53,11 +53,7 @@ function passthrough(name: string, table: Table<object>): LakeTable {
 // union_by_name because developer_fields makes the JSON column's contents vary
 // per activity, and a future column added to the decode schema should widen
 // the lake rather than break the scan of everything written before it.
-function scan(
-  sources: LakeSources,
-  name: string,
-  table: Table<object>,
-): string {
+function scan(sources: LakeSources, name: string, table: Table<object>): string {
   return sources.decoded
     ? `SELECT * FROM read_parquet(${decodeGlob(sources, name)}, union_by_name = true)`
     : emptySelectSql(table);
@@ -278,9 +274,7 @@ const STRAVA_COLUMNS: readonly StravaColumn[] = [
 ];
 
 function stravaPresent(source: string): string {
-  const columns = STRAVA_COLUMNS.map(
-    (column) => `${column.expression} AS ${column.name}`,
-  );
+  const columns = STRAVA_COLUMNS.map((column) => `${column.expression} AS ${column.name}`);
   return `
   strava AS (
     SELECT ${columns.join(", ")}
@@ -389,9 +383,7 @@ export const TABLES: readonly LakeTable[] = [
 ];
 
 function strava(sources: LakeSources): string {
-  return sources.stravaExport === null
-    ? STRAVA_ABSENT
-    : stravaPresent(sources.stravaExport);
+  return sources.stravaExport === null ? STRAVA_ABSENT : stravaPresent(sources.stravaExport);
 }
 
 // Strava writes a handful of non-numeric markers into otherwise numeric

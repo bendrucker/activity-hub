@@ -1,8 +1,4 @@
-import {
-  RateLimitedError,
-  type WahooIngestMessage,
-  retryAfterS,
-} from "../ingest";
+import { RateLimitedError, type WahooIngestMessage, retryAfterS } from "../ingest";
 import { trackTimezone } from "../import/timezone";
 import { extractTrack } from "../import/track";
 import { upsertSourceRecord } from "../registry";
@@ -49,10 +45,7 @@ async function fitTimezone(bytes: Uint8Array): Promise<string | null> {
 // as the export importer: borrow the zone of the nearest-in-time activity
 // that has one, which is usually the Strava twin of this very workout. UTC
 // only when the registry is empty.
-async function nearestTimezone(
-  db: D1Database,
-  startedAt: string,
-): Promise<string> {
+async function nearestTimezone(db: D1Database, startedAt: string): Promise<string> {
   const row = await db
     .prepare(
       "SELECT timezone FROM activities ORDER BY abs(unixepoch(started_at) - unixepoch(?1)) LIMIT 1",
@@ -68,8 +61,7 @@ async function resolveTimezone(
   fitBytes: Uint8Array | null,
 ): Promise<ResolvedTimezone> {
   const virtual = VIRTUAL_WORKOUT_TYPES.has(summary.workout.workout_type_id);
-  const fromTrack =
-    virtual || fitBytes === null ? null : await fitTimezone(fitBytes);
+  const fromTrack = virtual || fitBytes === null ? null : await fitTimezone(fitBytes);
   if (fromTrack) {
     return { timezone: fromTrack, inferred: false };
   }
@@ -113,9 +105,7 @@ async function fetchSummary(
   client: WahooClient,
   workoutId: number,
 ): Promise<{ absent: true } | { absent: false; body: unknown }> {
-  const response = await client.fetch(
-    `/v1/workouts/${workoutId}/workout_summary`,
-  );
+  const response = await client.fetch(`/v1/workouts/${workoutId}/workout_summary`);
   // A workout that was planned but never recorded has no summary. Wahoo
   // answers for one with either a 404 or a 401. The client hands a 401 on a
   // live token straight back, so this one belongs to the workout.
@@ -123,10 +113,7 @@ async function fetchSummary(
     return { absent: true };
   }
   if (response.status === 429) {
-    throw new RateLimitedError(
-      "rate limited on /v1/workouts/:id/summary",
-      retryAfterS(response),
-    );
+    throw new RateLimitedError("rate limited on /v1/workouts/:id/summary", retryAfterS(response));
   }
   if (!response.ok) {
     throw new Error(
@@ -138,10 +125,7 @@ async function fetchSummary(
 
 // A webhook message carries its summary, so only a backfill message can reach
 // the skip with a workout to explain it.
-function skipOutcome(
-  message: WahooIngestMessage,
-  missing: MissingSummary,
-): string {
+function skipOutcome(message: WahooIngestMessage, missing: MissingSummary): string {
   if (missing === "unreadable") {
     return "skipped: summary returned but unreadable";
   }
@@ -175,9 +159,7 @@ export async function consumeWahooEvent(
   if (fileUrl !== null) {
     const download = await fetch(fileUrl);
     if (!download.ok) {
-      throw new Error(
-        `Wahoo FIT download failed for workout ${workoutId}: ${download.status}`,
-      );
+      throw new Error(`Wahoo FIT download failed for workout ${workoutId}: ${download.status}`);
     }
     fitBytes = new Uint8Array(await download.arrayBuffer());
   }
@@ -191,11 +173,7 @@ export async function consumeWahooEvent(
 
   await upsertSourceRecord(
     env.REGISTRY,
-    summarySourceRecord(
-      summary,
-      await resolveTimezone(env, summary, fitBytes),
-      rawKeys,
-    ),
+    summarySourceRecord(summary, await resolveTimezone(env, summary, fitBytes), rawKeys),
   );
 
   return fitBytes === null ? "ok: summary only, no file" : undefined;

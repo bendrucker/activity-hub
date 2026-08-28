@@ -11,11 +11,7 @@ import {
 import { decodeClient, type DecodeClient } from "./container";
 import { enqueueTransform } from "./enqueue";
 import type { DecodeOutcome, DecodeWork } from "./protocol";
-import {
-  publishToSite,
-  type PublishOptions,
-  type PublishResult,
-} from "./publish";
+import { publishToSite, type PublishOptions, type PublishResult } from "./publish";
 
 export interface TransformMessage {
   activityId: string;
@@ -140,9 +136,7 @@ export async function consumeTransformBatch(
   try {
     const client = options.client ?? decodeClient(env);
     const response = await client.decode({ work });
-    outcomes = new Map(
-      response.outcomes.map((outcome) => [outcome.activityId, outcome]),
-    );
+    outcomes = new Map(response.outcomes.map((outcome) => [outcome.activityId, outcome]));
   } catch (error) {
     // The container is unreachable or answered non-2xx, so nothing here is
     // evidence about any single activity. The whole batch goes back.
@@ -157,9 +151,7 @@ export async function consumeTransformBatch(
   for (const item of pending.values()) {
     const outcome = outcomes.get(item.activityId);
     if (outcome === undefined) {
-      console.error(
-        `decode container returned no outcome for ${item.activityId}`,
-      );
+      console.error(`decode container returned no outcome for ${item.activityId}`);
       retryAll(item, summary);
       continue;
     }
@@ -287,8 +279,7 @@ function derivedOutcome(item: Pending, outcome: DecodeOutcome): DerivedOutcome {
         // Non-fatal decode errors ride along on a successful row. A device
         // that died mid-ride still produced usable rows, and the note is what
         // explains a short one later.
-        error:
-          outcome.errors.length > 0 ? outcome.errors.join("; ") : undefined,
+        error: outcome.errors.length > 0 ? outcome.errors.join("; ") : undefined,
       };
     case "failed":
       return { ...base, status: "failed", error: outcome.error };

@@ -11,24 +11,16 @@ const CSV = `Activity ID,Activity Date,Activity Name,Activity Type,Elapsed Time,
 
 describe("parseExportDate", () => {
   it("parses export dates as UTC", () => {
-    expect(parseExportDate("Jul 15, 2026, 1:11:54 PM")).toBe(
-      "2026-07-15T13:11:54.000Z",
-    );
+    expect(parseExportDate("Jul 15, 2026, 1:11:54 PM")).toBe("2026-07-15T13:11:54.000Z");
   });
 
   it("handles the 12 o'clock edge cases", () => {
-    expect(parseExportDate("Jan 1, 2020, 12:00:00 AM")).toBe(
-      "2020-01-01T00:00:00.000Z",
-    );
-    expect(parseExportDate("Jan 1, 2020, 12:30:00 PM")).toBe(
-      "2020-01-01T12:30:00.000Z",
-    );
+    expect(parseExportDate("Jan 1, 2020, 12:00:00 AM")).toBe("2020-01-01T00:00:00.000Z");
+    expect(parseExportDate("Jan 1, 2020, 12:30:00 PM")).toBe("2020-01-01T12:30:00.000Z");
   });
 
   it("throws on unrecognized formats", () => {
-    expect(() => parseExportDate("2026-07-15T13:11:54Z")).toThrow(
-      "unparseable activity date",
-    );
+    expect(() => parseExportDate("2026-07-15T13:11:54Z")).toThrow("unparseable activity date");
   });
 });
 
@@ -53,11 +45,7 @@ describe("parseActivitiesCsv", () => {
 
   it("normalizes display sport names to API sport types", () => {
     const rows = parseActivitiesCsv(CSV);
-    expect(rows.map((row) => row.sportType)).toEqual([
-      "Ride",
-      "VirtualRide",
-      "EBikeRide",
-    ]);
+    expect(rows.map((row) => row.sportType)).toEqual(["Ride", "VirtualRide", "EBikeRide"]);
   });
 
   it("handles rows without files and multiple media entries", () => {

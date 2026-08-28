@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  durationS,
-  summarySourceRecord,
-  syncStub,
-  type WahooWorkoutSummary,
-} from "./summary";
+import { durationS, summarySourceRecord, syncStub, type WahooWorkoutSummary } from "./summary";
 
 const SUMMARY: WahooWorkoutSummary = {
   id: 8297,
@@ -24,9 +19,7 @@ describe("durationS", () => {
   });
 
   it("falls back to workout minutes when the accumulator is absent", () => {
-    expect(durationS({ ...SUMMARY, duration_total_accum: undefined })).toBe(
-      720,
-    );
+    expect(durationS({ ...SUMMARY, duration_total_accum: undefined })).toBe(720);
   });
 });
 

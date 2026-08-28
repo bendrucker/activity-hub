@@ -7,11 +7,7 @@ import { SECRETS } from "../../test/secrets";
 import { RateLimitedError, type StravaIngestMessage } from "../ingest";
 import { tokenBroker } from "../tokens/broker";
 import { StravaClient } from "./client";
-import {
-  LOOKBACK_OVERLAP_S,
-  PER_PAGE,
-  reconcileStravaActivities,
-} from "./reconcile";
+import { LOOKBACK_OVERLAP_S, PER_PAGE, reconcileStravaActivities } from "./reconcile";
 
 function testEnv(queue: QueueStub<StravaIngestMessage>): Env {
   return {
@@ -33,10 +29,7 @@ function listResponse(ids: number[]): Response {
   return new Response(JSON.stringify(ids.map((id) => ({ id }))));
 }
 
-async function insertStravaSource(
-  sourceId: string,
-  startedAt: string,
-): Promise<void> {
+async function insertStravaSource(sourceId: string, startedAt: string): Promise<void> {
   const now = new Date().toISOString();
   await env.REGISTRY.batch([
     env.REGISTRY.prepare(
@@ -138,9 +131,7 @@ describe("reconcileStravaActivities", () => {
       client: apiClient(stub),
     });
 
-    expect(queue.messages).toEqual([
-      { source: "strava", kind: "refresh", objectId: 102 },
-    ]);
+    expect(queue.messages).toEqual([{ source: "strava", kind: "refresh", objectId: 102 }]);
     expect(report).toEqual({ enqueued: 0, refreshed: 1 });
   });
 

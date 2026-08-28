@@ -8,9 +8,7 @@ import type {
   PublishRequest,
 } from "../src/transform/protocol";
 
-export function routes(
-  deps: DecodeDeps & PublishDeps & { runner: LakeRunner },
-) {
+export function routes(deps: DecodeDeps & PublishDeps & { runner: LakeRunner }) {
   return {
     "/health": () => new Response("ok"),
     "/decode": {
@@ -28,16 +26,10 @@ export function routes(
 // One activity per request, so the outcome carries the failure the same way a
 // decode outcome does and the Worker never retries a whole batch for one bad
 // artifact.
-export async function publish(
-  request: Request,
-  deps: PublishDeps,
-): Promise<Response> {
+export async function publish(request: Request, deps: PublishDeps): Promise<Response> {
   const parsed = parsePublishRequest(await body(request));
   if (parsed === null) {
-    return Response.json(
-      { error: "expected { work: { activityId, decode } }" },
-      { status: 400 },
-    );
+    return Response.json({ error: "expected { work: { activityId, decode } }" }, { status: 400 });
   }
   return Response.json(await publishActivity(parsed, deps));
 }
@@ -47,10 +39,7 @@ export async function publish(
 // the library's in-flight counter and holds the container awake for hours. So
 // the route only accepts: the build runs in the background and the outcome
 // lands in R2 as the build summary.
-export async function lake(
-  request: Request,
-  runner: LakeRunner,
-): Promise<Response> {
+export async function lake(request: Request, runner: LakeRunner): Promise<Response> {
   const parsed = parseLakeRequest(await body(request));
   if (parsed === null) {
     return Response.json(
@@ -66,16 +55,10 @@ export async function lake(
 // container can attribute to a single activity comes back as that activity's
 // outcome instead, because the Worker retries the whole batch on any other
 // status.
-export async function decode(
-  request: Request,
-  deps: DecodeDeps,
-): Promise<Response> {
+export async function decode(request: Request, deps: DecodeDeps): Promise<Response> {
   const parsed = parseDecodeRequest(await body(request));
   if (parsed === null) {
-    return Response.json(
-      { error: "expected { work: DecodeWork[] }" },
-      { status: 400 },
-    );
+    return Response.json({ error: "expected { work: DecodeWork[] }" }, { status: 400 });
   }
   return Response.json(await decodeBatch(parsed, deps));
 }
@@ -92,10 +75,7 @@ function parseLakeRequest(body: unknown): LakeRequest | null {
   if (typeof body !== "object" || body === null) {
     return null;
   }
-  const { decode, registry, stravaExport, output } = body as Record<
-    string,
-    unknown
-  >;
+  const { decode, registry, stravaExport, output } = body as Record<string, unknown>;
   if (
     typeof decode !== "string" ||
     typeof registry !== "string" ||

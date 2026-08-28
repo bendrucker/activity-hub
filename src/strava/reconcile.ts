@@ -1,9 +1,4 @@
-import {
-  RateLimitedError,
-  sendBatched,
-  type IngestMessage,
-  retryAfterS,
-} from "../ingest";
+import { RateLimitedError, sendBatched, type IngestMessage, retryAfterS } from "../ingest";
 import { stravaClient, type StravaClient } from "./client";
 
 // Activities can be uploaded long after they were recorded, so listing from
@@ -96,23 +91,15 @@ async function listPage(
   }
   const response = await client.fetch(`/athlete/activities?${params}`);
   if (response.status === 429) {
-    throw new RateLimitedError(
-      "rate limited on /athlete/activities",
-      retryAfterS(response),
-    );
+    throw new RateLimitedError("rate limited on /athlete/activities", retryAfterS(response));
   }
   if (!response.ok) {
-    throw new Error(
-      `Strava activity list failed: ${response.status} ${await response.text()}`,
-    );
+    throw new Error(`Strava activity list failed: ${response.status} ${await response.text()}`);
   }
   return (await response.json()) as StravaActivitySummary[];
 }
 
-async function knownIds(
-  db: D1Database,
-  activities: StravaActivitySummary[],
-): Promise<Set<string>> {
+async function knownIds(db: D1Database, activities: StravaActivitySummary[]): Promise<Set<string>> {
   if (activities.length === 0) {
     return new Set();
   }

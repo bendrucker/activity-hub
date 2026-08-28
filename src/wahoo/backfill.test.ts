@@ -46,10 +46,7 @@ function summaryPayload(id: number) {
   };
 }
 
-function listResponse(
-  workouts: unknown[],
-  perPage: number = PER_PAGE,
-): Response {
+function listResponse(workouts: unknown[], perPage: number = PER_PAGE): Response {
   return new Response(
     JSON.stringify({
       workouts,
@@ -63,9 +60,7 @@ function listResponse(
 }
 
 function fullPage(page: number): unknown[] {
-  return Array.from({ length: PER_PAGE }, (_, index) =>
-    workout(page * 100 + index),
-  );
+  return Array.from({ length: PER_PAGE }, (_, index) => workout(page * 100 + index));
 }
 
 function requestedPage(request: Request): number {
@@ -136,9 +131,7 @@ describe("backfillWahooWorkouts", () => {
   });
 
   it("enqueues a workout whose list entry carries no summary at all", async () => {
-    const stub = stubFetch(() =>
-      listResponse([workout(101, { summary: false })]),
-    );
+    const stub = stubFetch(() => listResponse([workout(101, { summary: false })]));
     const queue = stubQueue<WahooIngestMessage>();
 
     const result = await backfillWahooWorkouts(testEnv(queue), {
@@ -165,9 +158,7 @@ describe("backfillWahooWorkouts", () => {
   });
 
   it("reports the next page when a full page ends the run's page budget", async () => {
-    const stub = stubFetch((request) =>
-      listResponse(fullPage(requestedPage(request))),
-    );
+    const stub = stubFetch((request) => listResponse(fullPage(requestedPage(request))));
     const queue = stubQueue<WahooIngestMessage>();
 
     const result = await backfillWahooWorkouts(testEnv(queue), {
@@ -179,21 +170,16 @@ describe("backfillWahooWorkouts", () => {
     expect(result.workoutsSeen).toBe(PER_PAGE * 2);
     expect(result.done).toBe(false);
     expect(result.nextPage).toBe(3);
-    expect(stub.requests.map((request) => requestedPage(request))).toEqual([
-      1, 2,
-    ]);
+    expect(stub.requests.map((request) => requestedPage(request))).toEqual([1, 2]);
   });
 
   it("resumes from the requested page", async () => {
     const stub = stubFetch(() => listResponse([workout(101)]));
 
-    const result = await backfillWahooWorkouts(
-      testEnv(stubQueue<WahooIngestMessage>()),
-      {
-        client: apiClient(stub),
-        page: 7,
-      },
-    );
+    const result = await backfillWahooWorkouts(testEnv(stubQueue<WahooIngestMessage>()), {
+      client: apiClient(stub),
+      page: 7,
+    });
 
     expect(requestedPage(stub.requests[0]!)).toBe(7);
     expect(result.done).toBe(true);
@@ -223,9 +209,7 @@ describe("backfillWahooWorkouts", () => {
   });
 
   it("fetches one page per run so a full page stays inside the subrequest cap", async () => {
-    const stub = stubFetch((request) =>
-      listResponse(fullPage(requestedPage(request))),
-    );
+    const stub = stubFetch((request) => listResponse(fullPage(requestedPage(request))));
     const queue = stubQueue<WahooIngestMessage>();
 
     const result = await backfillWahooWorkouts(testEnv(queue), {

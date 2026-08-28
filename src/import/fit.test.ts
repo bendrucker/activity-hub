@@ -67,9 +67,7 @@ function developerField(
   };
 }
 
-function developerDataId(
-  developerDataIndex: number,
-): Encodable<DeveloperDataIdMesg> {
+function developerDataId(developerDataIndex: number): Encodable<DeveloperDataIdMesg> {
   return {
     mesgNum: DEVELOPER_DATA_ID,
     developerDataIndex,
@@ -128,22 +126,14 @@ function invalidateFloat(bytes: Uint8Array, value: number): Uint8Array {
 
   // The trailing two bytes are the file CRC over everything before them.
   const end = patched.length - 2;
-  new DataView(patched.buffer).setUint16(
-    end,
-    CrcCalculator.calculateCRC(patched, 0, end),
-    true,
-  );
+  new DataView(patched.buffer).setUint16(end, CrcCalculator.calculateCRC(patched, 0, end), true);
   return patched;
 }
 
 // Overwrites one element of an encoded uint16 array with the all-ones pattern
 // a device writes for a reading it never took. The Encoder cannot produce it:
 // it validates each element and rejects the invalid value outright.
-function invalidateArrayElement(
-  bytes: Uint8Array,
-  values: number[],
-  element: number,
-): Uint8Array {
+function invalidateArrayElement(bytes: Uint8Array, values: number[], element: number): Uint8Array {
   const needle = new Uint8Array(values.length * 2);
   const write = new DataView(needle.buffer);
   values.forEach((value, index) => write.setUint16(index * 2, value, true));
@@ -159,11 +149,7 @@ function invalidateArrayElement(
 
   // The trailing two bytes are the file CRC over everything before them.
   const end = patched.length - 2;
-  new DataView(patched.buffer).setUint16(
-    end,
-    CrcCalculator.calculateCRC(patched, 0, end),
-    true,
-  );
+  new DataView(patched.buffer).setUint16(end, CrcCalculator.calculateCRC(patched, 0, end), true);
   return patched;
 }
 
@@ -219,11 +205,7 @@ describe("decodeFit", () => {
         { mesgNum: RECORD, timestamp: START, heartRate: 100 },
       ]),
     );
-    expect(activity.records.map((record) => record.cadence)).toEqual([
-      90.5,
-      80,
-      null,
-    ]);
+    expect(activity.records.map((record) => record.cadence)).toEqual([90.5, 80, null]);
   });
 
   it("prefers the enhanced variant and falls back to the base field", () => {
@@ -238,9 +220,7 @@ describe("decodeFit", () => {
   });
 
   it("leaves missing fields null rather than undefined", () => {
-    const activity = decodeFit(
-      encode([{ mesgNum: RECORD, timestamp: START, heartRate: 100 }]),
-    );
+    const activity = decodeFit(encode([{ mesgNum: RECORD, timestamp: START, heartRate: 100 }]));
     const record = activity.records[0];
     expect(record?.power).toBeNull();
     expect(record?.distance).toBeNull();
@@ -463,10 +443,7 @@ describe("decodeFit developer fields", () => {
             developerFields: { 0: 1.5, 1: 2.5 },
           },
         ],
-        [
-          developerField(0, 0, "smoothness"),
-          developerField(2, 0, "smoothness"),
-        ],
+        [developerField(0, 0, "smoothness"), developerField(2, 0, "smoothness")],
       ),
     );
 
@@ -485,10 +462,7 @@ describe("decodeFit developer fields", () => {
   });
 
   it("collapses a descriptor block declared three times over", () => {
-    const block = [
-      developerField(0, 0, "calibration"),
-      developerField(1, 0, "charge"),
-    ];
+    const block = [developerField(0, 0, "calibration"), developerField(1, 0, "charge")];
     const activity = decodeFit(
       encode(
         [
@@ -504,10 +478,7 @@ describe("decodeFit developer fields", () => {
     );
 
     expect(activity.errors).toEqual([]);
-    expect(activity.developerFields.map((field) => field.name)).toEqual([
-      "calibration",
-      "charge",
-    ]);
+    expect(activity.developerFields.map((field) => field.name)).toEqual(["calibration", "charge"]);
     expect(activity.records[0]?.developer_fields).toEqual({
       calibration: 1.5,
       charge: 2.5,
@@ -526,9 +497,7 @@ describe("decodeFit developer fields", () => {
     expect(activity.errors).toEqual([
       "developer field key 0 redeclared as charge, keeping calibration",
     ]);
-    expect(activity.developerFields.map((field) => field.name)).toEqual([
-      "calibration",
-    ]);
+    expect(activity.developerFields.map((field) => field.name)).toEqual(["calibration"]);
     expect(activity.records[0]?.developer_fields).toEqual({
       calibration: 1.5,
     });
@@ -622,9 +591,11 @@ describe("decodeFit developer fields", () => {
       zone_seconds: [10, null, 30],
     });
     const zoneSeconds = activity.records[0]?.developer_fields?.zone_seconds;
-    expect(
-      Array.isArray(zoneSeconds) ? zoneSeconds.map((item) => typeof item) : [],
-    ).toEqual(["number", "object", "number"]);
+    expect(Array.isArray(zoneSeconds) ? zoneSeconds.map((item) => typeof item) : []).toEqual([
+      "number",
+      "object",
+      "number",
+    ]);
   });
 });
 
@@ -703,16 +674,11 @@ describe("decodeFit missing values", () => {
 
 describe("decodeFit failures", () => {
   it("rejects bytes that are not a FIT file", () => {
-    expect(() => decodeFit(new TextEncoder().encode("not fit"))).toThrow(
-      "not a FIT file",
-    );
+    expect(() => decodeFit(new TextEncoder().encode("not fit"))).toThrow("not a FIT file");
   });
 
   it("keeps the records of a truncated file and reports the decode error", () => {
-    const bytes = encode([
-      FULL_RECORD,
-      { mesgNum: RECORD, timestamp: START, heartRate: 141 },
-    ]);
+    const bytes = encode([FULL_RECORD, { mesgNum: RECORD, timestamp: START, heartRate: 141 }]);
     const activity = decodeFit(bytes.slice(0, -2));
     expect(activity.records).toHaveLength(2);
     expect(activity.errors).toHaveLength(1);

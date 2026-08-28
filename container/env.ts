@@ -23,9 +23,7 @@ const LAKE_SECRET_ACCESS_KEY = "R2_LAKE_SECRET_ACCESS_KEY";
 // Reports every missing name at once. A container that starts without
 // credentials fails every batch it is handed, so this runs before the listener
 // opens and the process exits rather than serving.
-export function readConfig(
-  env: Record<string, string | undefined>,
-): ContainerConfig {
+export function readConfig(env: Record<string, string | undefined>): ContainerConfig {
   const missing = [
     ACCOUNT_ID,
     RAW_ACCESS_KEY_ID,
@@ -55,10 +53,7 @@ export function endpoint(accountId: string): string {
   return `https://${accountId}.r2.cloudflarestorage.com`;
 }
 
-function required(
-  env: Record<string, string | undefined>,
-  name: string,
-): string {
+function required(env: Record<string, string | undefined>, name: string): string {
   const value = env[name];
   if (!value) {
     throw new Error(`missing container environment: ${name}`);

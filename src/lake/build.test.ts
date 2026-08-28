@@ -39,9 +39,7 @@ it("picks the newest archived export", async () => {
   await seedExport("2025-01-01");
   await seedExport("2026-07-16");
 
-  expect(await latestExportCsv(env.RAW)).toBe(
-    "raw/strava/export/2026-07-16/activities.csv",
-  );
+  expect(await latestExportCsv(env.RAW)).toBe("raw/strava/export/2026-07-16/activities.csv");
 });
 
 // A partial upload leaves the activity files under a dated prefix with no CSV.
@@ -66,8 +64,7 @@ it("hands the container S3 URIs for every source", async () => {
   expect(lake.build).toHaveBeenCalledWith({
     decode: "s3://activity-hub-lake/decode/v1",
     registry: `s3://activity-hub-lake/${result.registry.key}`,
-    stravaExport:
-      "s3://activity-hub-raw/raw/strava/export/2026-07-16/activities.csv",
+    stravaExport: "s3://activity-hub-raw/raw/strava/export/2026-07-16/activities.csv",
     output: "s3://activity-hub-lake/lake/v1",
   });
   // The snapshot key is unique per run so a trigger that arrives while a
@@ -85,7 +82,5 @@ it("builds with a null export rather than refusing to run", async () => {
 
   await buildLake(testEnv, { client: lake });
 
-  expect(lake.build).toHaveBeenCalledWith(
-    expect.objectContaining({ stravaExport: null }),
-  );
+  expect(lake.build).toHaveBeenCalledWith(expect.objectContaining({ stravaExport: null }));
 });

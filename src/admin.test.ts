@@ -16,12 +16,7 @@ import {
   handleWahooIngest,
   handleWahooProbe,
 } from "./admin";
-import {
-  ARTIFACT_VERSION,
-  MAX_ATTEMPTS,
-  type DerivedStatus,
-  type Stage,
-} from "./derived";
+import { ARTIFACT_VERSION, MAX_ATTEMPTS, type DerivedStatus, type Stage } from "./derived";
 import type { StravaIngestMessage, WahooIngestMessage } from "./ingest";
 import type { LakeClient } from "./transform/container";
 import { LAKE_BUILD_SUMMARY_KEY, type LakeStart } from "./transform/protocol";
@@ -67,10 +62,7 @@ function reconcileRequest(authorization?: string): Request {
   });
 }
 
-function stravaBackfillRequest(
-  authorization?: string,
-  cursor?: string,
-): Request {
+function stravaBackfillRequest(authorization?: string, cursor?: string): Request {
   const url = new URL("https://hub.example/admin/strava-backfill");
   if (cursor !== undefined) {
     url.searchParams.set("cursor", cursor);
@@ -138,10 +130,7 @@ beforeEach(async () => {
 
 describe("handleStravaBackfill", () => {
   it("rejects a request without an Authorization header", async () => {
-    const response = await handleStravaBackfill(
-      stravaBackfillRequest(),
-      testEnv(),
-    );
+    const response = await handleStravaBackfill(stravaBackfillRequest(), testEnv());
     expect(response.status).toBe(403);
   });
 
@@ -168,9 +157,7 @@ describe("handleStravaBackfill", () => {
       remaining: 1,
       done: true,
     });
-    expect(queue.messages).toEqual([
-      { source: "strava", kind: "refresh", objectId: 101 },
-    ]);
+    expect(queue.messages).toEqual([{ source: "strava", kind: "refresh", objectId: 101 }]);
   });
 
   it("passes the cursor through", async () => {
@@ -186,11 +173,7 @@ describe("handleStravaBackfill", () => {
   });
 });
 
-function photoBackfillRequest(
-  authorization?: string,
-  limit?: string,
-  body?: unknown,
-): Request {
+function photoBackfillRequest(authorization?: string, limit?: string, body?: unknown): Request {
   const url = new URL("https://hub.example/admin/photo-backfill");
   if (limit !== undefined) {
     url.searchParams.set("limit", limit);
@@ -216,10 +199,7 @@ describe("handlePhotoBackfill", () => {
   });
 
   it("rejects a request without an Authorization header", async () => {
-    const response = await handlePhotoBackfill(
-      photoBackfillRequest(),
-      testEnv(),
-    );
+    const response = await handlePhotoBackfill(photoBackfillRequest(), testEnv());
     expect(response.status).toBe(403);
   });
 
@@ -237,9 +217,7 @@ describe("handlePhotoBackfill", () => {
       remaining: 1,
       done: true,
     });
-    expect(queue.messages).toEqual([
-      { source: "strava", kind: "refresh", objectId: 101 },
-    ]);
+    expect(queue.messages).toEqual([{ source: "strava", kind: "refresh", objectId: 101 }]);
   });
 
   // Every activity swept costs a call to an undocumented endpoint, so the
@@ -295,9 +273,7 @@ describe("handlePhotoBackfill", () => {
       remaining: 2,
       done: true,
     });
-    expect(queue.messages).toEqual([
-      { source: "strava", kind: "refresh", objectId: 102 },
-    ]);
+    expect(queue.messages).toEqual([{ source: "strava", kind: "refresh", objectId: 102 }]);
   });
 
   // `IN` matches a repeated id once, so counting skipped against the raw list
@@ -318,9 +294,7 @@ describe("handlePhotoBackfill", () => {
       remaining: 1,
       done: true,
     });
-    expect(queue.messages).toEqual([
-      { source: "strava", kind: "refresh", objectId: 101 },
-    ]);
+    expect(queue.messages).toEqual([{ source: "strava", kind: "refresh", objectId: 101 }]);
   });
 
   // Re-sending a page that already landed has to cost one query rather than a
@@ -465,10 +439,7 @@ describe("handleReconcile", () => {
   });
 
   it("rejects a wrong token", async () => {
-    const response = await handleReconcile(
-      reconcileRequest("Bearer wrong"),
-      testEnv(),
-    );
+    const response = await handleReconcile(reconcileRequest("Bearer wrong"), testEnv());
     expect(response.status).toBe(403);
   });
 
@@ -496,9 +467,7 @@ describe("handleReconcile", () => {
       enqueued: 2,
       refreshed: 0,
     });
-    expect(queue.messages.map((message) => message.objectId)).toEqual([
-      101, 102,
-    ]);
+    expect(queue.messages.map((message) => message.objectId)).toEqual([101, 102]);
   });
 
   it("counts a known activity as refreshed rather than enqueued", async () => {
@@ -513,11 +482,9 @@ describe("handleReconcile", () => {
     ]);
     const stub = stubFetch(() => listResponse([101, 102]));
 
-    const response = await handleReconcile(
-      reconcileRequest("Bearer admin-secret"),
-      testEnv(),
-      { client: apiClient(stub) },
-    );
+    const response = await handleReconcile(reconcileRequest("Bearer admin-secret"), testEnv(), {
+      client: apiClient(stub),
+    });
 
     expect(await response.json()).toEqual({
       ok: true,
@@ -529,11 +496,9 @@ describe("handleReconcile", () => {
   it("reports a Strava rate limit as a 429", async () => {
     const stub = stubFetch(() => new Response("slow down", { status: 429 }));
 
-    const response = await handleReconcile(
-      reconcileRequest("Bearer admin-secret"),
-      testEnv(),
-      { client: apiClient(stub) },
-    );
+    const response = await handleReconcile(reconcileRequest("Bearer admin-secret"), testEnv(), {
+      client: apiClient(stub),
+    });
 
     expect(response.status).toBe(429);
     expect(await response.text()).toContain("rate limited");
@@ -542,11 +507,9 @@ describe("handleReconcile", () => {
   it("returns the failure to the caller instead of throwing", async () => {
     const stub = stubFetch(() => new Response("boom", { status: 500 }));
 
-    const response = await handleReconcile(
-      reconcileRequest("Bearer admin-secret"),
-      testEnv(),
-      { client: apiClient(stub) },
-    );
+    const response = await handleReconcile(reconcileRequest("Bearer admin-secret"), testEnv(), {
+      client: apiClient(stub),
+    });
 
     expect(response.status).toBe(500);
     const body = (await response.json()) as {
@@ -567,10 +530,7 @@ describe("handleWahooBackfill", () => {
   });
 
   it("rejects a wrong token", async () => {
-    const response = await handleWahooBackfill(
-      backfillRequest("Bearer wrong"),
-      testEnv(),
-    );
+    const response = await handleWahooBackfill(backfillRequest("Bearer wrong"), testEnv());
     expect(response.status).toBe(403);
   });
 
@@ -608,9 +568,7 @@ describe("handleWahooBackfill", () => {
       oldestStartedAt: "2026-07-01T00:00:00.000Z",
       done: true,
     });
-    expect(queue.messages.map((message) => message.workoutId)).toEqual([
-      101, 102,
-    ]);
+    expect(queue.messages.map((message) => message.workoutId)).toEqual([101, 102]);
   });
 
   it("hands the caller the next page when the run stops short of the end", async () => {
@@ -635,11 +593,9 @@ describe("handleWahooBackfill", () => {
   it("reports a Wahoo rate limit as a 429", async () => {
     const stub = stubFetch(() => new Response("slow down", { status: 429 }));
 
-    const response = await handleWahooBackfill(
-      backfillRequest("Bearer admin-secret"),
-      testEnv(),
-      { client: wahooApiClient(stub) },
-    );
+    const response = await handleWahooBackfill(backfillRequest("Bearer admin-secret"), testEnv(), {
+      client: wahooApiClient(stub),
+    });
 
     expect(response.status).toBe(429);
     expect(await response.text()).toContain("rate limited");
@@ -648,11 +604,9 @@ describe("handleWahooBackfill", () => {
   it("returns the failure to the caller instead of throwing", async () => {
     const stub = stubFetch(() => new Response("boom", { status: 500 }));
 
-    const response = await handleWahooBackfill(
-      backfillRequest("Bearer admin-secret"),
-      testEnv(),
-      { client: wahooApiClient(stub) },
-    );
+    const response = await handleWahooBackfill(backfillRequest("Bearer admin-secret"), testEnv(), {
+      client: wahooApiClient(stub),
+    });
 
     expect(response.status).toBe(500);
     const body = (await response.json()) as { ok: boolean; error: string };
@@ -678,10 +632,7 @@ describe("handleWahooProbe", () => {
   });
 
   it("rejects a workout that is not a positive integer", async () => {
-    const response = await handleWahooProbe(
-      probeRequest("Bearer admin-secret", "abc"),
-      testEnv(),
-    );
+    const response = await handleWahooProbe(probeRequest("Bearer admin-secret", "abc"), testEnv());
     expect(response.status).toBe(400);
   });
 
@@ -693,20 +644,14 @@ describe("handleWahooProbe", () => {
       workout_type_id: 0,
     };
     const stub = stubFetch((input) =>
-      String(input instanceof Request ? input.url : input).endsWith(
-        "/workout_summary",
-      )
-        ? new Response(
-            JSON.stringify({ id: 1010, file: { url: "https://cdn/101.fit" } }),
-          )
+      String(input instanceof Request ? input.url : input).endsWith("/workout_summary")
+        ? new Response(JSON.stringify({ id: 1010, file: { url: "https://cdn/101.fit" } }))
         : new Response(JSON.stringify(workout)),
     );
 
-    const response = await handleWahooProbe(
-      probeRequest("Bearer admin-secret", "101"),
-      testEnv(),
-      { client: wahooApiClient(stub) },
-    );
+    const response = await handleWahooProbe(probeRequest("Bearer admin-secret", "101"), testEnv(), {
+      client: wahooApiClient(stub),
+    });
 
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
@@ -722,11 +667,9 @@ describe("handleWahooProbe", () => {
   it("passes through an upstream error status with its body", async () => {
     const stub = stubFetch(() => new Response("Not Found", { status: 404 }));
 
-    const response = await handleWahooProbe(
-      probeRequest("Bearer admin-secret", "101"),
-      testEnv(),
-      { client: wahooApiClient(stub) },
-    );
+    const response = await handleWahooProbe(probeRequest("Bearer admin-secret", "101"), testEnv(), {
+      client: wahooApiClient(stub),
+    });
 
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
@@ -856,10 +799,7 @@ describe("handlePipeline", () => {
     });
   }
 
-  async function seedActivity(
-    activityId: string,
-    sourceUpdatedAt: string,
-  ): Promise<void> {
+  async function seedActivity(activityId: string, sourceUpdatedAt: string): Promise<void> {
     await env.REGISTRY.batch([
       env.REGISTRY.prepare(
         `INSERT INTO activities (activity_id, started_at, timezone, sport, duration_s, created_at, updated_at)
@@ -909,18 +849,12 @@ describe("handlePipeline", () => {
   });
 
   it("rejects a wrong token", async () => {
-    const response = await handlePipeline(
-      pipelineRequest("Bearer wrong"),
-      testEnv(),
-    );
+    const response = await handlePipeline(pipelineRequest("Bearer wrong"), testEnv());
     expect(response.status).toBe(403);
   });
 
   it("reports every stage as zero when nothing has been derived", async () => {
-    const response = await handlePipeline(
-      pipelineRequest("Bearer admin-secret"),
-      testEnv(),
-    );
+    const response = await handlePipeline(pipelineRequest("Bearer admin-secret"), testEnv());
 
     expect(response.status).toBe(200);
     const body = (await response.json()) as PipelineBody;
@@ -965,10 +899,7 @@ describe("handlePipeline", () => {
     });
     await seedDerived({ activityId: "a1", stage: "lake", status: "skipped" });
 
-    const response = await handlePipeline(
-      pipelineRequest("Bearer admin-secret"),
-      testEnv(),
-    );
+    const response = await handlePipeline(pipelineRequest("Bearer admin-secret"), testEnv());
 
     expect(response.status).toBe(200);
     const body = (await response.json()) as PipelineBody;
@@ -1021,10 +952,7 @@ describe("handlePipeline", () => {
       error: "no decodable raw key",
     });
 
-    const response = await handlePipeline(
-      pipelineRequest("Bearer admin-secret"),
-      testEnv(),
-    );
+    const response = await handlePipeline(pipelineRequest("Bearer admin-secret"), testEnv());
 
     const body = (await response.json()) as PipelineBody;
     const decode = stageOf(body, "decode");
@@ -1038,16 +966,10 @@ describe("handlePipeline", () => {
     await seedActivity("a1", OLDEST);
     const expected = Math.round((Date.now() - Date.parse(OLDEST)) / 1000);
 
-    const response = await handlePipeline(
-      pipelineRequest("Bearer admin-secret"),
-      testEnv(),
-    );
+    const response = await handlePipeline(pipelineRequest("Bearer admin-secret"), testEnv());
 
     const body = (await response.json()) as PipelineBody;
-    expect(stageOf(body, "decode").oldestStale?.behindS).toBeCloseTo(
-      expected,
-      -1,
-    );
+    expect(stageOf(body, "decode").oldestStale?.behindS).toBeCloseTo(expected, -1);
   });
 });
 
@@ -1074,11 +996,9 @@ describe("handleLake", () => {
 
   it("starts a build and answers with the accept", async () => {
     const startedAt = "2026-08-27T08:00:00.000Z";
-    const response = await handleLake(
-      lakeRequest("POST", "Bearer admin-secret"),
-      testEnv(),
-      { client: stubClient({ accepted: true, startedAt }) },
-    );
+    const response = await handleLake(lakeRequest("POST", "Bearer admin-secret"), testEnv(), {
+      client: stubClient({ accepted: true, startedAt }),
+    });
 
     expect(response.status).toBe(202);
     const body = (await response.json()) as Record<string, unknown>;
@@ -1088,11 +1008,9 @@ describe("handleLake", () => {
   });
 
   it("answers 409 when a build is already running", async () => {
-    const response = await handleLake(
-      lakeRequest("POST", "Bearer admin-secret"),
-      testEnv(),
-      { client: stubClient({ accepted: false }) },
-    );
+    const response = await handleLake(lakeRequest("POST", "Bearer admin-secret"), testEnv(), {
+      client: stubClient({ accepted: false }),
+    });
 
     expect(response.status).toBe(409);
     const body = (await response.json()) as Record<string, unknown>;
@@ -1107,20 +1025,14 @@ describe("handleLake", () => {
     };
     await env.LAKE.put(LAKE_BUILD_SUMMARY_KEY, JSON.stringify(summary));
 
-    const response = await handleLake(
-      lakeRequest("GET", "Bearer admin-secret"),
-      testEnv(),
-    );
+    const response = await handleLake(lakeRequest("GET", "Bearer admin-secret"), testEnv());
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, build: summary });
   });
 
   it("answers 404 before any build has written a summary", async () => {
-    const response = await handleLake(
-      lakeRequest("GET", "Bearer admin-secret"),
-      testEnv(),
-    );
+    const response = await handleLake(lakeRequest("GET", "Bearer admin-secret"), testEnv());
     expect(response.status).toBe(404);
   });
 });
@@ -1147,10 +1059,7 @@ describe("handleConsumeLog", () => {
     };
     await env.TOKENS.put("debug:consume-log", JSON.stringify([entry]));
 
-    const response = await handleConsumeLog(
-      logRequest("Bearer admin-secret"),
-      testEnv(),
-    );
+    const response = await handleConsumeLog(logRequest("Bearer admin-secret"), testEnv());
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual([entry]);

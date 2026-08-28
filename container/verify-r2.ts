@@ -14,9 +14,7 @@ import { literal } from "./sql";
 
 const [decode, registry, stravaExport, output] = process.argv.slice(2);
 if (!decode || !registry || !output) {
-  throw new Error(
-    "usage: verify-r2.ts <decode-uri> <registry-uri> <export-uri|-> <output-uri>",
-  );
+  throw new Error("usage: verify-r2.ts <decode-uri> <registry-uri> <export-uri|-> <output-uri>");
 }
 
 const configure = configureS3(readConfig(process.env));
@@ -27,8 +25,7 @@ const response = await buildLake(
     registry,
     // `-` stands in for an omitted export because the argument is positional
     // and the output URI follows it.
-    stravaExport:
-      stravaExport === undefined || stravaExport === "-" ? null : stravaExport,
+    stravaExport: stravaExport === undefined || stravaExport === "-" ? null : stravaExport,
     output,
   },
   { instance, configure },
@@ -37,9 +34,7 @@ console.log(JSON.stringify(response, null, 2));
 
 const connection = await instance.connect();
 await configure(connection);
-const activities = literal(
-  `${output.replace(/\/$/, "")}/activities/**/*.parquet`,
-);
+const activities = literal(`${output.replace(/\/$/, "")}/activities/**/*.parquet`);
 const reader = await connection.runAndReadAll(
   `SELECT telemetry_origin, telemetry_format, power_source, COUNT(*) AS activities
    FROM read_parquet(${activities})

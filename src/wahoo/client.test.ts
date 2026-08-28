@@ -1,11 +1,6 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import {
-  brokerSource,
-  brokerStub,
-  clearTokens,
-  withBroker,
-} from "../../test/broker";
+import { brokerSource, brokerStub, clearTokens, withBroker } from "../../test/broker";
 import { stubFetch, type FetchStub } from "../../test/fetch-stub";
 import type { TokenBroker } from "../tokens/broker";
 import { REFRESH_MARGIN_S, type StoredTokens } from "../tokens/source";
@@ -53,9 +48,7 @@ describe("WahooClient", () => {
     const stub = stubFetch(() => new Response("{}"));
 
     await withBroker("wahoo", async (broker) => {
-      await expect(client(broker, stub).fetch("/v1/workouts")).rejects.toThrow(
-        /auth\/wahoo/,
-      );
+      await expect(client(broker, stub).fetch("/v1/workouts")).rejects.toThrow(/auth\/wahoo/);
     });
 
     expect(stub.requests).toHaveLength(0);
@@ -114,10 +107,7 @@ describe("WahooClient", () => {
         return refreshResponse();
       }
       if (request.headers.get("Authorization") === "Bearer revoked") {
-        return Response.json(
-          { error: "Access token has been revoked" },
-          { status: 401 },
-        );
+        return Response.json({ error: "Access token has been revoked" }, { status: 401 });
       }
       return Response.json({ workouts: [] });
     });
@@ -152,9 +142,10 @@ describe("WahooClient", () => {
 
       const result = await client(broker, stub).fetch("/v1/workouts");
 
-      expect(
-        stub.requests.map((request) => request.headers.get("Authorization")),
-      ).toEqual(["Bearer stale", "Bearer rotated"]);
+      expect(stub.requests.map((request) => request.headers.get("Authorization"))).toEqual([
+        "Bearer stale",
+        "Bearer rotated",
+      ]);
       return result;
     });
 

@@ -20,8 +20,7 @@ export class WahooClient {
   constructor(private readonly config: WahooClientConfig) {
     // workerd's native fetch throws "Illegal invocation" when called with a
     // foreign `this`. An arrow wrapper keeps late binding without that risk.
-    this.transport =
-      config.fetch ?? ((input, init) => globalThis.fetch(input, init));
+    this.transport = config.fetch ?? ((input, init) => globalThis.fetch(input, init));
   }
 
   async fetch(path: string, init: RequestInit = {}): Promise<Response> {
@@ -32,8 +31,7 @@ export class WahooClient {
     }
     const current = await this.config.tokens.current();
     const live =
-      current?.accessToken === token &&
-      current.expiresAt - Date.now() / 1000 > REFRESH_MARGIN_S;
+      current?.accessToken === token && current.expiresAt - Date.now() / 1000 > REFRESH_MARGIN_S;
     if (live) {
       // Wahoo answers 401 for individual workouts even on a live token
       // (observed in production, e.g. workout 481533297, whose body reads
@@ -49,11 +47,7 @@ export class WahooClient {
     return this.request(path, init, await this.config.tokens.refresh(token));
   }
 
-  private request(
-    path: string,
-    init: RequestInit,
-    token: string,
-  ): Promise<Response> {
+  private request(path: string, init: RequestInit, token: string): Promise<Response> {
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${token}`);
     return this.transport(`${this.config.apiBase}${path}`, {

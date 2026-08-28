@@ -1,9 +1,4 @@
-import {
-  RateLimitedError,
-  sendBatched,
-  type IngestMessage,
-  retryAfterS,
-} from "../ingest";
+import { RateLimitedError, sendBatched, type IngestMessage, retryAfterS } from "../ingest";
 import { wahooClient, type WahooClient } from "./client";
 
 // /v1/workouts takes no date filters and sorts by start descending, so the
@@ -86,25 +81,17 @@ function older(current: string | null, candidate: string): string {
   return Date.parse(candidate) < Date.parse(current) ? candidate : current;
 }
 
-async function listPage(
-  client: WahooClient,
-  page: number,
-): Promise<WorkoutsPage> {
+async function listPage(client: WahooClient, page: number): Promise<WorkoutsPage> {
   const params = new URLSearchParams({
     page: String(page),
     per_page: String(PER_PAGE),
   });
   const response = await client.fetch(`/v1/workouts?${params}`);
   if (response.status === 429) {
-    throw new RateLimitedError(
-      "rate limited on /v1/workouts",
-      retryAfterS(response),
-    );
+    throw new RateLimitedError("rate limited on /v1/workouts", retryAfterS(response));
   }
   if (!response.ok) {
-    throw new Error(
-      `Wahoo workout list failed: ${response.status} ${await response.text()}`,
-    );
+    throw new Error(`Wahoo workout list failed: ${response.status} ${await response.text()}`);
   }
   const body = (await response.json()) as Partial<{
     workouts: WahooListWorkout[];
@@ -115,10 +102,7 @@ async function listPage(
   return { workouts: body.workouts ?? [], perPage: body.per_page ?? PER_PAGE };
 }
 
-async function enqueueMissing(
-  env: Env,
-  workouts: WahooListWorkout[],
-): Promise<number> {
+async function enqueueMissing(env: Env, workouts: WahooListWorkout[]): Promise<number> {
   const missing = await missingWorkouts(env.REGISTRY, workouts);
   const messages: IngestMessage[] = missing.map((entry) => {
     // The list nests a summary that never carries a file URL in practice.

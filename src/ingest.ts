@@ -24,9 +24,7 @@ export function retryAfterS(response: Response): number | undefined {
     return Math.max(0, Math.round(seconds));
   }
   const at = Date.parse(header);
-  return Number.isNaN(at)
-    ? undefined
-    : Math.max(0, Math.round((at - Date.now()) / 1000));
+  return Number.isNaN(at) ? undefined : Math.max(0, Math.round((at - Date.now()) / 1000));
 }
 
 // Strava webhook payloads carry ids only, plus the field names that changed
@@ -57,10 +55,7 @@ export interface StravaPhotosMessage {
   objectId: number;
 }
 
-export type StravaIngestMessage =
-  | StravaWebhookMessage
-  | StravaRefreshMessage
-  | StravaPhotosMessage;
+export type StravaIngestMessage = StravaWebhookMessage | StravaRefreshMessage | StravaPhotosMessage;
 
 // Wahoo webhook events carry the full workout summary, FIT file URL
 // included, so the message carries it too and the consumer never calls the
@@ -91,10 +86,7 @@ export type IngestMessage = StravaIngestMessage | WahooIngestMessage;
 // subrequest per chunk instead of one per message.
 const QUEUE_BATCH_LIMIT = 100;
 
-export async function sendBatched<T>(
-  queue: Queue<T>,
-  messages: T[],
-): Promise<void> {
+export async function sendBatched<T>(queue: Queue<T>, messages: T[]): Promise<void> {
   for (let offset = 0; offset < messages.length; offset += QUEUE_BATCH_LIMIT) {
     const chunk = messages.slice(offset, offset + QUEUE_BATCH_LIMIT);
     await queue.sendBatch(chunk.map((body) => ({ body })));

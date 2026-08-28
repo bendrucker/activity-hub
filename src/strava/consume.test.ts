@@ -64,9 +64,7 @@ const PHOTOS_MESSAGE: StravaPhotosMessage = {
   objectId: ACTIVITY_ID,
 };
 
-function message(
-  overrides: Partial<StravaIngestMessage> = {},
-): StravaIngestMessage {
+function message(overrides: Partial<StravaIngestMessage> = {}): StravaIngestMessage {
   return {
     source: "strava",
     kind: "create",
@@ -97,9 +95,7 @@ function photosPrefix(id: number): string {
   return `raw/strava/activities/${id}/photos/`;
 }
 
-async function sourceRow(
-  sourceId: string,
-): Promise<Record<string, unknown> | null> {
+async function sourceRow(sourceId: string): Promise<Record<string, unknown> | null> {
   return env.REGISTRY.prepare(
     "SELECT * FROM activity_sources WHERE source = 'strava' AND source_id = ?1",
   )
@@ -121,14 +117,10 @@ beforeEach(async () => {
   const existing = await env.RAW.list({
     prefix: `raw/strava/activities/${ACTIVITY_ID}/`,
   });
-  await Promise.all(
-    existing.objects.map((object) => env.RAW.delete(object.key)),
-  );
+  await Promise.all(existing.objects.map((object) => env.RAW.delete(object.key)));
 });
 
-function respondByPath(
-  routes: Record<string, () => Response>,
-): (request: Request) => Response {
+function respondByPath(routes: Record<string, () => Response>): (request: Request) => Response {
   return (request) => {
     const url = new URL(request.url);
     for (const [path, respond] of Object.entries(routes)) {
@@ -145,10 +137,8 @@ describe("consumeStravaEvent", () => {
     const stub = stubFetch(
       respondByPath({
         [`/api/v3/activities/${ACTIVITY_ID}`]: () => new Response(DETAIL_JSON),
-        [`/api/v3/activities/${ACTIVITY_ID}/streams`]: () =>
-          new Response(STREAMS_JSON),
-        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () =>
-          new Response(PHOTOS_JSON),
+        [`/api/v3/activities/${ACTIVITY_ID}/streams`]: () => new Response(STREAMS_JSON),
+        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () => new Response(PHOTOS_JSON),
       }),
     );
     const photoStub = stubFetch(() => new Response(new Uint8Array([1, 2, 3])));
@@ -179,9 +169,7 @@ describe("consumeStravaEvent", () => {
       }),
     });
 
-    const activity = await env.REGISTRY.prepare(
-      "SELECT * FROM activities WHERE activity_id = ?1",
-    )
+    const activity = await env.REGISTRY.prepare("SELECT * FROM activities WHERE activity_id = ?1")
       .bind(row!.activity_id as string)
       .first();
     expect(activity).toMatchObject({
@@ -198,10 +186,8 @@ describe("consumeStravaEvent", () => {
     const stub = stubFetch(
       respondByPath({
         [`/api/v3/activities/${ACTIVITY_ID}`]: () => new Response(DETAIL_JSON),
-        [`/api/v3/activities/${ACTIVITY_ID}/streams`]: () =>
-          new Response(STREAMS_JSON),
-        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () =>
-          new Response("boom", { status: 500 }),
+        [`/api/v3/activities/${ACTIVITY_ID}/streams`]: () => new Response(STREAMS_JSON),
+        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () => new Response("boom", { status: 500 }),
       }),
     );
 
@@ -251,10 +237,8 @@ describe("consumeStravaEvent", () => {
     const stub = stubFetch(
       respondByPath({
         [`/api/v3/activities/${ACTIVITY_ID}`]: () => new Response(DETAIL_JSON),
-        [`/api/v3/activities/${ACTIVITY_ID}/streams`]: () =>
-          new Response(STREAMS_JSON),
-        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () =>
-          new Response(PHOTOS_JSON),
+        [`/api/v3/activities/${ACTIVITY_ID}/streams`]: () => new Response(STREAMS_JSON),
+        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () => new Response(PHOTOS_JSON),
       }),
     );
     const photoStub = stubFetch(() => new Response(new Uint8Array([1])));
@@ -267,9 +251,9 @@ describe("consumeStravaEvent", () => {
     const secondRow = await sourceRow(String(ACTIVITY_ID));
 
     expect(secondRow!.activity_id).toBe(firstRow!.activity_id);
-    const count = await env.REGISTRY.prepare(
-      "SELECT COUNT(*) AS n FROM activities",
-    ).first<{ n: number }>();
+    const count = await env.REGISTRY.prepare("SELECT COUNT(*) AS n FROM activities").first<{
+      n: number;
+    }>();
     expect(count?.n).toBe(1);
     const storedDetail = await env.RAW.get(detailKey(ACTIVITY_ID));
     expect(await storedDetail?.text()).toBe(DETAIL_JSON);
@@ -279,10 +263,8 @@ describe("consumeStravaEvent", () => {
     const stub = stubFetch(
       respondByPath({
         [`/api/v3/activities/${ACTIVITY_ID}`]: () => new Response(DETAIL_JSON),
-        [`/api/v3/activities/${ACTIVITY_ID}/streams`]: () =>
-          new Response(STREAMS_JSON),
-        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () =>
-          new Response(PHOTOS_JSON),
+        [`/api/v3/activities/${ACTIVITY_ID}/streams`]: () => new Response(STREAMS_JSON),
+        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () => new Response(PHOTOS_JSON),
       }),
     );
     await consumeStravaEvent(message(), testEnv, { client: apiClient(stub) });
@@ -307,8 +289,7 @@ describe("consumeStravaEvent", () => {
     const stub = stubFetch(
       respondByPath({
         [`/api/v3/activities/${ACTIVITY_ID}`]: () => new Response(DETAIL_JSON),
-        [`/api/v3/activities/${ACTIVITY_ID}/streams`]: () =>
-          new Response(STREAMS_JSON),
+        [`/api/v3/activities/${ACTIVITY_ID}/streams`]: () => new Response(STREAMS_JSON),
         [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () => new Response("[]"),
       }),
     );
@@ -325,9 +306,7 @@ describe("consumeStravaEvent", () => {
     const row = await sourceRow(String(ACTIVITY_ID));
     expect(row?.deleted_at).not.toBeNull();
     expect(await env.RAW.get(detailKey(ACTIVITY_ID))).not.toBeNull();
-    const activity = await env.REGISTRY.prepare(
-      "SELECT * FROM activities WHERE activity_id = ?1",
-    )
+    const activity = await env.REGISTRY.prepare("SELECT * FROM activities WHERE activity_id = ?1")
       .bind(row!.activity_id as string)
       .first();
     expect(activity).not.toBeNull();
@@ -340,8 +319,7 @@ describe("consumeStravaEvent", () => {
     const stub = stubFetch(
       respondByPath({
         [`/api/v3/activities/${ACTIVITY_ID}`]: () => new Response(DETAIL_JSON),
-        [`/api/v3/activities/${ACTIVITY_ID}/streams`]: () =>
-          new Response(STREAMS_JSON),
+        [`/api/v3/activities/${ACTIVITY_ID}/streams`]: () => new Response(STREAMS_JSON),
         [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () => new Response("[]"),
       }),
     );
@@ -375,8 +353,7 @@ describe("consumeStravaEvent", () => {
     const stub = stubFetch(
       respondByPath({
         [`/api/v3/activities/${ACTIVITY_ID}`]: () => new Response(DETAIL_JSON),
-        [`/api/v3/activities/${ACTIVITY_ID}/streams`]: () =>
-          new Response(STREAMS_JSON),
+        [`/api/v3/activities/${ACTIVITY_ID}/streams`]: () => new Response(STREAMS_JSON),
         [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () => new Response("[]"),
       }),
     );
@@ -404,11 +381,9 @@ describe("consumeStravaEvent", () => {
       throw new Error("athlete events should not fetch");
     });
 
-    const outcome = await consumeStravaEvent(
-      message({ objectType: "athlete" }),
-      testEnv,
-      { client: apiClient(stub) },
-    );
+    const outcome = await consumeStravaEvent(message({ objectType: "athlete" }), testEnv, {
+      client: apiClient(stub),
+    });
 
     // The log entry carries the athlete id, so an unnamed outcome would read
     // as an activity that ingested cleanly.
@@ -441,8 +416,7 @@ async function seedActivity(): Promise<void> {
   const stub = stubFetch(
     respondByPath({
       [`/api/v3/activities/${ACTIVITY_ID}`]: () => new Response(DETAIL_JSON),
-      [`/api/v3/activities/${ACTIVITY_ID}/streams`]: () =>
-        new Response(STREAMS_JSON),
+      [`/api/v3/activities/${ACTIVITY_ID}/streams`]: () => new Response(STREAMS_JSON),
       [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () => new Response("[]"),
     }),
   );
@@ -509,15 +483,11 @@ describe("consumeStravaEvent on a refresh", () => {
   it("downloads a new photo and leaves the one already in R2 alone", async () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     await seedActivity();
-    await env.RAW.put(
-      `${photosPrefix(ACTIVITY_ID)}photo-1.jpg`,
-      new Uint8Array([9]),
-    );
+    await env.RAW.put(`${photosPrefix(ACTIVITY_ID)}photo-1.jpg`, new Uint8Array([9]));
     const stub = stubFetch(
       respondByPath({
         [`/api/v3/activities/${ACTIVITY_ID}`]: () => new Response(DETAIL_JSON),
-        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () =>
-          new Response(TWO_PHOTOS_JSON),
+        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () => new Response(TWO_PHOTOS_JSON),
       }),
     );
     const photoStub = stubFetch(() => new Response(new Uint8Array([1, 2, 3])));
@@ -531,12 +501,8 @@ describe("consumeStravaEvent on a refresh", () => {
       "https://cdn.example/photo-2-5000.jpg",
     ]);
     const kept = await env.RAW.get(`${photosPrefix(ACTIVITY_ID)}photo-1.jpg`);
-    expect(new Uint8Array(await kept!.arrayBuffer())).toEqual(
-      new Uint8Array([9]),
-    );
-    expect(
-      await env.RAW.head(`${photosPrefix(ACTIVITY_ID)}photo-2.jpg`),
-    ).not.toBeNull();
+    expect(new Uint8Array(await kept!.arrayBuffer())).toEqual(new Uint8Array([9]));
+    expect(await env.RAW.head(`${photosPrefix(ACTIVITY_ID)}photo-2.jpg`)).not.toBeNull();
 
     const row = await sourceRow(String(ACTIVITY_ID));
     expect(row!.updated_at).not.toBe(SEEDED_UPDATED_AT);
@@ -555,8 +521,7 @@ describe("consumeStravaEvent on a refresh", () => {
     const stub = stubFetch(
       respondByPath({
         [`/api/v3/activities/${ACTIVITY_ID}`]: () => new Response(DETAIL_JSON),
-        [`/api/v3/activities/${ACTIVITY_ID}/streams`]: () =>
-          new Response(STREAMS_JSON),
+        [`/api/v3/activities/${ACTIVITY_ID}/streams`]: () => new Response(STREAMS_JSON),
         [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () => new Response("[]"),
       }),
     );
@@ -602,8 +567,7 @@ describe("consumeStravaEvent on a photos message", () => {
     await seedActivity();
     const stub = stubFetch(
       respondByPath({
-        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () =>
-          new Response(PHOTOS_JSON),
+        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () => new Response(PHOTOS_JSON),
       }),
     );
     const photoStub = stubFetch(() => new Response(new Uint8Array([1, 2, 3])));
@@ -614,12 +578,10 @@ describe("consumeStravaEvent on a photos message", () => {
     });
 
     expect(outcome).toBeUndefined();
-    expect(
-      stub.requests.map((request) => new URL(request.url).pathname),
-    ).toEqual([`/api/v3/activities/${ACTIVITY_ID}/photos`]);
-    expect(
-      await env.RAW.head(`${photosPrefix(ACTIVITY_ID)}photo-1.jpg`),
-    ).not.toBeNull();
+    expect(stub.requests.map((request) => new URL(request.url).pathname)).toEqual([
+      `/api/v3/activities/${ACTIVITY_ID}/photos`,
+    ]);
+    expect(await env.RAW.head(`${photosPrefix(ACTIVITY_ID)}photo-1.jpg`)).not.toBeNull();
     expect(await detailSeal()).toBe("intact");
 
     const row = await sourceRow(String(ACTIVITY_ID));
@@ -658,8 +620,7 @@ describe("consumeStravaEvent on a photos message", () => {
     await seedActivity();
     const stub = stubFetch(
       respondByPath({
-        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () =>
-          new Response(PHOTOS_JSON),
+        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () => new Response(PHOTOS_JSON),
       }),
     );
     const photoStub = stubFetch(() => new Response("nope", { status: 503 }));
@@ -682,8 +643,7 @@ describe("consumeStravaEvent on a photos message", () => {
     await seedActivity();
     const stub = stubFetch(
       respondByPath({
-        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () =>
-          new Response("boom", { status: 500 }),
+        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () => new Response("boom", { status: 500 }),
       }),
     );
 
@@ -695,10 +655,7 @@ describe("consumeStravaEvent on a photos message", () => {
 
   it("writes nothing when the photo is already archived and keyed", async () => {
     await seedActivity();
-    await env.RAW.put(
-      `${photosPrefix(ACTIVITY_ID)}photo-1.jpg`,
-      new Uint8Array([9]),
-    );
+    await env.RAW.put(`${photosPrefix(ACTIVITY_ID)}photo-1.jpg`, new Uint8Array([9]));
     await env.REGISTRY.prepare(
       "UPDATE activity_sources SET raw_keys = ?1 WHERE source = 'strava' AND source_id = ?2",
     )
@@ -713,8 +670,7 @@ describe("consumeStravaEvent on a photos message", () => {
       .run();
     const stub = stubFetch(
       respondByPath({
-        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () =>
-          new Response(PHOTOS_JSON),
+        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () => new Response(PHOTOS_JSON),
       }),
     );
 

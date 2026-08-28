@@ -7,12 +7,7 @@ export type TelemetrySource = "fit" | "gpx";
 // array base types decode to arrays. An element is nullable because the SDK's
 // invalid-value check misses non-finite floats, which have to be nulled here
 // rather than carried into a numeric column.
-export type DeveloperFieldValue =
-  | number
-  | string
-  | (number | null)[]
-  | (string | null)[]
-  | null;
+export type DeveloperFieldValue = number | string | (number | null)[] | (string | null)[] | null;
 
 export interface TelemetryRecord {
   timestamp: Date | null;
@@ -175,9 +170,7 @@ export async function decodeTelemetry(
 }
 
 export async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
-  const stream = new Blob([bytes])
-    .stream()
-    .pipeThrough(new DecompressionStream("gzip"));
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
@@ -202,15 +195,8 @@ const NO_POSITION: Position = { latitude: null, longitude: null };
 
 // Shared so that a change to what counts as an unusable fix reaches the full
 // decoder and the position-only track scan together.
-export function position(
-  latitude: number | undefined,
-  longitude: number | undefined,
-): Position {
-  if (
-    latitude == null ||
-    longitude == null ||
-    nullIsland(latitude, longitude)
-  ) {
+export function position(latitude: number | undefined, longitude: number | undefined): Position {
+  if (latitude == null || longitude == null || nullIsland(latitude, longitude)) {
     return NO_POSITION;
   }
   return {

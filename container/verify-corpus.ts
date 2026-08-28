@@ -55,9 +55,7 @@ const catalogRows = await catalog.runAndReadAll(
    FROM read_csv(${literal(csv)}, header = true, null_padding = true, parallel = false)
    WHERE "Filename" IS NOT NULL`,
 );
-const byFile = new Map(
-  catalogRows.getRowObjects().map((row) => [String(row.file), row]),
-);
+const byFile = new Map(catalogRows.getRowObjects().map((row) => [String(row.file), row]));
 console.log(`csv maps ${byFile.size} files to activity ids`);
 
 const registry: string[] = [];
@@ -80,13 +78,7 @@ for (const [index, file] of selected.entries()) {
     const activity = await decodeTelemetry(bytes, file);
     const directory = join(DECODE, activityId);
     await mkdir(directory, { recursive: true });
-    await writeActivityParquet(
-      instance,
-      directory,
-      activityId,
-      rawKey,
-      activity,
-    );
+    await writeActivityParquet(instance, directory, activityId, rawKey, activity);
     records += activity.records.length;
 
     registry.push(
