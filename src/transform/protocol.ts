@@ -104,7 +104,7 @@ export const LAKE_BUILD_SUMMARY_KEY = "lake/builds/latest.json";
 // The shape of what the publish stage sends the website. A change here means
 // every published row is one version behind what the site should be holding,
 // which is what makes the sweep republish the corpus.
-export const PUBLISH_SCHEMA_VERSION = 3;
+export const PUBLISH_SCHEMA_VERSION = 4;
 
 export interface PublishWork {
   activityId: string;
