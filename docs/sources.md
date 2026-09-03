@@ -31,7 +31,7 @@ Facts about the source APIs that shaped the design, current as of July 2026. Re-
 - Settings → My Account → Download or Delete Your Account. The link arrives by email after a few hours.
 - Contents: activities in original upload format (gzipped FIT for Wahoo-recorded rides, GPX/TCX otherwise), `activities.csv` with metadata richer than the API (weather, training load, grade-adjusted pace), full-resolution photos, routes, and account CSVs (profile, gear, segments). Kudos and comments are not meaningfully included.
 - No API or sanctioned automation exists for requesting exports. Session-cookie scripts violate the ToS. Treat export as a manual, occasional operation.
-- The 2026-07-16 export analysis found 4,118 activities: 3,246 FIT, 574 GPX, 1 TCX, at 698 MB zipped (876 MB unpacked).
+- The 2026-07-16 export ran 698 MB zipped and held 4,118 `activities.csv` rows against 3,821 original files: 3,246 FIT, 574 GPX, 1 TCX. The 297-row gap is manual and trainer entries, which carry metadata and no file.
 
 ## Wahoo
 
