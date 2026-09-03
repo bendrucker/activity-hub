@@ -5,7 +5,7 @@
   "compatibility_date": "2026-07-01",
   // Every Access policy on hub.bendrucker.me is bypassable while the
   // workers.dev hostname serves the same worker. The route itself is
-  // Terraform-managed in bendrucker/infrastructure.
+  // Terraform-managed in this repo's terraform/ (see terraform/routes.tf).
   "workers_dev": false,
   // Pinned so CI only needs CLOUDFLARE_API_TOKEN. Not a secret.
   "account_id": "72bdc77341dc52a3cf4a94097f9ad96f",

@@ -340,7 +340,7 @@ git config blame.ignoreRevsFile .git-blame-ignore-revs
 
 ## Status
 
-The Strava pipeline is live. The historical export is imported, OAuth and webhooks run, and a daily reconciliation cron catches anything webhooks miss. Wahoo is in progress ([#11](https://github.com/bendrucker/activity-hub/issues/11)).
+The Strava pipeline is live. The historical export is imported, OAuth and webhooks run, and a daily reconciliation cron catches anything webhooks miss. The Wahoo pipeline is live too: OAuth, the `workout_summary` webhook receiver, and a history backfill that found 2,532 workouts reaching back to 2017-12-14, with no truncation.
 
 The transform pipeline's `decode` stage is built: the FIT and GPX decoders, the `derived` table, the queue, and the container. The `lake` stage builds `activities`, `records`, `laps`, `sessions`, `meta`, and `power_curve` as Parquet under `lake/v1/`. Publishing them to R2 Data Catalog as Iceberg remains ([#13](https://github.com/bendrucker/activity-hub/issues/13)). The `publish` stage sends feed rows to bendrucker.me ([#15](https://github.com/bendrucker/activity-hub/issues/15)).
 

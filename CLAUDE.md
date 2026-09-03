@@ -1,15 +1,16 @@
 # Activity Hub
 
-System of record for activity data (rides, workouts) from Strava and Wahoo. Ingests via webhooks, archives raw files in R2, and will build a DuckDB analytics lake that publishes a feed subset to [bendrucker.me](https://github.com/bendrucker/bendrucker.me). See the [README](README.md) for architecture and [docs/design.md](docs/design.md) for the full design.
+System of record for activity data (rides, workouts) from Strava and Wahoo. Ingests via webhooks, archives raw files in R2, and builds a DuckDB analytics lake that publishes a feed subset to [bendrucker.me](https://github.com/bendrucker/bendrucker.me). See the [README](README.md) for architecture and [docs/design.md](docs/design.md) for the full design.
 
 ## Stack
 
-Cloudflare Workers (TypeScript), Bun, Wrangler. Storage: D1 (`REGISTRY`), R2 (`RAW`, `LAKE`), KV (`TOKENS`), Durable Objects (`TokenBroker`), Queues (`INGEST_QUEUE`). Config lives in `wrangler.jsonc`.
+Cloudflare Workers (TypeScript), Bun, Wrangler. Storage: D1 (`REGISTRY`), R2 (`RAW`, `LAKE`), KV (`TOKENS`), Durable Objects (`TokenBroker`, `DECODE_CONTAINER`), Queues (`INGEST_QUEUE`, `TRANSFORM_QUEUE`). The `containers` config runs the decode/lake/publish container behind `DECODE_CONTAINER`, and `SITE` is a service binding to bendrucker.me's `Publish` entrypoint. Config lives in `wrangler.jsonc`.
 
 ## Commands
 
 - `bun run typecheck`: checks `src/` and `scripts/`
 - `bun run test`: runs `vitest run` (uses `@cloudflare/vitest-pool-workers`, config in `vitest.config.ts`)
+- `bun run lint`: runs `oxlint --report-unused-disable-directives && ast-grep scan`
 - `bun run format` / `bun run format:check`: oxfmt
 - `bun run dev`: runs `wrangler dev` for local iteration
 - `bun run wrangler <cmd>`: pinned Wrangler binary. Use this over a global `wrangler` install
@@ -17,7 +18,7 @@ Cloudflare Workers (TypeScript), Bun, Wrangler. Storage: D1 (`REGISTRY`), R2 (`R
 
 ## Deploy
 
-CI runs on every push and PR (`.github/workflows/ci.yml`): typecheck, test, format check. Deploy (`.github/workflows/deploy.yml`) triggers on push to `main`: applies D1 migrations, then `wrangler deploy`. Deploys are automatic; don't run `wrangler deploy` manually against production unless recovering from a broken deploy.
+CI runs on every push and PR (`.github/workflows/ci.yml`): typecheck, test, lint, format check, plus container and container-image jobs. A `deploy` job in the same workflow needs those to pass and runs only on push to `main`: it applies D1 migrations, then runs `wrangler deploy`. Deploys are automatic; don't run `wrangler deploy` manually against production unless recovering from a broken deploy.
 
 D1 migrations live in `migrations/`, applied with `wrangler d1 migrations apply`.
 
