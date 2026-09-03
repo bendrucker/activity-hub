@@ -226,13 +226,11 @@ The importer runs locally rather than in a Worker: the archive exceeds Workers' 
 
 - OAuth tokens for both sources live in a `TokenBroker` Durable Object, one instance per source, with refresh-before-use. Wahoo rotates the refresh token on every refresh and revokes the grant when it sees one reused, so refreshes have to be serialized: KV reads go up to 60 seconds stale, which let two invocations send the same pair. Durable Object storage is strongly consistent and a named instance gives one refresh at a time. The broker seeds itself from the KV keys the pairs used to live under and mirrors every pair back to them, so rolling the deploy back leaves the older code reading a current refresh token rather than a spent one. Nothing else reads KV. Wahoo requires `offline_data` scope for background refresh and webhooks.
 - Strava's June 2027 migration is designed in now: header-only auth and a configurable base URL (`www.api-v3.strava.com`).
-- Wahoo production API access requires human approval. Apply immediately. Sandbox limits (25 req/5 min) may cover single-user use in the meantime.
+- Wahoo production API access is approved.
 - Cost: Workers Paid at $5/month covers the CPU budget for FIT parsing. R2, Queues, D1, and Data Catalog all sit inside free tiers at this scale.
 
 ## Risks
 
-- Wahoo production approval is a human gate with unknown latency. Mitigation: apply first, build Strava ingest while waiting, verify sandbox suffices for one user.
-- Wahoo cloud history depth is unverified. Mitigation: the Strava export is canonical history, so Wahoo backfill depth only affects source-overlay completeness.
 - The Strava photos endpoint is undocumented and may break. Mitigation: photos also arrive full-resolution in each manual bulk export.
 - R2 Data Catalog and R2 SQL are betas. Mitigation: raw bucket is the system of record; fall back to plain Parquet.
 - Strava's API agreement bars AI/ML training on API data and its posture keeps tightening. Personal display and analysis of my own data is the sanctioned case, but the future LLM website feature should prefer lake data derived from my own files.
