@@ -9,6 +9,21 @@ import type {
   PublishResponse,
 } from "./protocol";
 
+// How long the instance may sit allocated with nothing running before it is
+// destroyed. The library's own two-minute inactivity timer should have fired
+// long before this, so reaching it means the timer is stuck.
+const IDLE_LIMIT_SECONDS = 10 * 60;
+
+// A lake build runs in the background with no request in flight, so an idle
+// instance is not necessarily a free one. Accepting a build extends the
+// deadline by this instead, well past the ~12 minutes a build takes.
+const LAKE_BUILD_SECONDS = 90 * 60;
+
+// A `/lake` POST the container accepted, as opposed to one it refused as busy.
+export function acceptedLakeBuild(request: Request, response: Response): boolean {
+  return new URL(request.url).pathname === "/lake" && response.status === 202;
+}
+
 export class DecodeContainer extends Container<Env> {
   defaultPort = 8080;
   // Reprocessing arrives as a burst of batches. Holding the instance between
@@ -31,6 +46,17 @@ export class DecodeContainer extends Container<Env> {
     R2_LAKE_SECRET_ACCESS_KEY: this.env.R2_LAKE_SECRET_ACCESS_KEY,
   };
 
+  // When the instance was last doing something. Held in memory rather than in
+  // storage because the pin this guards against lasts exactly as long as the
+  // Durable Object does: the library's alarm loop keeps the object and the
+  // stuck counter alive together, and an object the platform recycles takes
+  // the pin with it.
+  private busyUntil = 0;
+
+  // One idle chain at a time. Two chains would each reschedule the other's
+  // successor, and the pair would keep doubling.
+  private idleCheckScheduled = false;
+
   // The lake build defers SIGTERM until it settles, so a build that hangs
   // would hold the instance indefinitely. This timer caps any pin of the
   // instance at three hours, triple the ~55-minute build. The schedule
@@ -39,7 +65,40 @@ export class DecodeContainer extends Container<Env> {
   // during a later wake can kill a 30-second decode batch, which the queue
   // retries.
   override async onStart(): Promise<void> {
+    this.extendBusy(IDLE_LIMIT_SECONDS);
     await this.schedule(3 * 3600, "watchdogStop");
+    await this.scheduleIdleCheck();
+  }
+
+  // The library holds the instance awake while it counts a request as in
+  // flight, and a Worker invocation killed between the response arriving and
+  // its body being read leaves that count stuck above zero for good
+  // (cloudflare/containers#241, #242), so `sleepAfter` never fires. This
+  // tracks activity on the Worker side, where the count cannot lie.
+  override async fetch(request: Request): Promise<Response> {
+    // Before as well as after: a request still in flight is activity, and a
+    // decode runs up to 30 seconds.
+    this.extendBusy(IDLE_LIMIT_SECONDS);
+    const response = await super.fetch(request);
+    this.extendBusy(acceptedLakeBuild(request, response) ? LAKE_BUILD_SECONDS : IDLE_LIMIT_SECONDS);
+    return response;
+  }
+
+  async idleStop(): Promise<void> {
+    this.idleCheckScheduled = false;
+    if (!this.ctx.container?.running) {
+      return;
+    }
+    // A Durable Object revived around a running container has no deadline yet.
+    // Start one rather than read the zero as an expiry and kill live work.
+    if (this.busyUntil === 0) {
+      this.extendBusy(IDLE_LIMIT_SECONDS);
+    }
+    if (Date.now() < this.busyUntil) {
+      await this.scheduleIdleCheck();
+      return;
+    }
+    await this.destroy();
   }
 
   async watchdogStop(): Promise<void> {
@@ -49,6 +108,19 @@ export class DecodeContainer extends Container<Env> {
     // destroy() sends SIGKILL. The drain path ignores SIGTERM while a build
     // runs, so a signal the container may defer cannot serve as a backstop.
     await this.destroy();
+  }
+
+  private extendBusy(seconds: number): void {
+    this.busyUntil = Math.max(this.busyUntil, Date.now() + seconds * 1000);
+  }
+
+  private async scheduleIdleCheck(): Promise<void> {
+    if (this.idleCheckScheduled) {
+      return;
+    }
+    this.idleCheckScheduled = true;
+    const seconds = Math.max(1, Math.ceil((this.busyUntil - Date.now()) / 1000));
+    await this.schedule(seconds, "idleStop");
   }
 }
 
