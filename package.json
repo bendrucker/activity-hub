@@ -28,7 +28,7 @@
     "@types/mapbox__polyline": "^1.0.5",
     "@types/tz-lookup": "^6.1.2",
     "oxfmt": "0.66.0",
-    "oxlint": "1.80.0",
+    "oxlint": "1.81.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.11",
     "wrangler": "^4.126.0"
