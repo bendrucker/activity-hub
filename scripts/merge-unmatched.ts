@@ -19,8 +19,8 @@
 // Usage: bun scripts/merge-unmatched.ts
 import { matchActivity, type MatchCandidate } from "../src/match";
 import type { Sport } from "../src/sport";
+import { literal, query } from "./registry";
 
-const DATABASE = "activity-hub-registry";
 const SQL_PATH = "tmp/merge-unmatched.sql";
 const ORPHANS_PATH = "tmp/merge-unmatched-orphans.json";
 
@@ -94,27 +94,3 @@ console.log(`merges: ${orphans.length}, contested: ${contested}`);
 await Bun.write(SQL_PATH, statements.join("\n") + "\n");
 await Bun.write(ORPHANS_PATH, JSON.stringify(orphans, null, 2) + "\n");
 console.log(`plan: ${SQL_PATH}, emptied activities: ${ORPHANS_PATH}`);
-
-function literal(value: string): string {
-  return `'${value.replaceAll("'", "''")}'`;
-}
-
-function query(sql: string): Record<string, unknown>[] {
-  const stdout = run(["d1", "execute", DATABASE, "--remote", "--json", "--command", sql]);
-  const parsed = JSON.parse(stdout) as { results: Record<string, unknown>[] }[];
-  const first = parsed[0];
-  if (!first) {
-    throw new Error(`no result from d1 execute: ${stdout.slice(0, 200)}`);
-  }
-  return first.results;
-}
-
-function run(args: string[]): string {
-  const result = Bun.spawnSync(["bun", "run", "--silent", "wrangler", "--", ...args], {
-    stdio: ["ignore", "pipe", "inherit"],
-  });
-  if (result.exitCode !== 0) {
-    throw new Error(`wrangler ${args.join(" ")} failed (${result.exitCode})`);
-  }
-  return result.stdout.toString();
-}

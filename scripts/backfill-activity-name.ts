@@ -12,8 +12,7 @@
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { parseActivitiesCsv } from "../src/import/csv";
-
-const DATABASE = "activity-hub-registry";
+import { executeFile, literal, query } from "./registry";
 
 // D1 rejects an oversized script, and one statement per activity across a
 // four-thousand-row corpus comfortably exceeds it.
@@ -79,33 +78,9 @@ for (let start = 0; start < statements.length; start += BATCH) {
   const batch = statements.slice(start, start + BATCH);
   const sqlPath = `tmp/backfill-activity-name-${String(start)}.sql`;
   await Bun.write(sqlPath, batch.join("\n") + "\n");
-  run(["d1", "execute", DATABASE, "--remote", "--yes", "--file", sqlPath]);
+  executeFile(sqlPath);
   console.log(`wrote ${String(start + batch.length)}/${statements.length}`);
 }
 
 const counts = query("SELECT COUNT(*) AS named FROM activities WHERE name IS NOT NULL");
 console.log("named now:", JSON.stringify(counts[0]));
-
-function literal(value: string): string {
-  return `'${value.replaceAll("'", "''")}'`;
-}
-
-function query(sql: string): Record<string, unknown>[] {
-  const stdout = run(["d1", "execute", DATABASE, "--remote", "--json", "--command", sql]);
-  const parsed = JSON.parse(stdout) as { results: Record<string, unknown>[] }[];
-  const first = parsed[0];
-  if (!first) {
-    throw new Error(`no result from d1 execute: ${stdout.slice(0, 200)}`);
-  }
-  return first.results;
-}
-
-function run(args: string[]): string {
-  const result = Bun.spawnSync(["bun", "run", "--silent", "wrangler", "--", ...args], {
-    stdio: ["ignore", "pipe", "inherit"],
-  });
-  if (result.exitCode !== 0) {
-    throw new Error(`wrangler ${args.join(" ")} failed (${result.exitCode})`);
-  }
-  return result.stdout.toString();
-}

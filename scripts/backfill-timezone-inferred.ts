@@ -12,8 +12,7 @@ import { parseArgs } from "node:util";
 import { parseActivitiesCsv } from "../src/import/csv";
 import { trackTimezone } from "../src/import/timezone";
 import { extractTrack } from "../src/import/track";
-
-const DATABASE = "activity-hub-registry";
+import { executeFile, query } from "./registry";
 
 const { values: flags, positionals } = parseArgs({
   args: Bun.argv.slice(2),
@@ -82,27 +81,7 @@ if (statements.length === 0) {
 
 const sqlPath = "tmp/backfill-timezone-inferred.sql";
 await Bun.write(sqlPath, statements.join("\n") + "\n");
-run(["d1", "execute", DATABASE, "--remote", "--yes", "--file", sqlPath]);
+executeFile(sqlPath);
 
 const counts = query("SELECT COUNT(*) AS flagged FROM activities WHERE timezone_inferred = 1");
 console.log("flagged now:", JSON.stringify(counts[0]));
-
-function query(sql: string): Record<string, unknown>[] {
-  const stdout = run(["d1", "execute", DATABASE, "--remote", "--json", "--command", sql]);
-  const parsed = JSON.parse(stdout) as { results: Record<string, unknown>[] }[];
-  const first = parsed[0];
-  if (!first) {
-    throw new Error(`no result from d1 execute: ${stdout.slice(0, 200)}`);
-  }
-  return first.results;
-}
-
-function run(args: string[]): string {
-  const result = Bun.spawnSync(["bun", "run", "--silent", "wrangler", "--", ...args], {
-    stdio: ["ignore", "pipe", "inherit"],
-  });
-  if (result.exitCode !== 0) {
-    throw new Error(`wrangler ${args.join(" ")} failed (${result.exitCode})`);
-  }
-  return result.stdout.toString();
-}

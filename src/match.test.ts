@@ -28,12 +28,12 @@ describe("matchActivity", () => {
 
   it("matches at exactly the start delta threshold", () => {
     const existing = candidate("a", { startedAt: offset(900) });
-    expect(matchActivity(input(), [existing])).toBe(existing);
+    expect(matchActivity(input({ durationS: 7200 }), [existing])).toBe(existing);
   });
 
   it("mints just over the start delta threshold", () => {
     const existing = candidate("a", { startedAt: offset(901) });
-    expect(matchActivity(input(), [existing])).toBeNull();
+    expect(matchActivity(input({ durationS: 7200 }), [existing])).toBeNull();
   });
 
   it("mints when an earlier recording ended before the candidate started", () => {
@@ -44,6 +44,16 @@ describe("matchActivity", () => {
   it("mints when the candidate ended before a later recording started", () => {
     const later = candidate("a", { startedAt: offset(600) });
     expect(matchActivity(input({ durationS: 600 }), [later])).toBeNull();
+  });
+
+  it("matches at exactly the overlap ratio threshold", () => {
+    const existing = candidate("a", { startedAt: offset(200), durationS: 1000 });
+    expect(matchActivity(input({ durationS: 1000 }), [existing])).toBe(existing);
+  });
+
+  it("mints when the overlap covers too little of the shorter recording", () => {
+    const next = candidate("a", { startedAt: offset(700), durationS: 3600 });
+    expect(matchActivity(input({ durationS: 1200 }), [next])).toBeNull();
   });
 
   it("matches a Wahoo recording that ran on while paused", () => {
