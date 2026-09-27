@@ -20,7 +20,6 @@ beforeEach(async () => {
 
 interface Seed {
   activityId: string;
-  // One source per entry, each carrying its own indoor flag.
   sources?: (boolean | null)[];
   decoded?: boolean;
   publish?: "ok" | "failed" | "deleted" | null;
@@ -171,8 +170,6 @@ describe("indoor", () => {
     expect(patcher.patches).toEqual([["a", { indoor: false }]]);
   });
 
-  // Publish only reads sub_sports from a decode artifact, so an activity
-  // without one is decided by its sources and never reaches the container.
   it("reads sub_sports only for decoded activities", async () => {
     await seed({ activityId: "a", decoded: true });
     await seed({ activityId: "b", decoded: false, sources: [true] });

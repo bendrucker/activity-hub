@@ -432,9 +432,6 @@ export async function handleTransform(request: Request, env: Env): Promise<Respo
   }
 }
 
-// Patches one field on every published row, a page per request. Without
-// `apply=true` the page only reports what it would send, which is how a
-// backfill gets checked against production before it writes anything.
 export async function handleFieldBackfill(
   request: Request,
   env: Env,

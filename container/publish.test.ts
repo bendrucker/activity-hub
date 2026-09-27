@@ -270,7 +270,6 @@ test("reads each activity's sub_sports without summarizing the ride", async () =
   ]);
 });
 
-// A page mixes activities, so one missing artifact has to fail on its own.
 test("fails only the activity whose sessions are missing", async () => {
   const decode = await seed("a", { sessions: [session({ sub_sport: "virtualActivity" })] });
 
