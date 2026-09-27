@@ -12,6 +12,7 @@ export class Publish extends WorkerEntrypoint {
   async publishActivity() {}
   async publishPowerCurve() {}
   async deleteActivity() {}
+  async patchActivity() {}
 }
 
 export default {

@@ -1,5 +1,6 @@
 import {
   handleConsumeLog,
+  handleFieldBackfill,
   handleLake,
   handlePipeline,
   handleReconcile,
@@ -205,6 +206,12 @@ export default {
     if (url.pathname === "/admin/transform") {
       if (request.method === "POST") {
         return handleTransform(request, env);
+      }
+      return new Response("Method Not Allowed", { status: 405 });
+    }
+    if (url.pathname === "/admin/field-backfill") {
+      if (request.method === "POST") {
+        return handleFieldBackfill(request, env);
       }
       return new Response("Method Not Allowed", { status: 405 });
     }

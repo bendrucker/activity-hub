@@ -165,3 +165,25 @@ export type PublishOutcome =
 export interface PublishResponse {
   outcome: PublishOutcome;
 }
+
+// A field backfill needs the sub_sports alone, and reading one small table per
+// activity is what keeps a corpus-wide pass from summarizing every ride again.
+export interface SubSportRequest {
+  work: PublishWork[];
+}
+
+export type SubSportOutcome =
+  | {
+      activityId: string;
+      status: "ok";
+      subSports: string[];
+    }
+  | {
+      activityId: string;
+      status: "failed";
+      error: string;
+    };
+
+export interface SubSportResponse {
+  outcomes: SubSportOutcome[];
+}

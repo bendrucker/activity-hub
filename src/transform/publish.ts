@@ -45,12 +45,27 @@ export interface SitePublisher {
   deleteActivity(activityId: string): Promise<void>;
 }
 
+// The scalar columns the site updates in place on a row it already holds. The
+// site's schema is strict, so a key it does not list comes back as a
+// ValidationError, and an activity it does not hold is a no-op.
+export interface PatchableFields {
+  indoor: boolean;
+}
+
+export interface SitePatcher {
+  patchActivity(activityId: string, fields: Partial<PatchableFields>): Promise<void>;
+}
+
 // The binding is a Service that also carries Publish's methods, which is what
 // makes reading them off it a narrowing rather than a leap. Nothing generates
 // the method list from the other repo, so this is where the two agree.
-type SiteBinding = Service & SitePublisher;
+type SiteBinding = Service & SitePublisher & SitePatcher;
 
 export function sitePublisher(env: Env): SitePublisher {
+  return env.SITE as SiteBinding;
+}
+
+export function sitePatcher(env: Env): SitePatcher {
   return env.SITE as SiteBinding;
 }
 
@@ -68,7 +83,7 @@ export type PublishResult = { fingerprint: string } & (
 
 // Every fingerprint below is a SHA-256 digest, so neither sentinel can collide
 // with one.
-const DELETED = "deleted";
+export const DELETED = "deleted";
 const UNDECODED = "undecoded";
 
 function notDecoded(reason = "activity has not been decoded"): PublishResult {
@@ -417,7 +432,7 @@ function title(registry: ActivityRow, detail: StravaDetail | null): string | nul
 // Strava can hold a trainer ride typed as a plain Ride while Wahoo knows it
 // was on the trainer, and the reverse. A Garmin recording carries no type but
 // its FIT sub_sport, so the telemetry votes alongside the sources.
-function indoor(registry: ActivityRow, subSports: readonly string[] = []): boolean {
+export function indoor(registry: ActivityRow, subSports: readonly string[] = []): boolean {
   return registry.sources.some((source) => source.indoor === true) || subSports.some(indoorFromFit);
 }
 
@@ -450,7 +465,7 @@ function row(
   };
 }
 
-async function activityRows(
+export async function activityRows(
   db: D1Database,
   activityIds: readonly string[],
 ): Promise<Map<string, ActivityRow>> {

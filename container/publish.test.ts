@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { DuckDBInstance } from "@duckdb/node-api";
 import polyline from "@mapbox/polyline";
 import { writeActivityParquet } from "./parquet";
-import { publishActivity } from "./publish";
+import { publishActivity, readSubSports } from "./publish";
 import type { TelemetryActivity, TelemetryRecord, TelemetrySession } from "../src/import/telemetry";
 
 let instance: DuckDBInstance;
@@ -248,4 +248,44 @@ test("answers with a failed outcome when the artifact is missing", async () => {
   expect(outcome.status).toBe("failed");
   if (outcome.status !== "failed") return;
   expect(outcome.error).toContain("records.parquet");
+});
+
+test("reads each activity's sub_sports without summarizing the ride", async () => {
+  const indoor = await seed("a", { sessions: [session({ sub_sport: "indoorCycling" })] });
+  const road = await seed("b", { sessions: [session({ sub_sport: "road" })] });
+
+  const { outcomes } = await readSubSports(
+    {
+      work: [
+        { activityId: "a", decode: indoor },
+        { activityId: "b", decode: `${road}/` },
+      ],
+    },
+    { instance },
+  );
+
+  expect(outcomes).toEqual([
+    { activityId: "a", status: "ok", subSports: ["indoorCycling"] },
+    { activityId: "b", status: "ok", subSports: ["road"] },
+  ]);
+});
+
+// A page mixes activities, so one missing artifact has to fail on its own.
+test("fails only the activity whose sessions are missing", async () => {
+  const decode = await seed("a", { sessions: [session({ sub_sport: "virtualActivity" })] });
+
+  const { outcomes } = await readSubSports(
+    {
+      work: [
+        { activityId: "a", decode },
+        { activityId: "b", decode: join(work, "absent") },
+      ],
+    },
+    { instance },
+  );
+
+  expect(outcomes[0]).toEqual({ activityId: "a", status: "ok", subSports: ["virtualActivity"] });
+  expect(outcomes[1]).toMatchObject({ activityId: "b", status: "failed" });
+  if (outcomes[1]?.status !== "failed") return;
+  expect(outcomes[1].error).toContain("sessions.parquet");
 });

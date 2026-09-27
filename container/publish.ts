@@ -11,6 +11,10 @@ import type {
   PublishArtifact,
   PublishRequest,
   PublishResponse,
+  PublishWork,
+  SubSportOutcome,
+  SubSportRequest,
+  SubSportResponse,
 } from "../src/transform/protocol";
 import { powerBestsSql } from "./power";
 import { literal } from "./sql";
@@ -37,12 +41,11 @@ export async function publishActivity(
   const connection = await deps.instance.connect();
   try {
     await deps.configure?.(connection);
-    const prefix = decode.endsWith("/") ? decode.slice(0, -1) : decode;
     return {
       outcome: {
         activityId,
         status: "ok",
-        artifact: await artifact(connection, prefix),
+        artifact: await artifact(connection, decodePrefix(decode)),
       },
     };
   } catch (error) {
@@ -58,10 +61,59 @@ export async function publishActivity(
   }
 }
 
+// Each activity reads on its own connection, so one missing artifact fails
+// only its own outcome and the rest of the page still answers.
+export async function readSubSports(
+  request: SubSportRequest,
+  deps: PublishDeps,
+): Promise<SubSportResponse> {
+  return {
+    outcomes: await Promise.all(request.work.map((work) => activitySubSports(work, deps))),
+  };
+}
+
+async function activitySubSports(
+  { activityId, decode }: PublishWork,
+  deps: PublishDeps,
+): Promise<SubSportOutcome> {
+  const connection = await deps.instance.connect();
+  try {
+    await deps.configure?.(connection);
+    const reader = await connection.runAndReadAll(
+      `SELECT ${SUB_SPORTS} AS sub_sports FROM ${sessionsTable(decodePrefix(decode))}`,
+    );
+    const [row] = reader.getRowObjectsJS();
+    return { activityId, status: "ok", subSports: subSportList(row?.sub_sports) };
+  } catch (error) {
+    return {
+      activityId,
+      status: "failed",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    connection.disconnectSync();
+  }
+}
+
+function decodePrefix(decode: string): string {
+  return decode.endsWith("/") ? decode.slice(0, -1) : decode;
+}
+
+function sessionsTable(prefix: string): string {
+  return `read_parquet(${literal(`${prefix}/sessions.parquet`)})`;
+}
+
+const SUB_SPORTS =
+  "list(DISTINCT sub_sport ORDER BY sub_sport) FILTER (WHERE sub_sport IS NOT NULL)";
+
+function subSportList(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(String) : [];
+}
+
 async function artifact(connection: DuckDBConnection, prefix: string): Promise<PublishArtifact> {
   const records = `read_parquet(${literal(`${prefix}/records.parquet`)})`;
   const meta = `read_parquet(${literal(`${prefix}/meta.parquet`)})`;
-  const sessions = `read_parquet(${literal(`${prefix}/sessions.parquet`)})`;
+  const sessions = sessionsTable(prefix);
 
   const power = await powerSummary(connection, records, meta);
   return {
@@ -94,16 +146,15 @@ async function sessionSummary(
       SUM(total_distance) AS distance_m,
       SUM(total_ascent) AS elevation_m,
       SUM(COALESCE(total_moving_time, total_timer_time)) AS moving_s,
-      list(DISTINCT sub_sport ORDER BY sub_sport) FILTER (WHERE sub_sport IS NOT NULL) AS sub_sports
+      ${SUB_SPORTS} AS sub_sports
     FROM ${sessions}`);
 
   const [row] = reader.getRowObjectsJS();
-  const subSports = row?.sub_sports;
   return {
     distanceM: optional(row?.distance_m),
     elevationM: optional(row?.elevation_m),
     movingS: optional(row?.moving_s),
-    subSports: Array.isArray(subSports) ? subSports.map(String) : [],
+    subSports: subSportList(row?.sub_sports),
   };
 }
 

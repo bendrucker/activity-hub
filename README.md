@@ -265,6 +265,25 @@ The transform sweep runs at :30 every hour. It enqueues at most `RECONCILE_LIMIT
 
 Strava reconciliation runs at 06:00 and the lake rebuild two hours later at 08:00. The lake keeps its own trigger because a sweep only enqueues. Decoding drains through the queue afterwards, so a rebuild in the same invocation would read the artifacts that sweep was about to replace.
 
+#### Field Backfill
+
+A new scalar on the published row reaches the rows the site already holds through the site's `patchActivity`. Bumping `PUBLISH_SCHEMA_VERSION` would also carry it, but that republishes the whole corpus through the hourly sweep, which takes hours for one value. `PATCHABLE_FIELDS` in `src/transform/fields.ts` lists each field with the function that computes it, which publish shares.
+
+```sh
+# Report what a page would patch: counts per value, plus `unknown` where
+# nothing recorded one. Pass `nextCursor` back as `cursor` until it is null.
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  "https://hub.bendrucker.me/admin/field-backfill?field=indoor"
+# {"field":"indoor","applied":false,"activities":100,"patched":0,
+#  "counts":{"false":61,"unknown":36,"true":3},"failures":[],"nextCursor":"..."}
+
+# The same walk, patching each page. The site must already accept the field.
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  "https://hub.bendrucker.me/admin/field-backfill?field=indoor&apply=true"
+```
+
+A page covers `FIELD_PAGE` published activities, so the corpus is about 45 requests.
+
 #### Photo Backfill
 
 ```sh
