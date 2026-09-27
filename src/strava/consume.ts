@@ -1,6 +1,6 @@
 import { RateLimitedError, type StravaIngestMessage, parseRetryAfter } from "../ingest";
 import { markSourceDeleted, mergeRawKeys, touchSource, upsertSourceRecord } from "../registry";
-import { sportFromStrava } from "../sport";
+import { indoorFromStrava, sportFromStrava } from "../sport";
 import { enqueueActivity } from "../transform/enqueue";
 import { stravaClient, type StravaClient } from "./client";
 
@@ -15,6 +15,7 @@ interface StravaActivityDetail {
   start_date: string;
   timezone: string;
   sport_type: string;
+  trainer?: boolean;
   elapsed_time: number;
 }
 
@@ -197,6 +198,7 @@ async function upsertDetail(
     timezone: parseTimezone(detail.timezone),
     timezoneInferred: false,
     sport: sportFromStrava(detail.sport_type),
+    indoor: indoorFromStrava(detail.sport_type, detail.trainer === true),
     durationS: detail.elapsed_time,
     rawKeys,
   });

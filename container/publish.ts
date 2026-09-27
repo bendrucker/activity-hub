@@ -70,33 +70,40 @@ async function artifact(connection: DuckDBConnection, prefix: string): Promise<P
     averageWatts: power.averageWatts,
     powerSource: power.source,
     bests: power.source === "none" ? [] : await bests(connection, records),
-    ...(await totals(connection, sessions)),
+    ...(await sessionSummary(connection, sessions)),
   };
 }
 
-interface DeviceTotals {
+interface SessionSummary {
   distanceM: number | null;
   elevationM: number | null;
   movingS: number | null;
+  subSports: string[];
 }
 
 // Summed across sessions, because a multisport file records one per leg and
 // the feed shows the whole outing. Moving time falls back to timer time: not
 // every device records the pause-aware total, and both mean the clock the
 // device was counting.
-async function totals(connection: DuckDBConnection, sessions: string): Promise<DeviceTotals> {
+async function sessionSummary(
+  connection: DuckDBConnection,
+  sessions: string,
+): Promise<SessionSummary> {
   const reader = await connection.runAndReadAll(`
     SELECT
       SUM(total_distance) AS distance_m,
       SUM(total_ascent) AS elevation_m,
-      SUM(COALESCE(total_moving_time, total_timer_time)) AS moving_s
+      SUM(COALESCE(total_moving_time, total_timer_time)) AS moving_s,
+      list(DISTINCT sub_sport ORDER BY sub_sport) FILTER (WHERE sub_sport IS NOT NULL) AS sub_sports
     FROM ${sessions}`);
 
-  const [row] = reader.getRowObjects();
+  const [row] = reader.getRowObjectsJS();
+  const subSports = row?.sub_sports;
   return {
     distanceM: optional(row?.distance_m),
     elevationM: optional(row?.elevation_m),
     movingS: optional(row?.moving_s),
+    subSports: Array.isArray(subSports) ? subSports.map(String) : [],
   };
 }
 

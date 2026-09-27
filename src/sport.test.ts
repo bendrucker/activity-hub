@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { sportFromStrava, sportFromWahoo } from "./sport";
+import {
+  indoorFromFit,
+  indoorFromStrava,
+  indoorFromWahoo,
+  sportFromStrava,
+  sportFromWahoo,
+} from "./sport";
 
 describe("sportFromStrava", () => {
   it.each([
@@ -49,5 +55,44 @@ describe("sportFromWahoo", () => {
 
   it("maps unknown workout type ids to other", () => {
     expect(sportFromWahoo(9999)).toBe("other");
+  });
+});
+
+describe("indoorFromStrava", () => {
+  it.each<[string, boolean | undefined, boolean | null]>([
+    ["VirtualRide", false, true],
+    ["VirtualRide", undefined, true],
+    ["Ride", true, true],
+    ["Ride", false, false],
+    ["Ride", undefined, null],
+    ["GravelRide", false, false],
+  ])("reads %s with trainer %s as %s", (sportType, trainer, expected) => {
+    expect(indoorFromStrava(sportType, trainer)).toBe(expected);
+  });
+});
+
+describe("indoorFromWahoo", () => {
+  it.each([
+    [12, true],
+    [21, true],
+    [49, true],
+    [61, true],
+    [68, true],
+    [0, false],
+    [15, false],
+  ])("reads workout type %i as %s", (workoutTypeId, expected) => {
+    expect(indoorFromWahoo(workoutTypeId)).toBe(expected);
+  });
+});
+
+describe("indoorFromFit", () => {
+  it.each([
+    ["indoorCycling", true],
+    ["virtualActivity", true],
+    ["spin", true],
+    ["generic", false],
+    ["road", false],
+  ])("reads sub_sport %s as %s", (subSport, expected) => {
+    expect(indoorFromFit(subSport)).toBe(expected);
   });
 });

@@ -211,6 +211,34 @@ test("leaves the totals null when the device wrote no session", async () => {
   expect(outcome.artifact.polyline).not.toBeNull();
 });
 
+// A multisport file records one session per leg, so every distinct sub_sport
+// comes back.
+test("reports each distinct session sub_sport", async () => {
+  const decode = await seed("a", {
+    sessions: [
+      session({ sub_sport: "virtualActivity" }),
+      session({ message_index: 1, sub_sport: "virtualActivity" }),
+      session({ message_index: 2, sub_sport: null }),
+    ],
+  });
+
+  const { outcome } = await publish("a", decode);
+
+  expect(outcome.status).toBe("ok");
+  if (outcome.status !== "ok") return;
+  expect(outcome.artifact.subSports).toEqual(["virtualActivity"]);
+});
+
+test("reports no sub_sports when the device wrote no session", async () => {
+  const decode = await seed("a", { sessions: [] });
+
+  const { outcome } = await publish("a", decode);
+
+  expect(outcome.status).toBe("ok");
+  if (outcome.status !== "ok") return;
+  expect(outcome.artifact.subSports).toEqual([]);
+});
+
 // The missing artifact is the failure the Worker parks against, so it has to
 // arrive as this activity's outcome rather than as a non-2xx that would retry
 // the whole message.

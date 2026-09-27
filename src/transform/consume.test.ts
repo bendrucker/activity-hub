@@ -39,14 +39,23 @@ interface SeedSource {
   sourceId: string;
   activityId: string;
   rawKeys?: Record<string, string>;
+  indoor?: boolean | null;
 }
 
 async function seedSource(seed: SeedSource): Promise<void> {
+  const indoor = seed.indoor === undefined || seed.indoor === null ? null : Number(seed.indoor);
   await env.REGISTRY.prepare(
-    `INSERT INTO activity_sources (source, source_id, activity_id, raw_keys, created_at, updated_at, deleted_at)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?5, NULL)`,
+    `INSERT INTO activity_sources (source, source_id, activity_id, raw_keys, indoor, created_at, updated_at, deleted_at)
+     VALUES (?1, ?2, ?3, ?4, ?6, ?5, ?5, NULL)`,
   )
-    .bind(seed.source, seed.sourceId, seed.activityId, JSON.stringify(seed.rawKeys ?? {}), OLD)
+    .bind(
+      seed.source,
+      seed.sourceId,
+      seed.activityId,
+      JSON.stringify(seed.rawKeys ?? {}),
+      OLD,
+      indoor,
+    )
     .run();
 }
 
@@ -519,6 +528,7 @@ function artifact(overrides: Partial<PublishArtifact> = {}): PublishArtifact {
     distanceM: 42000,
     elevationM: 500,
     movingS: 5400,
+    subSports: [],
     ...overrides,
   };
 }
@@ -675,6 +685,7 @@ describe("the publish stage", () => {
       stravaId: "9001",
       name: "Kings Mountain",
       sport: "ride",
+      indoor: false,
       startedAt: "2026-01-01T14:00:00.000Z",
       timezone: "America/Los_Angeles",
       distanceM: 42000,
@@ -727,6 +738,103 @@ describe("the publish stage", () => {
         elevationM: 480,
       }),
     );
+  });
+
+  // A Garmin recording carries no type but its FIT sub_sport, so a virtual
+  // ride uploaded as a plain Ride is only indoor by what the file says.
+  it("publishes indoor when the telemetry's sub_sport is indoor", async () => {
+    await seedPublishable("a1");
+    const site = siteStub();
+
+    await consumeTransformBatch(batchOf([publishMessage("a1")]), testEnv, {
+      container: {
+        summarize: summarizeReturning({
+          outcome: {
+            activityId: "a1",
+            status: "ok",
+            artifact: artifact({ subSports: ["virtualActivity"] }),
+          },
+        }),
+      },
+      site,
+    });
+
+    expect(site.publishActivity).toHaveBeenCalledWith(expect.objectContaining({ indoor: true }));
+  });
+
+  it("publishes indoor when any one source says indoor", async () => {
+    await seedActivity("a1");
+    await seedSource({
+      source: "strava",
+      sourceId: "9001",
+      activityId: "a1",
+      rawKeys: { original: "raw/test/a1.fit" },
+      indoor: false,
+    });
+    await seedSource({
+      source: "wahoo",
+      sourceId: "1",
+      activityId: "a1",
+      rawKeys: { summary: "raw/test/summary.json" },
+      indoor: true,
+    });
+    await seedDerived({
+      activityId: "a1",
+      stage: "decode",
+      status: "ok",
+      outputKey: "decode/v1/a1/",
+    });
+    const site = siteStub();
+
+    await consumeTransformBatch(batchOf([publishMessage("a1")]), testEnv, {
+      container: {
+        summarize: summarizeReturning({
+          outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+        }),
+      },
+      site,
+    });
+
+    expect(site.publishActivity).toHaveBeenCalledWith(expect.objectContaining({ indoor: true }));
+  });
+
+  it("publishes indoor from the registry when there is no telemetry", async () => {
+    await seedActivity("a1");
+    await seedWahooSummary("a1", 60);
+    await env.REGISTRY.prepare("UPDATE activity_sources SET indoor = 1").run();
+    const site = siteStub();
+
+    await consumeTransformBatch(batchOf([publishMessage("a1")]), testEnv, {
+      container: {
+        summarize: summarizeReturning({
+          outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+        }),
+      },
+      site,
+    });
+
+    expect(site.publishActivity).toHaveBeenCalledWith(expect.objectContaining({ indoor: true }));
+  });
+
+  // The backfill sets the flag without moving `updated_at`, so the republish
+  // that follows has to find the row stale by its fingerprint.
+  it("republishes when a source's indoor flag changes", async () => {
+    await seedPublishable("a1");
+    await seedPublished("a1");
+    await env.REGISTRY.prepare("UPDATE activity_sources SET indoor = 1").run();
+    const site = siteStub();
+
+    const summary = await consumeTransformBatch(batchOf([publishMessage("a1")]), testEnv, {
+      container: {
+        summarize: summarizeReturning({
+          outcome: { activityId: "a1", status: "ok", artifact: artifact() },
+        }),
+      },
+      site,
+    });
+
+    expect(site.publishActivity).toHaveBeenCalledWith(expect.objectContaining({ indoor: true }));
+    expect(summary).toEqual({ ...EMPTY_SUMMARY, published: 1 });
   });
 
   // Only a few hundred activities ever had a detail body archived, so most of
@@ -913,6 +1021,7 @@ describe("the publish stage", () => {
       stravaId: "9001",
       name: "Old Kings Mountain",
       sport: "ride",
+      indoor: false,
       startedAt: "2026-01-01T14:00:00.000Z",
       timezone: "America/Los_Angeles",
       distanceM: 41000,
@@ -970,6 +1079,7 @@ describe("the publish stage", () => {
       stravaId: null,
       name: null,
       sport: "ride",
+      indoor: false,
       startedAt: "2026-01-01T14:00:00.000Z",
       timezone: "America/Los_Angeles",
       distanceM: null,

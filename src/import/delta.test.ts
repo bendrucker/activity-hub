@@ -15,6 +15,7 @@ function record(overrides: Partial<SourceRecord> = {}): SourceRecord {
     timezone: "America/Los_Angeles",
     timezoneInferred: false,
     sport: "ride",
+    indoor: false,
     durationS: 3600,
     rawKeys: { original: "raw/strava/activities/12345/original.fit.gz" },
     ...overrides,

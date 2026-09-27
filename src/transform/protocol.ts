@@ -140,6 +140,9 @@ export interface PublishArtifact {
   distanceM: number | null;
   elevationM: number | null;
   movingS: number | null;
+  // Every session's FIT sub_sport, which is the only activity type a Garmin
+  // recording carries.
+  subSports: string[];
 }
 
 export type PublishOutcome =

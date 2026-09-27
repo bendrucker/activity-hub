@@ -13,6 +13,7 @@ function strava(overrides: Partial<SourceRecord> = {}): SourceRecord {
     timezone: "America/Los_Angeles",
     timezoneInferred: false,
     sport: "ride",
+    indoor: false,
     durationS: 3600,
     rawKeys: { detail: "raw/strava/12345/detail.json" },
     ...overrides,
@@ -27,6 +28,7 @@ function wahoo(overrides: Partial<SourceRecord> = {}): SourceRecord {
     timezone: "America/Los_Angeles",
     timezoneInferred: false,
     sport: "ride",
+    indoor: false,
     durationS: 3650,
     rawKeys: { fit: "raw/wahoo/67890/workout.fit" },
     ...overrides,
@@ -95,6 +97,18 @@ describe("upsertSourceRecord", () => {
       detail: "raw/strava/12345/detail.json",
       streams: "raw/strava/12345/streams.json",
     });
+  });
+
+  // A bulk re-import carries no trainer flag, so it must not clear the one the
+  // webhook's detail recorded.
+  it("keeps a recorded indoor flag when an update cannot tell", async () => {
+    await upsertSourceRecord(env.REGISTRY, strava({ indoor: true }));
+    await upsertSourceRecord(env.REGISTRY, strava({ indoor: null }));
+
+    const source = await env.REGISTRY.prepare(
+      "SELECT indoor FROM activity_sources WHERE source = 'strava' AND source_id = '12345'",
+    ).first<{ indoor: number | null }>();
+    expect(source?.indoor).toBe(1);
   });
 
   it("attaches a Wahoo record to a matching Strava activity", async () => {
