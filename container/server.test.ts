@@ -3,7 +3,12 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import type { TelemetryActivity } from "../src/import/telemetry";
 import type { DecodeDeps } from "./decode";
 import { lakeRunner, type LakeRunner } from "./lake-runner";
-import type { DecodeResponse, LakeRequest, LakeStart } from "../src/transform/protocol";
+import type {
+  DecodeResponse,
+  LakeRequest,
+  LakeStart,
+  SubSportResponse,
+} from "../src/transform/protocol";
 import { routes } from "./server";
 import type { LakeStore, RawStore } from "./storage";
 
@@ -80,6 +85,28 @@ test("POST /lake accepts before the build settles and refuses a second", async (
 test("POST /lake rejects a body that is not a lake request", async () => {
   for (const body of [{}, { decode: "x" }, []]) {
     const response = await fetch(new URL("/lake", server.url), {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    expect(response.status).toBe(400);
+  }
+});
+
+test("POST /subsports answers a failed outcome for a missing artifact", async () => {
+  const response = await fetch(new URL("/subsports", server.url), {
+    method: "POST",
+    body: JSON.stringify({ work: [{ activityId: "a", decode: "/nonexistent/a" }] }),
+  });
+
+  expect(response.status).toBe(200);
+  const { outcomes } = (await response.json()) as SubSportResponse;
+  expect(outcomes).toHaveLength(1);
+  expect(outcomes[0]).toMatchObject({ activityId: "a", status: "failed" });
+});
+
+test("POST /subsports rejects a body that is not a sub_sport request", async () => {
+  for (const body of [{}, { work: {} }, { work: [{ activityId: "a" }] }, []]) {
+    const response = await fetch(new URL("/subsports", server.url), {
       method: "POST",
       body: JSON.stringify(body),
     });
