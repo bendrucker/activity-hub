@@ -3,8 +3,8 @@
 // added the column. Each source's type is read from wherever that source
 // archived it: Strava's detail.json where the webhook stored one, otherwise
 // the bulk export's activity type, and Wahoo's summary.json. The export has no
-// trainer column, so a trainer ride that only the export describes stays
-// outdoor here unless its FIT says otherwise, which publish reads for itself.
+// trainer column, so a plain Ride that only the export describes stays NULL,
+// the same answer an import gives it. Publish still reads its FIT sub_sport.
 //
 // Only the column moves. `updated_at` stays put so nothing re-decodes, and the
 // corpus republish that carries the flag to the site is a separate step.
@@ -60,6 +60,9 @@ interface Classified {
   row: SourceRow;
   indoor: boolean | null;
   basis: string;
+  // Set when the archive could not be read, as opposed to read and unable to
+  // tell, which is the export's plain Ride.
+  failed?: true;
 }
 
 const rows = query(
@@ -87,7 +90,12 @@ async function classifyNext(): Promise<void> {
 // A missing or corrupt archive object leaves its row unclassified rather than
 // discarding every other row's read.
 function unreadable(row: SourceRow, error: unknown): Classified {
-  return { row, indoor: null, basis: `${row.source}: unreadable archive (${String(error)})` };
+  return {
+    row,
+    indoor: null,
+    basis: `${row.source}: unreadable archive (${String(error)})`,
+    failed: true,
+  };
 }
 
 async function classify(row: SourceRow): Promise<Classified> {
@@ -107,11 +115,11 @@ async function classify(row: SourceRow): Promise<Classified> {
     if (sportType !== undefined) {
       return {
         row,
-        indoor: indoorFromStrava(sportType, false),
+        indoor: indoorFromStrava(sportType),
         basis: `strava export ${sportType}`,
       };
     }
-    return { row, indoor: null, basis: "strava: no detail and not in the export" };
+    return { row, indoor: null, basis: "strava: no detail and not in the export", failed: true };
   }
   if (row.source === "wahoo" && keys.summary !== undefined) {
     const summary: unknown = await bucket.file(keys.summary).json();
@@ -119,21 +127,21 @@ async function classify(row: SourceRow): Promise<Classified> {
       const type = summary.workout.workout_type_id;
       return { row, indoor: indoorFromWahoo(type), basis: `wahoo type ${type}` };
     }
-    return { row, indoor: null, basis: "wahoo: unreadable summary" };
+    return { row, indoor: null, basis: "wahoo: unreadable summary", failed: true };
   }
-  return { row, indoor: null, basis: `${row.source}: no archived type` };
+  return { row, indoor: null, basis: `${row.source}: no archived type`, failed: true };
 }
 
 const bases = new Map<string, number>();
 for (const { indoor, basis } of classified) {
-  const label = `${indoor === null ? "unclassified" : indoor ? "indoor" : "outdoor"}: ${basis}`;
+  const label = `${indoor === null ? "unknown" : indoor ? "indoor" : "outdoor"}: ${basis}`;
   bases.set(label, (bases.get(label) ?? 0) + 1);
 }
 for (const [label, count] of [...bases].toSorted(([a], [b]) => a.localeCompare(b))) {
   console.log(`${String(count).padStart(6)}  ${label}`);
 }
 
-const unclassified = classified.filter(({ indoor }) => indoor === null);
+const unclassified = classified.filter(({ failed }) => failed);
 for (const { row, basis } of unclassified) {
   console.log(
     `unclassified ${row.source}:${row.source_id} (activity ${row.activity_id}): ${basis}`,

@@ -59,10 +59,12 @@ describe("sportFromWahoo", () => {
 });
 
 describe("indoorFromStrava", () => {
-  it.each([
+  it.each<[string, boolean | undefined, boolean | null]>([
     ["VirtualRide", false, true],
+    ["VirtualRide", undefined, true],
     ["Ride", true, true],
     ["Ride", false, false],
+    ["Ride", undefined, null],
     ["GravelRide", false, false],
   ])("reads %s with trainer %s as %s", (sportType, trainer, expected) => {
     expect(indoorFromStrava(sportType, trainer)).toBe(expected);
