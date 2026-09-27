@@ -104,7 +104,7 @@ export const LAKE_BUILD_SUMMARY_KEY = "lake/builds/latest.json";
 // The shape of what the publish stage sends the website. A change here means
 // every published row is one version behind what the site should be holding,
 // which is what makes the sweep republish the corpus.
-export const PUBLISH_SCHEMA_VERSION = 4;
+export const PUBLISH_SCHEMA_VERSION = 5;
 
 export interface PublishWork {
   activityId: string;
@@ -164,4 +164,26 @@ export type PublishOutcome =
 
 export interface PublishResponse {
   outcome: PublishOutcome;
+}
+
+// A field backfill needs the sub_sports alone, and reading one small table per
+// activity is what keeps a corpus-wide pass from summarizing every ride again.
+export interface SubSportRequest {
+  work: PublishWork[];
+}
+
+export type SubSportOutcome =
+  | {
+      activityId: string;
+      status: "ok";
+      subSports: string[];
+    }
+  | {
+      activityId: string;
+      status: "failed";
+      error: string;
+    };
+
+export interface SubSportResponse {
+  outcomes: SubSportOutcome[];
 }

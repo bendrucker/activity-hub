@@ -6,6 +6,7 @@ import { stubQueue } from "../test/queue-stub";
 import { SECRETS } from "../test/secrets";
 import {
   handleConsumeLog,
+  handleFieldBackfill,
   handleLake,
   handlePhotoBackfill,
   handlePhotoBackfillTargets,
@@ -1063,5 +1064,56 @@ describe("handleConsumeLog", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual([entry]);
+  });
+});
+
+describe("handleFieldBackfill", () => {
+  function fieldRequest(query: string, authorization = "Bearer admin-secret"): Request {
+    return new Request(`https://hub.example/admin/field-backfill?${query}`, {
+      method: "POST",
+      headers: { Authorization: authorization },
+    });
+  }
+
+  const options = {
+    container: {
+      subSports: async () => ({ outcomes: [] }),
+    },
+    site: {
+      updateActivity: async () => {
+        throw new Error("a dry run must not update");
+      },
+    },
+  };
+
+  it("rejects a request without the admin token", async () => {
+    const response = await handleFieldBackfill(
+      fieldRequest("field=indoor", "Bearer wrong"),
+      testEnv(),
+      options,
+    );
+    expect(response.status).toBe(403);
+  });
+
+  it("rejects a field the site cannot update", async () => {
+    const response = await handleFieldBackfill(fieldRequest("field=name"), testEnv(), options);
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("indoor");
+  });
+
+  it.each(["0", "101", "1.5"])("rejects a limit of %s", async (limit) => {
+    const response = await handleFieldBackfill(
+      fieldRequest(`field=indoor&limit=${limit}`),
+      testEnv(),
+      options,
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it("dry runs unless apply=true", async () => {
+    const response = await handleFieldBackfill(fieldRequest("field=indoor"), testEnv(), options);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ field: "indoor", applied: false });
   });
 });

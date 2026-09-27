@@ -1,11 +1,13 @@
 import { decodeBatch, type DecodeDeps } from "./decode";
 import type { LakeRunner } from "./lake-runner";
-import { publishActivity, type PublishDeps } from "./publish";
+import { publishActivity, readSubSports, type PublishDeps } from "./publish";
 import type {
   DecodeRequest,
   DecodeWork,
   LakeRequest,
   PublishRequest,
+  PublishWork,
+  SubSportRequest,
 } from "../src/transform/protocol";
 
 export function routes(deps: DecodeDeps & PublishDeps & { runner: LakeRunner }) {
@@ -20,7 +22,18 @@ export function routes(deps: DecodeDeps & PublishDeps & { runner: LakeRunner }) 
     "/publish": {
       POST: (request: Request) => postPublish(request, deps),
     },
+    "/subsports": {
+      POST: (request: Request) => postSubSports(request, deps),
+    },
   };
+}
+
+export async function postSubSports(request: Request, deps: PublishDeps): Promise<Response> {
+  const parsed = parseSubSportRequest(await jsonBody(request));
+  if (parsed === null) {
+    return Response.json({ error: "expected { work: PublishWork[] }" }, { status: 400 });
+  }
+  return Response.json(await readSubSports(parsed, deps));
 }
 
 // One activity per request, so the outcome carries the failure the same way a
@@ -91,7 +104,23 @@ function parsePublishRequest(body: unknown): PublishRequest | null {
   if (typeof body !== "object" || body === null) {
     return null;
   }
-  const item = (body as Record<string, unknown>).work;
+  const work = parsePublishWork((body as Record<string, unknown>).work);
+  return work === null ? null : { work };
+}
+
+function parseSubSportRequest(body: unknown): SubSportRequest | null {
+  if (typeof body !== "object" || body === null) {
+    return null;
+  }
+  const items = (body as Record<string, unknown>).work;
+  if (!Array.isArray(items)) {
+    return null;
+  }
+  const work = items.map(parsePublishWork);
+  return work.every((item) => item !== null) ? { work } : null;
+}
+
+function parsePublishWork(item: unknown): PublishWork | null {
   if (typeof item !== "object" || item === null) {
     return null;
   }
@@ -99,7 +128,7 @@ function parsePublishRequest(body: unknown): PublishRequest | null {
   if (typeof activityId !== "string" || typeof decode !== "string") {
     return null;
   }
-  return { work: { activityId, decode } };
+  return { activityId, decode };
 }
 
 function parseDecodeRequest(body: unknown): DecodeRequest | null {

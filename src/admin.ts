@@ -22,6 +22,13 @@ import {
   type ReconcileReport,
 } from "./strava/reconcile";
 import { enqueueActivity, reconcileTransform, RECONCILE_LIMIT } from "./transform/enqueue";
+import {
+  backfillField,
+  FIELD_PAGE,
+  isFieldName,
+  UPDATABLE_FIELDS,
+  type FieldBackfillOptions,
+} from "./transform/fields";
 import { LAKE_BUILD_SUMMARY_KEY } from "./transform/protocol";
 import { backfillWahooWorkouts, type BackfillOptions } from "./wahoo/backfill";
 import { wahooClient, type WahooClient } from "./wahoo/client";
@@ -420,6 +427,41 @@ export async function handleTransform(request: Request, env: Env): Promise<Respo
       ok: true,
       enqueued: await reconcileTransform(env, limit),
     });
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function handleFieldBackfill(
+  request: Request,
+  env: Env,
+  options: FieldBackfillOptions = {},
+): Promise<Response> {
+  if (!authorized(request, env)) {
+    return new Response("Forbidden", { status: 403 });
+  }
+
+  const params = new URL(request.url).searchParams;
+  const field = params.get("field") ?? "";
+  if (!isFieldName(field)) {
+    return new Response(`field must be one of: ${Object.keys(UPDATABLE_FIELDS).join(", ")}`, {
+      status: 400,
+    });
+  }
+  const limit = Number(params.get("limit") ?? FIELD_PAGE);
+  if (!Number.isInteger(limit) || limit < 1 || limit > FIELD_PAGE) {
+    return new Response(`limit must be an integer from 1 to ${FIELD_PAGE}`, { status: 400 });
+  }
+
+  try {
+    return Response.json(
+      await backfillField(env, field, {
+        cursor: params.get("cursor") ?? undefined,
+        limit,
+        apply: params.get("apply") === "true",
+        ...options,
+      }),
+    );
   } catch (error) {
     return errorResponse(error);
   }

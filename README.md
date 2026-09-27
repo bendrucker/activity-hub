@@ -266,6 +266,25 @@ The transform sweep runs at :30 every hour. It enqueues at most `RECONCILE_LIMIT
 
 Strava reconciliation runs at 06:00 and the lake rebuild two hours later at 08:00. The lake keeps its own trigger because a sweep only enqueues. Decoding drains through the queue afterwards, so a rebuild in the same invocation would read the artifacts that sweep was about to replace.
 
+#### Field Backfill
+
+A new scalar on the published row reaches rows the site already holds through this route, which calls the site's `updateActivity` for each one. Bumping `PUBLISH_SCHEMA_VERSION` would carry it too, but that republishes the whole corpus through the hourly sweep, which takes hours for one value. `UPDATABLE_FIELDS` in `src/transform/fields.ts` lists each field with its compute function, built on the same helpers publish uses.
+
+```sh
+# Report what a page would update: counts per value, plus `unknown` where
+# nothing recorded one. Pass `nextCursor` back as `cursor` until it is null.
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  "https://hub.bendrucker.me/admin/field-backfill?field=indoor"
+# {"field":"indoor","applied":false,"activities":100,"updated":0,
+#  "counts":{"false":61,"unknown":36,"true":3},"failures":[],"nextCursor":"..."}
+
+# The same walk, updating each page. The site must already accept the field.
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  "https://hub.bendrucker.me/admin/field-backfill?field=indoor&apply=true"
+```
+
+A page covers `FIELD_PAGE` published activities. An `unknown` row is updated too, with the default a republish would send.
+
 #### Photo Backfill
 
 ```sh

@@ -7,6 +7,8 @@ import type {
   LakeStart,
   PublishRequest,
   PublishResponse,
+  SubSportRequest,
+  SubSportResponse,
 } from "./protocol";
 
 // How long the instance may sit allocated with nothing running before it is
@@ -136,6 +138,10 @@ export interface PublishClient {
   summarize(request: PublishRequest): Promise<PublishResponse>;
 }
 
+export interface SubSportClient {
+  subSports(request: SubSportRequest): Promise<SubSportResponse>;
+}
+
 // Every batch lands on the same instance. The work is CPU-bound inside the
 // container and it paces itself across its own vCPUs, so spreading batches over
 // several instances would multiply cold starts and memory without decoding any
@@ -178,6 +184,12 @@ export function lakeClient(env: Env): LakeClient {
 export function publishClient(env: Env): PublishClient {
   return {
     summarize: (request) => call(env, "publish", request),
+  };
+}
+
+export function subSportClient(env: Env): SubSportClient {
+  return {
+    subSports: (request) => call(env, "subsports", request),
   };
 }
 
