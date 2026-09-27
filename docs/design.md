@@ -134,7 +134,7 @@ The hub mints its own activity ID. Source records attach as overlays:
 - `activities`: `activity_id` (hub-native), `started_at`, `timezone`, `timezone_inferred`, `sport`, `duration_s`
 - `activity_sources`: `activity_id`, `source` (`strava` | `wahoo`), `source_id`, raw object keys
 
-Wahoo and Strava describe the same physical ride, so ingest matches before minting: same sport class, start times within 2 minutes, durations within 5%. Wahoo wins for telemetry (original FIT). Strava wins for presentation (title, description, gear, photos). Activities that exist in only one source (manual Strava entries, workouts that never synced to Strava) are first-class.
+Wahoo and Strava describe the same physical ride, so ingest matches before minting: same sport class, start times within 15 minutes, recordings overlapping in time. Durations are not compared: Wahoo counts paused time until the stop button and Strava reports elapsed time after any crop, so one ride can differ by hours. Wahoo wins for telemetry (original FIT). Strava wins for presentation (title, description, gear, photos). Activities that exist in only one source (manual Strava entries, workouts that never synced to Strava) are first-class.
 
 The registry lives in the hub's own D1 database, which is operational state, not analytics. It answers "have I seen this source ID" and "which hub ID does this Strava ID map to" during ingest.
 
