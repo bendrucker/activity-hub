@@ -71,7 +71,17 @@ async function artifact(connection: DuckDBConnection, prefix: string): Promise<P
     powerSource: power.source,
     bests: power.source === "none" ? [] : await bests(connection, records),
     ...(await totals(connection, sessions)),
+    subSports: await subSports(connection, sessions),
   };
+}
+
+async function subSports(connection: DuckDBConnection, sessions: string): Promise<string[]> {
+  const reader = await connection.runAndReadAll(`
+    SELECT DISTINCT sub_sport
+    FROM ${sessions}
+    WHERE sub_sport IS NOT NULL
+    ORDER BY sub_sport`);
+  return reader.getRowObjects().map((row) => String(row.sub_sport));
 }
 
 interface DeviceTotals {

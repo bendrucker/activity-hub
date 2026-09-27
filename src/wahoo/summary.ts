@@ -1,5 +1,5 @@
 import type { SourceRecord } from "../record";
-import { sportFromWahoo } from "../sport";
+import { indoorFromWahoo, sportFromWahoo } from "../sport";
 
 // The subset of the workout_summary webhook payload
 // (https://cloud-api.wahooligan.com/#webhooks) that ingest reads. Parsed
@@ -103,6 +103,7 @@ export function summarySourceRecord(
     timezone: timezone.timezone,
     timezoneInferred: timezone.inferred,
     sport: sportFromWahoo(summary.workout.workout_type_id),
+    indoor: indoorFromWahoo(summary.workout.workout_type_id),
     durationS: durationS(summary),
     rawKeys,
   };

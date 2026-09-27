@@ -12,6 +12,7 @@ import {
   type StageRow,
 } from "../derived";
 import { lakeUri } from "../lake/location";
+import { indoorFromFit } from "../sport";
 import { isWorkoutSummary } from "../wahoo/summary";
 import { publishClient, type PublishClient } from "./container";
 import type { PowerBest, PowerSource, PublishArtifact } from "./protocol";
@@ -25,6 +26,7 @@ export interface PublishedActivity {
   stravaId: string | null;
   name: string | null;
   sport: string;
+  indoor: boolean;
   startedAt: string;
   timezone: string;
   distanceM: number | null;
@@ -221,7 +223,7 @@ async function publishInputs(
       registry.timezone,
       // Ordered by the registry query, so two sources hash the same way every
       // time.
-      registry.sources.map((source) => [source.source, source.sourceId]),
+      registry.sources.map((source) => [source.source, source.sourceId, source.indoor]),
     ]),
   );
   return { photoKeys, fingerprint };
@@ -300,6 +302,7 @@ async function publishFromDetail(
     stravaId: stravaSource(registry.sources)?.sourceId ?? null,
     name: title(registry, detail),
     sport: registry.sport,
+    indoor: indoor(registry),
     startedAt: registry.startedAt,
     timezone: registry.timezone,
     distanceM: detail.distance,
@@ -373,6 +376,7 @@ async function publishFromWahooSummary(
     stravaId: null,
     name: registry.name,
     sport: registry.sport,
+    indoor: indoor(registry),
     startedAt: registry.startedAt,
     timezone: registry.timezone,
     distanceM: null,
@@ -391,6 +395,8 @@ interface ActivitySource {
   source: string;
   sourceId: string;
   rawKeys: Record<string, string>;
+  // Null until ingest or the backfill has read the source's own type.
+  indoor: boolean | null;
 }
 
 export interface ActivityRow {
@@ -408,6 +414,14 @@ function title(registry: ActivityRow, detail: StravaDetail | null): string | nul
   return detail?.name ?? registry.name;
 }
 
+// Any one source saying indoor is enough. Strava can hold a trainer ride typed
+// as a plain Ride while Wahoo knows it was on the trainer, and the reverse. A
+// Garmin recording carries no type but its FIT sub_sport, so the telemetry
+// votes alongside the sources.
+function indoor(registry: ActivityRow, subSports: readonly string[] = []): boolean {
+  return registry.sources.some((source) => source.indoor === true) || subSports.some(indoorFromFit);
+}
+
 // The device's own totals win where it recorded them, matching how the lake's
 // activities table resolves the same disagreement. Strava's numbers stand in
 // for a file that carries records but no session summary.
@@ -423,6 +437,7 @@ function row(
     stravaId: stravaSource(registry.sources)?.sourceId ?? null,
     name: title(registry, detail),
     sport: registry.sport,
+    indoor: indoor(registry, artifact.subSports),
     startedAt: registry.startedAt,
     timezone: registry.timezone,
     distanceM: artifact.distanceM ?? detail?.distance ?? null,
@@ -449,7 +464,7 @@ async function activityRows(
     .prepare(
       `SELECT activities.activity_id, activities.name, activities.sport,
               activities.started_at, activities.timezone,
-              sources.source, sources.source_id, sources.raw_keys
+              sources.source, sources.source_id, sources.raw_keys, sources.indoor
        FROM activities
        LEFT JOIN activity_sources AS sources
          ON sources.activity_id = activities.activity_id
@@ -467,6 +482,7 @@ async function activityRows(
       source: string | null;
       source_id: string | null;
       raw_keys: string | null;
+      indoor: number | null;
     }>();
 
   const rows = new Map<string, ActivityRow>();
@@ -490,6 +506,7 @@ async function activityRows(
         source: result.source,
         sourceId: result.source_id,
         rawKeys: rawKeys(result.raw_keys),
+        indoor: result.indoor === null ? null : result.indoor === 1,
       });
     }
   }

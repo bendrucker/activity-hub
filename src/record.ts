@@ -11,6 +11,8 @@ export interface SourceRecord {
   // fallback) rather than resolved from the activity's own data.
   timezoneInferred: boolean;
   sport: Sport;
+  // Whether the source's own type says the activity happened indoors.
+  indoor: boolean;
   durationS: number;
   rawKeys: Record<string, string>;
 }

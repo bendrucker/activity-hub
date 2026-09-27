@@ -70,8 +70,18 @@ describe("summarySourceRecord", () => {
       timezone: "America/Los_Angeles",
       timezoneInferred: false,
       sport: "ride",
+      indoor: false,
       durationS: 275,
       rawKeys: { summary: "raw/wahoo/workouts/56519/summary.json" },
     });
+  });
+
+  it("marks an indoor trainer workout as indoor", () => {
+    const record = summarySourceRecord(
+      { ...SUMMARY, workout: { ...SUMMARY.workout, workout_type_id: 61 } },
+      { timezone: "America/Los_Angeles", inferred: false },
+      {},
+    );
+    expect(record).toMatchObject({ sport: "ride", indoor: true });
   });
 });

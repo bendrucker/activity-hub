@@ -162,6 +162,7 @@ describe("consumeStravaEvent", () => {
 
     const row = await sourceRow(String(ACTIVITY_ID));
     expect(row).toMatchObject({
+      indoor: 0,
       raw_keys: JSON.stringify({
         detail: detailKey(ACTIVITY_ID),
         streams: streamsKey(ACTIVITY_ID),
@@ -179,6 +180,27 @@ describe("consumeStravaEvent", () => {
       started_at: "2026-07-01T14:00:00.000Z",
       duration_s: 3600,
     });
+  });
+
+  // A trainer ride the athlete left typed as a plain Ride is only indoor by
+  // Strava's `trainer` flag.
+  it("records a trainer ride as indoor", async () => {
+    const detail = JSON.stringify({
+      ...JSON.parse(DETAIL_JSON),
+      sport_type: "Ride",
+      trainer: true,
+    });
+    const stub = stubFetch(
+      respondByPath({
+        [`/api/v3/activities/${ACTIVITY_ID}`]: () => new Response(detail),
+        [`/api/v3/activities/${ACTIVITY_ID}/streams`]: () => new Response(STREAMS_JSON),
+        [`/api/v3/activities/${ACTIVITY_ID}/photos`]: () => new Response("[]"),
+      }),
+    );
+
+    await consumeStravaEvent(message(), testEnv, { client: apiClient(stub) });
+
+    expect(await sourceRow(String(ACTIVITY_ID))).toMatchObject({ indoor: 1 });
   });
 
   it("still writes detail and streams and upserts when photos fetch returns 500", async () => {

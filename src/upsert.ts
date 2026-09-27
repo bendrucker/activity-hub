@@ -32,8 +32,8 @@ export function planSourceUpdate(
     statement: {
       // A fresh upsert means the source is live upstream again, so it also
       // reverses any earlier soft delete.
-      sql: "UPDATE activity_sources SET raw_keys = ?1, updated_at = ?2, deleted_at = NULL WHERE source = ?3 AND source_id = ?4",
-      params: [JSON.stringify(rawKeys), now, record.source, record.sourceId],
+      sql: "UPDATE activity_sources SET raw_keys = ?1, updated_at = ?2, deleted_at = NULL, indoor = ?5 WHERE source = ?3 AND source_id = ?4",
+      params: [JSON.stringify(rawKeys), now, record.source, record.sourceId, record.indoor ? 1 : 0],
     },
   };
 }
@@ -125,7 +125,14 @@ export function parseStartedAt(record: SourceRecord): number {
 
 function insertSource(record: SourceRecord, activityId: string, now: string): Statement {
   return {
-    sql: "INSERT INTO activity_sources (source, source_id, activity_id, raw_keys, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
-    params: [record.source, record.sourceId, activityId, JSON.stringify(record.rawKeys), now],
+    sql: "INSERT INTO activity_sources (source, source_id, activity_id, raw_keys, indoor, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+    params: [
+      record.source,
+      record.sourceId,
+      activityId,
+      JSON.stringify(record.rawKeys),
+      record.indoor ? 1 : 0,
+      now,
+    ],
   };
 }

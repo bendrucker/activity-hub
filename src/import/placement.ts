@@ -1,5 +1,5 @@
 import type { SourceRecord } from "../record";
-import { sportFromStrava } from "../sport";
+import { indoorFromStrava, sportFromStrava } from "../sport";
 import type { ExportActivity } from "./csv";
 
 export const RAW_PREFIX = "raw/strava/activities";
@@ -65,6 +65,8 @@ export function toSourceRecord(
     timezone,
     timezoneInferred,
     sport: sportFromStrava(activity.sportType),
+    // The export carries no trainer column, so only the sport type can say.
+    indoor: indoorFromStrava(activity.sportType, false),
     durationS: activity.elapsedS,
     rawKeys,
   };

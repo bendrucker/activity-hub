@@ -210,6 +210,7 @@ describe("consumeWahooEvent", () => {
       timezone: "America/Chicago",
       timezoneInferred: false,
       sport: "ride",
+      indoor: false,
       durationS: 280,
       rawKeys: {},
     });
@@ -237,6 +238,7 @@ describe("consumeWahooEvent", () => {
       timezone: "America/Denver",
       timezoneInferred: false,
       sport: "run",
+      indoor: false,
       durationS: 1800,
       rawKeys: {},
     });

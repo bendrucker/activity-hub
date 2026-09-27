@@ -61,3 +61,52 @@ const WAHOO_SPORTS: Record<number, Sport> = {
 export function sportFromWahoo(workoutTypeId: number): Sport {
   return WAHOO_SPORTS[workoutTypeId] ?? "other";
 }
+
+// Whether a source's own type says the activity happened indoors. The site
+// leaves these out of every record, because a trainer's distance is a wheel
+// sensor's guess and a virtual course's climbing happened in a game.
+const STRAVA_INDOOR = new Set(["VirtualRide", "VirtualRun", "VirtualRow"]);
+
+// Strava's `trainer` flag marks a ride on a trainer that the athlete left
+// typed as a plain Ride, which the sport type alone cannot tell apart.
+export function indoorFromStrava(sportType: string, trainer: boolean): boolean {
+  return trainer || STRAVA_INDOOR.has(sportType);
+}
+
+// FE_BIKE and FE_TREADMILL are fitness equipment the head unit paired with,
+// so they are indoor even though their names do not say so.
+const WAHOO_INDOOR = new Set([
+  5, // RUNNING_TREADMILL
+  12, // BIKING_INDOOR
+  19, // FE_TREADMILL
+  21, // FE_BIKE
+  49, // BIKING_INDOOR_CYCLING_CLASS
+  56, // WALKING_TREADMILL
+  61, // BIKING_INDOOR_TRAINER
+  68, // BIKING_INDOOR_VIRTUAL
+  71, // RUNNING_INDOOR_VIRTUAL
+]);
+
+export function indoorFromWahoo(workoutTypeId: number): boolean {
+  return WAHOO_INDOOR.has(workoutTypeId);
+}
+
+// A FIT session's sub_sport, as the Garmin SDK decodes it. This is the only
+// type a Garmin recording carries, and it is also how a Wahoo head unit marks
+// a trainer ride that its workout type does not.
+const FIT_INDOOR = new Set([
+  "treadmill",
+  "spin",
+  "indoorCycling",
+  "indoorRowing",
+  "elliptical",
+  "stairClimbing",
+  "indoorSkiing",
+  "indoorWalking",
+  "indoorRunning",
+  "virtualActivity",
+]);
+
+export function indoorFromFit(subSport: string): boolean {
+  return FIT_INDOOR.has(subSport);
+}
