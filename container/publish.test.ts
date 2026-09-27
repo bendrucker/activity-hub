@@ -212,7 +212,7 @@ test("leaves the totals null when the device wrote no session", async () => {
 });
 
 // A multisport file records one session per leg, so every distinct sub_sport
-// comes back and the Worker decides whether any of them is indoor.
+// comes back.
 test("reports each distinct session sub_sport", async () => {
   const decode = await seed("a", {
     sessions: [

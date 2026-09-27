@@ -414,10 +414,9 @@ function title(registry: ActivityRow, detail: StravaDetail | null): string | nul
   return detail?.name ?? registry.name;
 }
 
-// Any one source saying indoor is enough. Strava can hold a trainer ride typed
-// as a plain Ride while Wahoo knows it was on the trainer, and the reverse. A
-// Garmin recording carries no type but its FIT sub_sport, so the telemetry
-// votes alongside the sources.
+// Strava can hold a trainer ride typed as a plain Ride while Wahoo knows it
+// was on the trainer, and the reverse. A Garmin recording carries no type but
+// its FIT sub_sport, so the telemetry votes alongside the sources.
 function indoor(registry: ActivityRow, subSports: readonly string[] = []): boolean {
   return registry.sources.some((source) => source.indoor === true) || subSports.some(indoorFromFit);
 }

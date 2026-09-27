@@ -8,11 +8,6 @@
 //
 // Only the column moves. `updated_at` stays put so nothing re-decodes, and the
 // corpus republish that carries the flag to the site is a separate step.
-//
-// Reads R2 over its S3 API with AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
-// set to the raw bucket's credential pair.
-//
-// Usage: bun scripts/backfill-indoor.ts <export-dir> [--dry-run]
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { S3Client } from "bun";
@@ -59,7 +54,6 @@ interface SourceRow {
 interface Classified {
   row: SourceRow;
   indoor: boolean | null;
-  // What decided it, for the report.
   basis: string;
 }
 

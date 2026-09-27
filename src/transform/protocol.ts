@@ -141,7 +141,7 @@ export interface PublishArtifact {
   elevationM: number | null;
   movingS: number | null;
   // Every session's FIT sub_sport, which is the only activity type a Garmin
-  // recording carries. The Worker decides what counts as indoor.
+  // recording carries.
   subSports: string[];
 }
 
