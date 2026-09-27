@@ -267,7 +267,7 @@ Strava reconciliation runs at 06:00 and the lake rebuild two hours later at 08:0
 
 #### Field Backfill
 
-A new scalar on the published row reaches the rows the site already holds through the site's `patchActivity`. Bumping `PUBLISH_SCHEMA_VERSION` would also carry it, but that republishes the whole corpus through the hourly sweep, which takes hours for one value. `PATCHABLE_FIELDS` in `src/transform/fields.ts` lists each field with the function that computes it, which publish shares.
+A new scalar on the published row reaches rows the site already holds through this route, which calls the site's `patchActivity` for each one. Bumping `PUBLISH_SCHEMA_VERSION` would carry it too, but that republishes the whole corpus through the hourly sweep, which takes hours for one value. `PATCHABLE_FIELDS` in `src/transform/fields.ts` lists each field with its compute function, built on the same helpers publish uses.
 
 ```sh
 # Report what a page would patch: counts per value, plus `unknown` where
@@ -282,7 +282,7 @@ curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
   "https://hub.bendrucker.me/admin/field-backfill?field=indoor&apply=true"
 ```
 
-A page covers `FIELD_PAGE` published activities, so the corpus is about 45 requests.
+A page covers `FIELD_PAGE` published activities. An `unknown` row is patched too, with the default a republish would send.
 
 #### Photo Backfill
 
