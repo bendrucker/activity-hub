@@ -19,8 +19,10 @@ resource "cloudflare_zero_trust_access_service_token" "hub" {
   account_id = var.cloudflare_account_id
   name       = "activity-hub automation"
 
-  # Incrementing this issues a new client_secret and puts it in state.
-  client_secret_version = 2
+  # Incrementing this issues a new client_secret and puts it in state. The
+  # previous secret keeps working until previous_client_secret_expires_at.
+  client_secret_version             = 2
+  previous_client_secret_expires_at = "2026-09-28T00:00:00Z"
 }
 
 # Access ids carry an `accounts/` prefix that the DNS record and the workers
