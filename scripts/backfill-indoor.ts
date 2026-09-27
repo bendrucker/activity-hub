@@ -77,11 +77,17 @@ async function classifyNext(): Promise<void> {
   if (row === undefined) {
     return;
   }
-  classified.push(await classify(row));
+  classified.push(await classify(row).catch((error: unknown) => unreadable(row, error)));
   if (classified.length % 500 === 0) {
     console.log(`classified ${classified.length}/${rows.length}`);
   }
   return classifyNext();
+}
+
+// A missing or corrupt archive object leaves its row unclassified rather than
+// discarding every other row's read.
+function unreadable(row: SourceRow, error: unknown): Classified {
+  return { row, indoor: null, basis: `${row.source}: unreadable archive (${String(error)})` };
 }
 
 async function classify(row: SourceRow): Promise<Classified> {

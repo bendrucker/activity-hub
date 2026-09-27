@@ -65,8 +65,9 @@ export function toSourceRecord(
     timezone,
     timezoneInferred,
     sport: sportFromStrava(activity.sportType),
-    // The export carries no trainer column, so only the sport type can say.
-    indoor: indoorFromStrava(activity.sportType, false),
+    // The export carries no trainer column, so a plain Ride may still have
+    // been on a trainer the webhook's detail already recorded.
+    indoor: indoorFromStrava(activity.sportType, false) || null,
     durationS: activity.elapsedS,
     rawKeys,
   };

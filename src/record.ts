@@ -11,7 +11,9 @@ export interface SourceRecord {
   // fallback) rather than resolved from the activity's own data.
   timezoneInferred: boolean;
   sport: Sport;
-  indoor: boolean;
+  // Null when the record cannot rule indoor out, which leaves whatever a
+  // better-informed ingest already recorded.
+  indoor: boolean | null;
   durationS: number;
   rawKeys: Record<string, string>;
 }

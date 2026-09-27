@@ -143,6 +143,9 @@ function render(statement: Statement): string {
       if (param === undefined) {
         throw new Error(`missing parameter ${placeholder}: ${statement.sql}`);
       }
+      if (param === null) {
+        return "NULL";
+      }
       return typeof param === "number" ? String(param) : text(param);
     }) + ";"
   );

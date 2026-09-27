@@ -66,6 +66,7 @@ describe("toSourceRecord", () => {
       source: "strava",
       sourceId: "19324502491",
       sport: "ride",
+      indoor: true,
       durationS: 6770,
       timezone: "America/Los_Angeles",
       timezoneInferred: true,
@@ -76,5 +77,11 @@ describe("toSourceRecord", () => {
     const record = toSourceRecord(activity({ sportType: "Windsurf" }), "UTC", false, {});
     expect(record.sport).toBe("other");
     expect(record.timezoneInferred).toBe(false);
+  });
+
+  // The export has no trainer column, so a plain Ride cannot rule indoor out.
+  it("leaves indoor unknown for a plain ride", () => {
+    const record = toSourceRecord(activity({ sportType: "Ride" }), "UTC", false, {});
+    expect(record.indoor).toBeNull();
   });
 });

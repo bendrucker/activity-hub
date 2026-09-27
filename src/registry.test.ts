@@ -99,6 +99,18 @@ describe("upsertSourceRecord", () => {
     });
   });
 
+  // A bulk re-import carries no trainer flag, so it must not clear the one the
+  // webhook's detail recorded.
+  it("keeps a recorded indoor flag when an update cannot tell", async () => {
+    await upsertSourceRecord(env.REGISTRY, strava({ indoor: true }));
+    await upsertSourceRecord(env.REGISTRY, strava({ indoor: null }));
+
+    const source = await env.REGISTRY.prepare(
+      "SELECT indoor FROM activity_sources WHERE source = 'strava' AND source_id = '12345'",
+    ).first<{ indoor: number | null }>();
+    expect(source?.indoor).toBe(1);
+  });
+
   it("attaches a Wahoo record to a matching Strava activity", async () => {
     const first = await upsertSourceRecord(env.REGISTRY, strava({ timezoneInferred: true }));
     const second = await upsertSourceRecord(env.REGISTRY, wahoo());
