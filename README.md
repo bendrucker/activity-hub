@@ -184,19 +184,20 @@ provider's own terms instead: Strava against `STRAVA_SUBSCRIPTION_ID`, Wahoo
 against `WAHOO_WEBHOOK_TOKEN`.
 
 Reaching `/admin/*` from a script means a service token rather than a browser
-login. The client id is a Terraform output:
+login. The client id and secret are Terraform outputs:
 
 ```sh
 curl -H "CF-Access-Client-Id: $(terraform -chdir=terraform output -raw access_client_id)" \
-     -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+     -H "CF-Access-Client-Secret: $(terraform -chdir=terraform output -raw access_client_secret)" \
      -H "Authorization: Bearer $ADMIN_TOKEN" \
      https://hub.bendrucker.me/admin/consume-log
 ```
 
-Cloudflare returns a service token's secret once, at creation, so the secret has
-no output to read it back from. Incrementing `client_secret_version` on the
-resource issues a new one, and the previous secret keeps working until
-`previous_client_secret_expires_at`.
+Cloudflare returns a service token's secret only when it issues one, so
+incrementing `client_secret_version` on the resource is how a new secret reaches
+state. The previous secret keeps working until
+`previous_client_secret_expires_at`. Changing the `keepers` date on
+`random_password.hub_admin` rotates `ADMIN_TOKEN` the same way.
 
 `ADMIN_TOKEN` is generated in `terraform/` but not deployed from there. Terraform
 cannot write Worker secrets, so pushing the value is a separate step:
