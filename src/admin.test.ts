@@ -1080,8 +1080,8 @@ describe("handleFieldBackfill", () => {
       subSports: async () => ({ outcomes: [] }),
     },
     site: {
-      patchActivity: async () => {
-        throw new Error("a dry run must not patch");
+      updateActivity: async () => {
+        throw new Error("a dry run must not update");
       },
     },
   };
@@ -1095,7 +1095,7 @@ describe("handleFieldBackfill", () => {
     expect(response.status).toBe(403);
   });
 
-  it("rejects a field the site cannot patch", async () => {
+  it("rejects a field the site cannot update", async () => {
     const response = await handleFieldBackfill(fieldRequest("field=name"), testEnv(), options);
     expect(response.status).toBe(400);
     expect(await response.text()).toContain("indoor");

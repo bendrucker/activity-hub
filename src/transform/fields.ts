@@ -1,5 +1,5 @@
 // A field backfill carries one published field to every row the site already
-// holds, through the site's in-place patch rather than a republish. A
+// holds, through the site's in-place update rather than a republish. A
 // republish rebuilds the whole row from the decode artifacts and paces through
 // the hourly sweep, which is hours of container time to move one scalar.
 
@@ -11,16 +11,16 @@ import {
   DELETED,
   indoor,
   indoorKnown,
-  sitePatcher,
-  type PatchableFields,
-  type SitePatcher,
+  siteUpdater,
+  type ActivityUpdate,
+  type SiteUpdater,
 } from "./publish";
 import type { PublishWork } from "./protocol";
 
-export type FieldName = keyof PatchableFields;
+export type FieldName = keyof ActivityUpdate;
 
 // `known` separates a value some source or file recorded from the default
-// publish falls back to. Both are patched, because a republish would publish
+// publish falls back to. Both are updated, because a republish would publish
 // the default too, but a dry run reports them apart.
 export type FieldValue<T> =
   | { status: "ok"; value: T; known: boolean }
@@ -30,18 +30,18 @@ export interface FieldDeps {
   container: SubSportClient;
 }
 
-export interface PatchableField<K extends FieldName> {
+export interface UpdatableField<K extends FieldName> {
   compute(
     env: Env,
     activityIds: readonly string[],
     deps: FieldDeps,
-  ): Promise<Map<string, FieldValue<PatchableFields[K]>>>;
+  ): Promise<Map<string, FieldValue<ActivityUpdate[K]>>>;
 }
 
 // Publish reads sub_sports only where decode left an artifact, and falls back
 // to the sources alone everywhere else. Reading them under the same condition
-// is what keeps the patched value equal to what a republish would send.
-const indoorField: PatchableField<"indoor"> = {
+// is what keeps the updated value equal to what a republish would send.
+const indoorField: UpdatableField<"indoor"> = {
   async compute(env, activityIds, deps) {
     const [registries, decodes] = await Promise.all([
       activityRows(env.REGISTRY, activityIds),
@@ -81,15 +81,15 @@ const indoorField: PatchableField<"indoor"> = {
   },
 };
 
-export const PATCHABLE_FIELDS: { [K in FieldName]: PatchableField<K> } = {
+export const UPDATABLE_FIELDS: { [K in FieldName]: UpdatableField<K> } = {
   indoor: indoorField,
 };
 
 export function isFieldName(name: string): name is FieldName {
-  return Object.hasOwn(PATCHABLE_FIELDS, name);
+  return Object.hasOwn(UPDATABLE_FIELDS, name);
 }
 
-// A page runs one sub_sport read and one patch per activity, so it finishes
+// A page runs one sub_sport read and one update per activity, so it finishes
 // well inside a request.
 export const FIELD_PAGE = 100;
 
@@ -97,7 +97,7 @@ export interface FieldBackfillOptions {
   cursor?: string;
   limit?: number;
   apply?: boolean;
-  site?: SitePatcher;
+  site?: SiteUpdater;
   container?: SubSportClient;
 }
 
@@ -105,7 +105,7 @@ export interface FieldBackfillPage {
   field: FieldName;
   applied: boolean;
   activities: number;
-  patched: number;
+  updated: number;
   // Keyed by the value as a string, or `unknown` where no source or file
   // recorded one.
   counts: Record<string, number>;
@@ -123,13 +123,13 @@ export async function backfillField(
   const limit = options.limit ?? FIELD_PAGE;
   const apply = options.apply ?? false;
   const activityIds = await publishedActivities(env.REGISTRY, options.cursor ?? "", limit);
-  const values = await PATCHABLE_FIELDS[field].compute(env, activityIds, {
+  const values = await UPDATABLE_FIELDS[field].compute(env, activityIds, {
     container: options.container ?? subSportClient(env),
   });
 
   const counts: Record<string, number> = {};
   const failures: FieldBackfillPage["failures"] = [];
-  const patches: [string, PatchableFields[FieldName]][] = [];
+  const updates: [string, ActivityUpdate[FieldName]][] = [];
   for (const activityId of activityIds) {
     const value = values.get(activityId);
     if (value === undefined || value.status === "failed") {
@@ -138,15 +138,15 @@ export async function backfillField(
     }
     const key = value.known ? String(value.value) : "unknown";
     counts[key] = (counts[key] ?? 0) + 1;
-    patches.push([activityId, value.value]);
+    updates.push([activityId, value.value]);
   }
 
-  let patched = 0;
+  let updated = 0;
   if (apply) {
-    const site = options.site ?? sitePatcher(env);
+    const site = options.site ?? siteUpdater(env);
     const errors = await Promise.all(
-      patches.map(([activityId, value]) =>
-        site.patchActivity(activityId, { [field]: value }).then(
+      updates.map(([activityId, value]) =>
+        site.updateActivity(activityId, { [field]: value }).then(
           () => null,
           (error: unknown) => ({ activityId, error: String(error) }),
         ),
@@ -154,7 +154,7 @@ export async function backfillField(
     );
     for (const error of errors) {
       if (error === null) {
-        patched += 1;
+        updated += 1;
       } else {
         failures.push(error);
       }
@@ -165,7 +165,7 @@ export async function backfillField(
     field,
     applied: apply,
     activities: activityIds.length,
-    patched,
+    updated,
     counts,
     failures,
     nextCursor: activityIds.length < limit ? null : (activityIds.at(-1) ?? null),

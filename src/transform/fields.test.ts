@@ -4,7 +4,7 @@ import { SECRETS } from "../../test/secrets";
 import type { SubSportClient } from "./container";
 import { backfillField } from "./fields";
 import type { SubSportRequest } from "./protocol";
-import { DELETED, type PatchableFields, type SitePatcher } from "./publish";
+import { DELETED, type ActivityUpdate, type SiteUpdater } from "./publish";
 
 const testEnv: Env = { ...env, ...SECRETS };
 
@@ -103,15 +103,15 @@ function container(
 
 function site(
   rejecting: string[] = [],
-): SitePatcher & { patches: [string, Partial<PatchableFields>][] } {
-  const patches: [string, Partial<PatchableFields>][] = [];
+): SiteUpdater & { updates: [string, Partial<ActivityUpdate>][] } {
+  const updates: [string, Partial<ActivityUpdate>][] = [];
   return {
-    patches,
-    async patchActivity(activityId, fields) {
+    updates,
+    async updateActivity(activityId, fields) {
       if (rejecting.includes(activityId)) {
         throw new Error("ValidationError");
       }
-      patches.push([activityId, fields]);
+      updates.push([activityId, fields]);
     },
   };
 }
@@ -154,20 +154,20 @@ describe("indoor", () => {
     expect(page.counts).toEqual(expected);
   });
 
-  // Publish sends false here too, so the patch carries it, but the dry run
+  // Publish sends false here too, so the update carries it, but the dry run
   // keeps it apart from a recorded false.
-  it("reports unknown and patches false when nothing records it", async () => {
+  it("reports unknown and updates false when nothing records it", async () => {
     await seed({ activityId: "a", sources: [null] });
-    const patcher = site();
+    const updater = site();
 
     const page = await backfillField(testEnv, "indoor", {
       container: container(),
-      site: patcher,
+      site: updater,
       apply: true,
     });
 
     expect(page.counts).toEqual({ unknown: 1 });
-    expect(patcher.patches).toEqual([["a", { indoor: false }]]);
+    expect(updater.updates).toEqual([["a", { indoor: false }]]);
   });
 
   it("reads sub_sports only for decoded activities", async () => {
@@ -192,70 +192,70 @@ describe("indoor", () => {
     expect(client.requests).toHaveLength(0);
   });
 
-  it("fails an activity whose sub_sports could not be read, without patching it", async () => {
+  it("fails an activity whose sub_sports could not be read, without updating it", async () => {
     await seed({ activityId: "a" });
     await seed({ activityId: "b" });
-    const patcher = site();
+    const updater = site();
 
     const page = await backfillField(testEnv, "indoor", {
       container: container({}, ["a"]),
-      site: patcher,
+      site: updater,
       apply: true,
     });
 
     expect(page.failures).toEqual([{ activityId: "a", error: "sessions.parquet is missing" }]);
     expect(page.counts).toEqual({ unknown: 1 });
-    expect(patcher.patches.map(([activityId]) => activityId)).toEqual(["b"]);
+    expect(updater.updates.map(([activityId]) => activityId)).toEqual(["b"]);
   });
 });
 
 describe("backfillField", () => {
-  it("reports without patching unless applied", async () => {
+  it("reports without updating unless applied", async () => {
     await seed({ activityId: "a", sources: [true] });
-    const patcher = site();
+    const updater = site();
 
-    const page = await backfillField(testEnv, "indoor", { container: container(), site: patcher });
+    const page = await backfillField(testEnv, "indoor", { container: container(), site: updater });
 
-    expect(page).toMatchObject({ applied: false, activities: 1, patched: 0, counts: { true: 1 } });
-    expect(patcher.patches).toEqual([]);
+    expect(page).toMatchObject({ applied: false, activities: 1, updated: 0, counts: { true: 1 } });
+    expect(updater.updates).toEqual([]);
   });
 
-  it("patches only the one field on each activity", async () => {
+  it("updates only the one field on each activity", async () => {
     await seed({ activityId: "a", sources: [true] });
     await seed({ activityId: "b", sources: [false] });
-    const patcher = site();
+    const updater = site();
 
     const page = await backfillField(testEnv, "indoor", {
       container: container(),
-      site: patcher,
+      site: updater,
       apply: true,
     });
 
-    expect(page.patched).toBe(2);
-    expect(patcher.patches).toEqual([
+    expect(page.updated).toBe(2);
+    expect(updater.updates).toEqual([
       ["a", { indoor: true }],
       ["b", { indoor: false }],
     ]);
   });
 
-  it("patches only activities the hub published", async () => {
+  it("updates only activities the hub published", async () => {
     await seed({ activityId: "a", publish: "ok" });
     await seed({ activityId: "b", publish: "failed" });
     await seed({ activityId: "c", publish: "deleted" });
     await seed({ activityId: "d", publish: null });
-    const patcher = site();
+    const updater = site();
 
     const page = await backfillField(testEnv, "indoor", {
       container: container(),
-      site: patcher,
+      site: updater,
       apply: true,
     });
 
     expect(page.activities).toBe(1);
-    expect(patcher.patches.map(([activityId]) => activityId)).toEqual(["a"]);
+    expect(updater.updates.map(([activityId]) => activityId)).toEqual(["a"]);
   });
 
-  it("records a rejected patch as that activity's failure", async () => {
+  it("records a rejected update as that activity's failure", async () => {
     await seed({ activityId: "a" });
     await seed({ activityId: "b" });
 
@@ -265,7 +265,7 @@ describe("backfillField", () => {
       apply: true,
     });
 
-    expect(page.patched).toBe(1);
+    expect(page.updated).toBe(1);
     expect(page.failures).toEqual([{ activityId: "a", error: "Error: ValidationError" }]);
   });
 

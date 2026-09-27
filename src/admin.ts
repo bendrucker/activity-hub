@@ -26,7 +26,7 @@ import {
   backfillField,
   FIELD_PAGE,
   isFieldName,
-  PATCHABLE_FIELDS,
+  UPDATABLE_FIELDS,
   type FieldBackfillOptions,
 } from "./transform/fields";
 import { LAKE_BUILD_SUMMARY_KEY } from "./transform/protocol";
@@ -444,7 +444,7 @@ export async function handleFieldBackfill(
   const params = new URL(request.url).searchParams;
   const field = params.get("field") ?? "";
   if (!isFieldName(field)) {
-    return new Response(`field must be one of: ${Object.keys(PATCHABLE_FIELDS).join(", ")}`, {
+    return new Response(`field must be one of: ${Object.keys(UPDATABLE_FIELDS).join(", ")}`, {
       status: 400,
     });
   }

@@ -48,24 +48,24 @@ export interface SitePublisher {
 // The scalar columns the site updates in place on a row it already holds. The
 // site's schema is strict, so a key it does not list comes back as a
 // ValidationError, and an activity it does not hold is a no-op.
-export interface PatchableFields {
+export interface ActivityUpdate {
   indoor: boolean;
 }
 
-export interface SitePatcher {
-  patchActivity(activityId: string, fields: Partial<PatchableFields>): Promise<void>;
+export interface SiteUpdater {
+  updateActivity(activityId: string, fields: Partial<ActivityUpdate>): Promise<void>;
 }
 
 // The binding is a Service that also carries Publish's methods, which is what
 // makes reading them off it a narrowing rather than a leap. Nothing generates
 // the method list from the other repo, so this is where the two agree.
-type SiteBinding = Service & SitePublisher & SitePatcher;
+type SiteBinding = Service & SitePublisher & SiteUpdater;
 
 export function sitePublisher(env: Env): SitePublisher {
   return env.SITE as SiteBinding;
 }
 
-export function sitePatcher(env: Env): SitePatcher {
+export function siteUpdater(env: Env): SiteUpdater {
   return env.SITE as SiteBinding;
 }
 
