@@ -135,7 +135,7 @@ describe("upsertSourceRecord", () => {
     await upsertSourceRecord(env.REGISTRY, strava());
     const result = await upsertSourceRecord(
       env.REGISTRY,
-      wahoo({ startedAt: "2026-07-01T14:02:01.000Z" }),
+      wahoo({ startedAt: "2026-07-01T14:15:01.000Z" }),
     );
 
     expect(result.outcome).toBe("minted");

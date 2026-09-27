@@ -94,7 +94,7 @@ export function buildDelta(
     const startedAtMs = parseStartedAt(record);
 
     // A superset prefilter for performance only: the time window bounds the
-    // scan cheaply, matchActivity applies the real rules (sport, duration).
+    // scan cheaply, matchActivity applies the real rules (sport, overlap).
     const candidates = activities.filter(
       (activity) =>
         Math.abs((startTimes.get(activity.activityId) ?? NaN) - startedAtMs) <=
