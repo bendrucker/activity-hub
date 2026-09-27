@@ -79,8 +79,8 @@ function derived(
   ).bind(activityId, stage, fingerprint, outputKey, status, OLD);
 }
 
-// Answers from a table of sub_sports per activity. An activity named in
-// `failing` comes back failed, the way a missing sessions file does.
+// An activity named in `failing` comes back failed, the way a missing
+// sessions file does.
 function container(
   subSports: Record<string, string[]> = {},
   failing: string[] = [],

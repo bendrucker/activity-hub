@@ -93,7 +93,7 @@ export function isFieldName(name: string): name is FieldName {
 }
 
 // A page runs one sub_sport read and one patch per activity, so it finishes
-// well inside a request. The whole corpus is about 45 pages.
+// well inside a request.
 export const FIELD_PAGE = 100;
 
 export interface FieldBackfillOptions {
@@ -113,8 +113,8 @@ export interface FieldBackfillPage {
   // recorded one.
   counts: Record<string, number>;
   failures: { activityId: string; error: string }[];
-  // The last activity on this page, to pass back as `cursor`. Null once the
-  // page came back short, which means the walk has reached the end.
+  // Null once the page comes back short, which means the walk has reached the
+  // end.
   nextCursor: string | null;
 }
 
