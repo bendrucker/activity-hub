@@ -47,13 +47,11 @@ describe("matchActivity", () => {
   });
 
   it("matches a Wahoo recording that ran on while paused", () => {
-    // Tres: Wahoo total 71017 s, Strava elapsed 58177 s, same start.
     const strava = candidate("a", { durationS: 58177 });
     expect(matchActivity(input({ durationS: 71017 }), [strava])).toBe(strava);
   });
 
   it("matches a ride cropped on Strava", () => {
-    // Caltrain: the unit ran for hours after a 26 minute ride.
     const strava = candidate("a", { durationS: 1570 });
     expect(matchActivity(input({ durationS: 42788 }), [strava])).toBe(strava);
   });

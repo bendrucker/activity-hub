@@ -1,9 +1,6 @@
 #!/usr/bin/env bun
 // Plans folding each Wahoo-only activity into the Strava-only activity that
-// records the same ride. Before matching compared recordings by overlap, it
-// compared durations, and Wahoo's paused time or a Strava crop routinely
-// pushed one ride's two durations apart. The Wahoo backfill then minted a
-// second activity, and the site published the ride twice.
+// records the same ride.
 //
 // A pair merges only when each side is the other's best match, so two Wahoo
 // recordings sharing a start with one Strava ride leave the loser alone. The
