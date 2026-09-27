@@ -436,6 +436,17 @@ export function indoor(registry: ActivityRow, subSports: readonly string[] = [])
   return registry.sources.some((source) => source.indoor === true) || subSports.some(indoorFromFit);
 }
 
+// Whether anything recorded the answer `indoor` gives, as opposed to it
+// falling back to false because no source typed the activity and no file
+// carried a sub_sport.
+export function indoorKnown(registry: ActivityRow, subSports: readonly string[] = []): boolean {
+  return (
+    indoor(registry, subSports) ||
+    subSports.length > 0 ||
+    registry.sources.some((source) => source.indoor !== null)
+  );
+}
+
 // The device's own totals win where it recorded them, matching how the lake's
 // activities table resolves the same disagreement. Strava's numbers stand in
 // for a file that carries records but no session summary.

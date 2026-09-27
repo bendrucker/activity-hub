@@ -10,6 +10,7 @@ import {
   activityRows,
   DELETED,
   indoor,
+  indoorKnown,
   sitePatcher,
   type PatchableFields,
   type SitePatcher,
@@ -70,14 +71,10 @@ const indoorField: PatchableField<"indoor"> = {
         continue;
       }
       const subSports = outcome?.subSports ?? [];
-      const value = indoor(registry, subSports);
       values.set(activityId, {
         status: "ok",
-        value,
-        known:
-          value ||
-          subSports.length > 0 ||
-          registry.sources.some((source) => source.indoor !== null),
+        value: indoor(registry, subSports),
+        known: indoorKnown(registry, subSports),
       });
     }
     return values;

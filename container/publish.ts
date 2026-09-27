@@ -16,6 +16,7 @@ import type {
   SubSportRequest,
   SubSportResponse,
 } from "../src/transform/protocol";
+import { mapConcurrent } from "./concurrency";
 import { powerBestsSql } from "./power";
 import { literal } from "./sql";
 
@@ -61,6 +62,11 @@ export async function publishActivity(
   }
 }
 
+// A sessions table is a few rows, so a read is an R2 round trip rather than
+// work. Eight in flight overlaps those waits without opening a connection per
+// activity on the instance decode shares.
+const SUB_SPORT_CONCURRENCY = 8;
+
 // Each activity reads on its own connection, so one missing artifact fails
 // only its own outcome and the rest of the page still answers.
 export async function readSubSports(
@@ -68,7 +74,9 @@ export async function readSubSports(
   deps: PublishDeps,
 ): Promise<SubSportResponse> {
   return {
-    outcomes: await Promise.all(request.work.map((work) => activitySubSports(work, deps))),
+    outcomes: await mapConcurrent(request.work, SUB_SPORT_CONCURRENCY, (work) =>
+      activitySubSports(work, deps),
+    ),
   };
 }
 
@@ -76,8 +84,9 @@ async function activitySubSports(
   { activityId, decode }: PublishWork,
   deps: PublishDeps,
 ): Promise<SubSportOutcome> {
-  const connection = await deps.instance.connect();
+  let connection: DuckDBConnection | undefined;
   try {
+    connection = await deps.instance.connect();
     await deps.configure?.(connection);
     const reader = await connection.runAndReadAll(
       `SELECT ${SUB_SPORTS} AS sub_sports FROM ${sessionsTable(decodePrefix(decode))}`,
@@ -91,7 +100,7 @@ async function activitySubSports(
       error: error instanceof Error ? error.message : String(error),
     };
   } finally {
-    connection.disconnectSync();
+    connection?.disconnectSync();
   }
 }
 
