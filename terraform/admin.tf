@@ -8,4 +8,9 @@
 resource "random_password" "hub_admin" {
   length  = 48
   special = false
+
+  # Changing this replaces the password, which rotates the token.
+  keepers = {
+    rotated = "2026-09-27"
+  }
 }

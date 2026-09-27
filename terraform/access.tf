@@ -18,12 +18,15 @@ import {
 resource "cloudflare_zero_trust_access_service_token" "hub" {
   account_id = var.cloudflare_account_id
   name       = "activity-hub automation"
+
+  # Incrementing this issues a new client_secret and puts it in state.
+  client_secret_version = 2
 }
 
 # Access ids carry an `accounts/` prefix that the DNS record and the workers
 # route do not. Cloudflare hands back the client secret once, at create, so the
-# import adopts the token without it. The header value already deployed keeps
-# working, and only a rotation puts a readable secret back in state.
+# import adopts the token without it, and only a rotation puts a readable secret
+# back in state.
 import {
   to = cloudflare_zero_trust_access_service_token.hub
   id = "accounts/72bdc77341dc52a3cf4a94097f9ad96f/b2abbe4d-5586-4fee-b8c1-457d10485be4"
