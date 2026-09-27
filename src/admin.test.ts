@@ -1101,7 +1101,7 @@ describe("handleFieldBackfill", () => {
     expect(await response.text()).toContain("indoor");
   });
 
-  it.each(["0", "101", "1.5"])("rejects a limit of %s", async (limit) => {
+  it.each(["0", "100", "1.5"])("rejects a limit of %s", async (limit) => {
     const response = await handleFieldBackfill(
       fieldRequest(`field=indoor&limit=${limit}`),
       testEnv(),

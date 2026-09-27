@@ -90,8 +90,9 @@ export function isFieldName(name: string): name is FieldName {
 }
 
 // A page runs one sub_sport read and one update per activity, so it finishes
-// well inside a request.
-export const FIELD_PAGE = 100;
+// well inside a request. D1 binds at most 100 parameters per query, and
+// `stageRows` binds the stage alongside every id, so a page stops one short.
+export const FIELD_PAGE = 99;
 
 export interface FieldBackfillOptions {
   cursor?: string;
