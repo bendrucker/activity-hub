@@ -275,7 +275,7 @@ A new scalar on the published row reaches rows the site already holds through th
 # nothing recorded one. Pass `nextCursor` back as `cursor` until it is null.
 curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
   "https://hub.bendrucker.me/admin/field-backfill?field=indoor"
-# {"field":"indoor","applied":false,"activities":100,"updated":0,
+# {"field":"indoor","applied":false,"activities":99,"updated":0,
 #  "counts":{"false":61,"unknown":36,"true":3},"failures":[],"nextCursor":"..."}
 
 # The same walk, updating each page. The site must already accept the field.
