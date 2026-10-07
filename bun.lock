@@ -6,7 +6,7 @@
       "name": "activity-hub",
       "dependencies": {
         "@cloudflare/containers": "^0.3.7",
-        "@garmin/fitsdk": "^21.213.0",
+        "@garmin/fitsdk": "^21.217.0",
         "@mapbox/polyline": "^1.2.1",
         "csv-parse": "^7.0.2",
         "tz-lookup": "^6.1.25",
@@ -128,7 +128,7 @@
 
     "@esbuild/win32-x64": ["@esbuild/win32-x64@0.28.1", "", { "os": "win32", "cpu": "x64" }, "sha512-bm4Mowrv+GXMlpWX++EcXw/iLyd1o3+bJkC2DkWXYVvgZCqD/bSj9ctZeAMC3cIxgjRVR2Dufaiu4YPxr5gW1A=="],
 
-    "@garmin/fitsdk": ["@garmin/fitsdk@21.214.0", "", {}, "sha512-c3ydrRYD0kPnX8USl+JEyJ9smhol3/JRxcU9QVZUvmb7ZBoGwhsqCAe7wXhwMJnMba97x4x+9J/yXr6WYUVaYQ=="],
+    "@garmin/fitsdk": ["@garmin/fitsdk@21.217.0", "", {}, "sha512-oIkDo28Yrv8ZhJiOTBZWn8Cb9kIkcAx7oVfNtgqRuNvzbCyFWdLg1StUVECjIo9rbtpvTDuW8Jqd3PTnVapiAw=="],
 
     "@img/colour": ["@img/colour@1.1.0", "", {}, "sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ=="],
 
