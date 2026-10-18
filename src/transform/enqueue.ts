@@ -22,13 +22,18 @@ export const RECONCILE_LIMIT = 1000;
 // in a loop would keep reselecting the same oldest rows.
 export const SWEEP_CRON = "30 * * * *";
 
-// The consumer's span carries one activity id as its correlation id. A chunk
-// lists all of its own so either side finds the other.
+// The consumer's span carries its activity id as its correlation id. A single
+// send carries the same one, so the two match on equality. A sweep chunk of up
+// to 100 records its count only, since a joined id list needs a substring
+// query and outgrows attribute limits.
 function enqueueAttributes(messages: readonly TransformMessage[]): Attributes {
+  const [only] = messages;
   return {
     "hub.queue": TRANSFORM_QUEUE,
     "hub.count": messages.length,
-    "hub.correlation_ids": messages.map((message) => message.activityId).join(","),
+    ...(messages.length === 1 && only
+      ? { "hub.activity_id": only.activityId, "hub.correlation_id": only.activityId }
+      : {}),
   };
 }
 

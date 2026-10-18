@@ -11,8 +11,9 @@ export interface UpsertResult {
   outcome: "existing" | "attached" | "minted";
 }
 
-// A source's id meets the hub's activity id here, so this span is what joins an
-// ingest trace to the transform and publish traces that follow it.
+// On the webhook and queue path a source's id meets the hub's activity id here,
+// so this span joins an ingest trace to the transform and publish traces after
+// it. Bulk imports apply their delta without it and have no joining span.
 export async function upsertSourceRecord(
   db: D1Database,
   record: SourceRecord,

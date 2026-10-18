@@ -6,14 +6,24 @@ export type Attributes = Record<string, boolean | number | string | undefined>;
 // Queue context does not reliably carry a trace from producer to consumer, so
 // both sides stamp the same id and the two traces join by query instead. An
 // ingest message names its ride by the source's id, because the hub's own
-// activity id is minted only once the consumer reaches the registry.
+// activity id is minted only once the consumer reaches the registry. A Strava
+// athlete event names an athlete, so it stays out of hub.source_id.
 export function ingestAttributes(message: IngestMessage): Attributes {
-  const sourceId = message.source === "wahoo" ? message.workoutId : message.objectId;
+  const base = { "hub.provider": message.source, "hub.message_kind": message.kind };
+  if (message.source === "wahoo") {
+    return {
+      ...base,
+      "hub.source_id": String(message.workoutId),
+      "hub.correlation_id": `wahoo:${message.workoutId}`,
+    };
+  }
+  if ("objectType" in message && message.objectType === "athlete") {
+    return { ...base, "hub.correlation_id": `strava:athlete:${message.objectId}` };
+  }
   return {
-    "hub.provider": message.source,
-    "hub.message_kind": message.kind,
-    "hub.source_id": String(sourceId),
-    "hub.correlation_id": `${message.source}:${sourceId}`,
+    ...base,
+    "hub.source_id": String(message.objectId),
+    "hub.correlation_id": `strava:${message.objectId}`,
   };
 }
 
@@ -39,11 +49,10 @@ export async function traced<T>(
   });
 }
 
-// The transform consumer settles each message wherever its activity's fate is
-// decided, deep inside batch-wide reads and one container call, and a single
-// message's work never sits inside one call of its own. Each message instead gets a span from the
-// start of the batch to its ack or retry. A message the handler leaves
-// unsettled is acked implicitly when it returns, or retried when it throws.
+// Each message's span runs from the start of the batch to its ack or retry. A
+// message the handler leaves unsettled takes the batch-wide call if one was
+// made, and otherwise is acked when the handler returns or retried when it
+// throws. Per-message calls override a batch-wide one, as the runtime's do.
 export async function traceMessages<T>(
   batch: MessageBatch<T>,
   name: string,
@@ -51,6 +60,7 @@ export async function traceMessages<T>(
   consume: (batch: MessageBatch<T>) => Promise<void>,
 ): Promise<void> {
   const open = new Set<Span>();
+  let batchOutcome: Attributes | undefined;
   const settle = (span: Span, outcome: Attributes): void => {
     if (!open.delete(span)) {
       return;
@@ -91,23 +101,21 @@ export async function traceMessages<T>(
       metadata: batch.metadata,
       messages,
       ackAll: () => {
-        for (const message of messages) {
-          message.ack();
-        }
+        batchOutcome = { "hub.outcome": "ack" };
+        batch.ackAll();
       },
       retryAll: (options) => {
-        for (const message of messages) {
-          message.retry(options);
-        }
+        batchOutcome = { "hub.outcome": "retry", "hub.retry_delay_s": options?.delaySeconds };
+        batch.retryAll(options);
       },
     });
   } catch (error) {
     for (const span of open) {
-      settle(span, { "hub.outcome": "retry", ...errorAttributes(error) });
+      settle(span, { ...(batchOutcome ?? { "hub.outcome": "retry" }), ...errorAttributes(error) });
     }
     throw error;
   }
   for (const span of open) {
-    settle(span, { "hub.outcome": "ack" });
+    settle(span, batchOutcome ?? { "hub.outcome": "ack" });
   }
 }
