@@ -1,7 +1,12 @@
 import type { IngestMessage } from "../ingest";
+import { ingestAttributes } from "../trace";
 import { isWorkoutSummary } from "./summary";
 
-export async function handleWebhookEvent(request: Request, env: Env): Promise<Response> {
+export async function handleWebhookEvent(
+  request: Request,
+  env: Env,
+  span?: Span,
+): Promise<Response> {
   let body: Record<string, unknown>;
   try {
     body = (await request.json()) as Record<string, unknown>;
@@ -28,6 +33,7 @@ export async function handleWebhookEvent(request: Request, env: Env): Promise<Re
     workoutId: summary.workout.id,
     summary,
   };
+  span?.setAttributes(ingestAttributes(message));
   await env.INGEST_QUEUE.send(message);
   return new Response(null, { status: 200 });
 }

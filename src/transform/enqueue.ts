@@ -1,5 +1,6 @@
 import { clearDerived, staleActivitiesByStage, SWEPT_STAGES, type Stage } from "../derived";
-import type { TransformMessage } from "./consume";
+import { traced, type Attributes } from "../trace";
+import { TRANSFORM_QUEUE, type TransformMessage } from "./consume";
 
 // Cloudflare caps a batch send at 100 messages.
 const SEND_BATCH = 100;
@@ -21,6 +22,21 @@ export const RECONCILE_LIMIT = 1000;
 // in a loop would keep reselecting the same oldest rows.
 export const SWEEP_CRON = "30 * * * *";
 
+// The consumer's span carries its activity id as its correlation id. A single
+// send carries the same one, so the two match on equality. A sweep chunk of up
+// to 100 records its count only, since a joined id list needs a substring
+// query and outgrows attribute limits.
+function enqueueAttributes(messages: readonly TransformMessage[]): Attributes {
+  const [only] = messages;
+  return {
+    "hub.queue": TRANSFORM_QUEUE,
+    "hub.count": messages.length,
+    ...(messages.length === 1 && only
+      ? { "hub.activity_id": only.activityId, "hub.correlation_id": only.activityId }
+      : {}),
+  };
+}
+
 export async function enqueueTransform(
   queue: Queue<TransformMessage>,
   messages: readonly TransformMessage[],
@@ -30,7 +46,9 @@ export async function enqueueTransform(
     // SEND_BATCH is Cloudflare's cap, so there is no larger send to collapse
     // these into.
     // oxlint-disable-next-line no-await-in-loop
-    await queue.sendBatch(chunk.map((body) => ({ body })));
+    await traced("hub.enqueue", enqueueAttributes(chunk), async () =>
+      queue.sendBatch(chunk.map((body) => ({ body }))),
+    );
   }
   return messages.length;
 }
@@ -61,5 +79,7 @@ export async function enqueueActivity(
   if (force) {
     await clearDerived(env.REGISTRY, activityId, stage);
   }
-  await env.TRANSFORM_QUEUE.send({ activityId, stage });
+  await traced("hub.enqueue", enqueueAttributes([{ activityId, stage }]), async () =>
+    env.TRANSFORM_QUEUE.send({ activityId, stage }),
+  );
 }
