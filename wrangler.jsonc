@@ -11,6 +11,9 @@
   "account_id": "72bdc77341dc52a3cf4a94097f9ad96f",
   "observability": {
     "enabled": true,
+    // The SITE binding carries trace context into bendrucker.me, which traces
+    // too, so a ride's publish and the site's write land in one trace.
+    "traces": { "enabled": true },
   },
   "vars": {
     // App and athlete identity are public identifiers, safe to commit. The

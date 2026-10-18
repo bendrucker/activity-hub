@@ -1,6 +1,7 @@
 import { MAX_START_DELTA_S } from "./match";
 import type { Source, SourceRecord } from "./record";
 import type { Sport } from "./sport";
+import { traced } from "./trace";
 import { parseStartedAt, planMatchOrMint, planSourceUpdate, type Statement } from "./upsert";
 
 export type { Source, SourceRecord };
@@ -10,10 +11,24 @@ export interface UpsertResult {
   outcome: "existing" | "attached" | "minted";
 }
 
+// A source's id meets the hub's activity id here, so this span is what joins an
+// ingest trace to the transform and publish traces that follow it.
 export async function upsertSourceRecord(
   db: D1Database,
   record: SourceRecord,
 ): Promise<UpsertResult> {
+  return traced(
+    "hub.registry.upsert",
+    { "hub.provider": record.source, "hub.source_id": record.sourceId },
+    async (span) => {
+      const result = await upsert(db, record);
+      span.setAttributes({ "hub.activity_id": result.activityId, "hub.outcome": result.outcome });
+      return result;
+    },
+  );
+}
+
+async function upsert(db: D1Database, record: SourceRecord): Promise<UpsertResult> {
   const existing = await db
     .prepare(
       "SELECT activity_id, raw_keys FROM activity_sources WHERE source = ?1 AND source_id = ?2",

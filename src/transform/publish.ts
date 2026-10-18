@@ -13,6 +13,7 @@ import {
 } from "../derived";
 import { lakeUri } from "../lake/location";
 import { indoorFromFit } from "../sport";
+import { traced } from "../trace";
 import { isWorkoutSummary } from "../wahoo/summary";
 import { publishClient, type PublishClient } from "./container";
 import type { PowerBest, PowerSource, PublishArtifact } from "./protocol";
@@ -61,12 +62,33 @@ export interface SiteUpdater {
 // the method list from the other repo, so this is where the two agree.
 type SiteBinding = Service & SitePublisher & SiteUpdater;
 
+// Every call to the site goes through one of these two, so they are where its
+// spans open. The RPC carries the trace across the binding, and the site's own
+// spans land beneath this one.
+function traceSite<T>(method: string, activityId: string, call: () => Promise<T>): Promise<T> {
+  return traced("hub.publish", { "hub.method": method, "hub.activity_id": activityId }, call);
+}
+
 export function sitePublisher(env: Env): SitePublisher {
-  return env.SITE as SiteBinding;
+  const site = env.SITE as SiteBinding;
+  return {
+    publishActivity: async (activity) =>
+      traceSite("publishActivity", activity.activityId, async () => site.publishActivity(activity)),
+    publishPowerCurve: async (activityId, bests) =>
+      traceSite("publishPowerCurve", activityId, async () =>
+        site.publishPowerCurve(activityId, bests),
+      ),
+    deleteActivity: async (activityId) =>
+      traceSite("deleteActivity", activityId, async () => site.deleteActivity(activityId)),
+  };
 }
 
 export function siteUpdater(env: Env): SiteUpdater {
-  return env.SITE as SiteBinding;
+  const site = env.SITE as SiteBinding;
+  return {
+    updateActivity: async (activityId, fields) =>
+      traceSite("updateActivity", activityId, async () => site.updateActivity(activityId, fields)),
+  };
 }
 
 export interface PublishOptions {

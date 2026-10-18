@@ -1,4 +1,5 @@
 import type { IngestMessage } from "../ingest";
+import { ingestAttributes } from "../trace";
 
 const OBJECT_TYPES = ["activity", "athlete"] as const;
 
@@ -37,7 +38,11 @@ function toUpdates(value: unknown): Record<string, string> {
   return updates;
 }
 
-export async function handleWebhookEvent(request: Request, env: Env): Promise<Response> {
+export async function handleWebhookEvent(
+  request: Request,
+  env: Env,
+  span?: Span,
+): Promise<Response> {
   let body: Record<string, unknown>;
   try {
     body = (await request.json()) as Record<string, unknown>;
@@ -72,6 +77,7 @@ export async function handleWebhookEvent(request: Request, env: Env): Promise<Re
     objectId,
     updates: toUpdates(body.updates),
   };
+  span?.setAttributes(ingestAttributes(message));
   await env.INGEST_QUEUE.send(message);
   return new Response(null, { status: 200 });
 }

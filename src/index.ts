@@ -26,6 +26,7 @@ import {
   handleWebhookEvent as stravaWebhookEvent,
   handleWebhookVerify as stravaWebhookVerify,
 } from "./strava/webhook";
+import { errorAttributes, ingestAttributes, traceMessages, traced } from "./trace";
 import { consumeTransformBatch, TRANSFORM_QUEUE, type TransformMessage } from "./transform/consume";
 import { reconcileTransform, SWEEP_CRON } from "./transform/enqueue";
 import { consumeWahooEvent } from "./wahoo/consume";
@@ -75,6 +76,41 @@ export interface BatchOptions {
   consume?: (message: IngestMessage, env: Env) => Promise<string | undefined>;
 }
 
+// Answers with the outcome the consume log records.
+async function consumeOne(
+  message: Message<IngestMessage>,
+  env: Env,
+  consume: NonNullable<BatchOptions["consume"]>,
+  exhausted: Map<IngestMessage["source"], number>,
+  span: Span,
+): Promise<string> {
+  const source = message.body.source;
+  const parked = exhausted.get(source);
+  if (parked !== undefined) {
+    message.retry({ delaySeconds: parked });
+    span.setAttributes({ "hub.outcome": "rate-limited" });
+    return "rate-limited";
+  }
+  try {
+    const outcome = (await consume(message.body, env)) ?? "ok";
+    message.ack();
+    span.setAttributes({ "hub.outcome": outcome });
+    return outcome;
+  } catch (error) {
+    if (error instanceof RateLimitedError) {
+      const delaySeconds = error.retryAfterS ?? rateLimitDelayS(source, message.attempts);
+      exhausted.set(source, delaySeconds);
+      message.retry({ delaySeconds });
+      span.setAttributes({ "hub.outcome": "rate-limited" });
+      return "rate-limited";
+    }
+    console.error(`failed to consume ${message.body.source} event: ${String(error)}`);
+    message.retry({ delaySeconds: RETRY_DELAY_S });
+    span.setAttributes({ "hub.outcome": "error", ...errorAttributes(error) });
+    return `error: ${String(error)}`;
+  }
+}
+
 export async function consumeBatch(
   batch: MessageBatch<IngestMessage>,
   env: Env,
@@ -88,38 +124,38 @@ export async function consumeBatch(
   // it a large backlog keeps its own budget exhausted and never drains.
   const exhausted = new Map<IngestMessage["source"], number>();
   for (const message of batch.messages) {
-    const source = message.body.source;
-    const parked = exhausted.get(source);
-    if (parked !== undefined) {
-      message.retry({ delaySeconds: parked });
-      trail.push(consumeLogEntry(message.body, "rate-limited"));
-      continue;
-    }
-    try {
-      // The `exhausted` map read above is check-then-act: message N's 429 has
-      // to land before N+1 is attempted, or the parking parks nothing.
-      // oxlint-disable-next-line no-await-in-loop
-      const outcome = await consume(message.body, env); // ast-grep-ignore: await-in-for-of
-      message.ack();
-      trail.push(consumeLogEntry(message.body, outcome ?? "ok"));
-    } catch (error) {
-      if (error instanceof RateLimitedError) {
-        const delaySeconds = error.retryAfterS ?? rateLimitDelayS(source, message.attempts);
-        exhausted.set(source, delaySeconds);
-        message.retry({ delaySeconds });
-        trail.push(consumeLogEntry(message.body, "rate-limited"));
-        continue;
-      }
-      console.error(`failed to consume ${message.body.source} event: ${String(error)}`);
-      message.retry({ delaySeconds: RETRY_DELAY_S });
-      trail.push(consumeLogEntry(message.body, `error: ${String(error)}`));
-    }
+    // The `exhausted` map is check-then-act: message N's 429 has to land
+    // before N+1 is attempted, or the parking parks nothing.
+    // oxlint-disable-next-line no-await-in-loop
+    const outcome = await traced(
+      "hub.ingest",
+      {
+        ...ingestAttributes(message.body),
+        "hub.queue": batch.queue,
+        "hub.attempts": message.attempts,
+      },
+      (span) => consumeOne(message, env, consume, exhausted, span),
+    ); // ast-grep-ignore: await-in-for-of
+    trail.push(consumeLogEntry(message.body, outcome));
   }
   try {
     await appendConsumeLog(env.TOKENS, trail);
   } catch (error) {
     console.warn(`consume log write failed: ${String(error)}`);
   }
+}
+
+// The handler stamps the event's identity on the span once it parses one, so a
+// rejected or ignored delivery still shows up with its status.
+async function traceWebhook(
+  provider: IngestMessage["source"],
+  handle: (span: Span) => Promise<Response>,
+): Promise<Response> {
+  return traced("hub.webhook", { "hub.provider": provider }, async (span) => {
+    const response = await handle(span);
+    span.setAttributes({ "hub.status": response.status });
+    return response;
+  });
 }
 
 export default {
@@ -139,7 +175,7 @@ export default {
         return stravaWebhookVerify(url, env);
       }
       if (request.method === "POST") {
-        return stravaWebhookEvent(request, env);
+        return traceWebhook("strava", (span) => stravaWebhookEvent(request, env, span));
       }
       return new Response("Method Not Allowed", { status: 405 });
     }
@@ -151,7 +187,7 @@ export default {
     }
     if (url.pathname === "/webhooks/wahoo") {
       if (request.method === "POST") {
-        return wahooWebhookEvent(request, env);
+        return traceWebhook("wahoo", (span) => wahooWebhookEvent(request, env, span));
       }
       return new Response("Method Not Allowed", { status: 405 });
     }
@@ -275,8 +311,19 @@ export default {
 
   async queue(batch, env): Promise<void> {
     if (batch.queue === TRANSFORM_QUEUE) {
-      const summary = await consumeTransformBatch(batch as MessageBatch<TransformMessage>, env);
-      console.log(`transform batch: ${JSON.stringify(summary)}`);
+      await traceMessages(
+        batch as MessageBatch<TransformMessage>,
+        "hub.transform",
+        ({ body }) => ({
+          "hub.message_kind": body.stage,
+          "hub.activity_id": body.activityId,
+          "hub.correlation_id": body.activityId,
+        }),
+        async (wrapped) => {
+          const summary = await consumeTransformBatch(wrapped, env);
+          console.log(`transform batch: ${JSON.stringify(summary)}`);
+        },
+      );
       return;
     }
     await consumeBatch(batch as MessageBatch<IngestMessage>, env);
